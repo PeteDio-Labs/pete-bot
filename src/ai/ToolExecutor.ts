@@ -20,6 +20,9 @@ const TOOL_HINTS: Record<string, string> = {
   qbittorrent: `Actions: list (show torrents, optional filter: downloading|seeding|completed|paused|active), details (requires hash), speeds, transfer_info. Use "list" for "show downloads" questions.`,
   calculate: `Evaluate math expressions. Examples: "2+2", "sqrt(16)", "pow(2,8)". Supports +,-,*,/,% and functions: sqrt, pow, sin, cos, tan, log, abs, ceil, floor, round, PI, E.`,
   get_current_time: `Get current time. Optional timezone param (IANA format: "America/New_York", "Europe/London"). Defaults to UTC.`,
+  infrastructure: `Actions: inventory_summary (all hosts & workloads), node_status (Proxmox nodes with CPU/memory), workload_status (optional namespace filter). Use inventory_summary for "what's running" questions.`,
+  argocd: `Actions: list_apps (all ArgoCD apps with sync/health), app_status (requires app name), sync_app (requires app name). Use list_apps for general status questions.`,
+  alerts: `Actions: recent_events (optional limit, default 10). Returns recent infrastructure events and alerts.`,
 };
 
 export class ToolExecutor {

@@ -61,6 +61,20 @@ export const toolExecutionDuration = new Histogram({
   registers: [register],
 });
 
+// Mission Control Metrics
+export const mcAvailable = new Gauge({
+  name: 'mission_control_available',
+  help: '1=Mission Control reachable, 0=unavailable',
+  registers: [register],
+});
+
+export const mcRequestDuration = new Histogram({
+  name: 'mission_control_request_duration_seconds',
+  help: 'Mission Control API request duration in seconds',
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5],
+  registers: [register],
+});
+
 // qBittorrent Metrics
 export const qbitAvailable = new Gauge({
   name: 'qbittorrent_available',

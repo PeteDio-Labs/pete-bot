@@ -27,6 +27,13 @@ interface Config {
     host: string;
     enabled: boolean;
   };
+  missionControl: {
+    url: string;
+    enabled: boolean;
+  };
+  notificationService: {
+    url: string;
+  };
 }
 
 function getEnvVar(name: string, defaultValue?: string): string {
@@ -67,6 +74,13 @@ export const config: Config = {
   qbittorrent: {
     host: getEnvVar('QBIT_HOST', 'http://192.168.50.21:8080'),
     enabled: getEnvVar('QBIT_ENABLED', 'true') === 'true',
+  },
+  missionControl: {
+    url: getEnvVar('MISSION_CONTROL_URL', 'http://mission-control-backend.mission-control.svc.cluster.local:3000'),
+    enabled: getEnvVar('MISSION_CONTROL_ENABLED', 'true') === 'true',
+  },
+  notificationService: {
+    url: getEnvVar('NOTIFICATION_SERVICE_URL', 'http://notification-service.mission-control.svc.cluster.local:3002'),
   },
 };
 
