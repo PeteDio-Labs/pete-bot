@@ -71,7 +71,7 @@ describe('InfrastructureTool', () => {
     it('returns proxmox node data', async () => {
       (missionControlClient.getProxmoxNodes as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         data: [
-          { node: 'pedro', status: 'online', cpu: 0.15, maxcpu: 8, mem: 8589934592, maxmem: 34359738368, uptime: 86400 },
+          { node: 'pve01', status: 'online', cpu: 0.15, maxcpu: 8, mem: 8589934592, maxmem: 34359738368, uptime: 86400 },
         ],
       });
 
@@ -84,7 +84,7 @@ describe('InfrastructureTool', () => {
       });
       const nodes = (result as unknown as { nodes: unknown[] }).nodes;
       expect(nodes[0]).toMatchObject({
-        node: 'pedro',
+        node: 'pve01',
         status: 'online',
         cpu: 15,
         memUsedPct: 25,
