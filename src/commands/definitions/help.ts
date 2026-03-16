@@ -1,15 +1,16 @@
-// /tools command definition
+// /help command definition
 import { SlashCommandBuilder } from 'discord.js';
 
-export const toolsCommand = new SlashCommandBuilder()
-  .setName('tools')
-  .setDescription('List available AI tools')
+export const helpCommand = new SlashCommandBuilder()
+  .setName('help')
+  .setDescription('Get help and example prompts')
   .addStringOption((option) =>
     option
-      .setName('tool')
-      .setDescription('Show detailed info for a specific tool')
+      .setName('topic')
+      .setDescription('Help topic (e.g., a tool name like mission_control)')
       .setRequired(false)
       .addChoices(
+        { name: 'tools', value: 'tools' },
         { name: 'mission_control', value: 'mission_control' },
         { name: 'qbittorrent', value: 'qbittorrent' },
         { name: 'infrastructure', value: 'infrastructure' },
@@ -21,4 +22,4 @@ export const toolsCommand = new SlashCommandBuilder()
   )
   .toJSON();
 
-export default toolsCommand;
+export default helpCommand;

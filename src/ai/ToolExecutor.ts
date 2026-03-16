@@ -48,7 +48,9 @@ export class ToolExecutor {
     return `You are a helpful assistant with tools. Use the simplest approach to answer questions. Don't ask for parameters unless required.
 
 Tools:
-${hints}`;
+${hints}
+
+When a user asks what you can do, what tools are available, or how to query something, answer with your tool capabilities and example queries. Do NOT execute live tool calls for capability or discovery questions — describe the available actions and give example prompts instead.`;
   }
 
   /**

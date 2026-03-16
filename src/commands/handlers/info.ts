@@ -35,7 +35,7 @@ export async function handleInfoCommand(
         { name: 'Available Tools', value: `${toolCount}`, inline: true },
         {
           name: 'Commands',
-          value: '`/ask` - Ask the AI a question\n`/info` - Show bot info\n`/tools` - List available tools',
+          value: '`/ask` - Ask the AI a question\n`/tools` - List available tools\n`/help` - Get help and examples\n`/info` - Show bot info',
           inline: false,
         }
       )

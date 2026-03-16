@@ -1,7 +1,7 @@
 // Interaction event handler - routes commands to handlers
 import type { Interaction } from 'discord.js';
 import type { OllamaClient } from '../ai/OllamaClient.js';
-import { handleAskCommand, handleInfoCommand, handleToolsCommand } from '../commands/handlers/index.js';
+import { handleAskCommand, handleInfoCommand, handleToolsCommand, handleHelpCommand } from '../commands/handlers/index.js';
 import { discordMessagesProcessed, discordRequestDuration } from '../metrics/index.js';
 import { logger } from '../utils/index.js';
 
@@ -26,6 +26,9 @@ export function createInteractionHandler(
           break;
         case 'tools':
           await handleToolsCommand(interaction);
+          break;
+        case 'help':
+          await handleHelpCommand(interaction);
           break;
         default:
           logger.warn(`Unknown command: ${commandName}`);

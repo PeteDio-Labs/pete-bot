@@ -102,9 +102,15 @@ export async function handleAskCommand(
       .setTimestamp()
       .setFooter({ text: `Requested by ${interaction.user.tag}` });
 
-    // Add tools used if any
+    // Add tools used if any (compress repeated names: "tool ×N")
     if (result.toolsUsed.length > 0) {
-      const toolSummary = result.toolsUsed.map((t) => `\`${t.name}\``).join(', ');
+      const toolCounts = new Map<string, number>();
+      for (const t of result.toolsUsed) {
+        toolCounts.set(t.name, (toolCounts.get(t.name) || 0) + 1);
+      }
+      const toolSummary = Array.from(toolCounts.entries())
+        .map(([name, count]) => count > 1 ? `\`${name}\` ×${count}` : `\`${name}\``)
+        .join(', ');
       embed.addFields({ name: 'Tools Used', value: toolSummary, inline: false });
     }
 
