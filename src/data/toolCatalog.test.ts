@@ -54,7 +54,7 @@ describe('toolCatalog', () => {
   });
 
   it('should have correct mission_control actions', () => {
-    const mc = toolCatalog.mission_control;
+    const mc = toolCatalog.mission_control!;
     const actionNames = mc.actions!.map((a) => a.name);
     expect(actionNames).toContain('inventory_summary');
     expect(actionNames).toContain('list_apps');
@@ -66,13 +66,13 @@ describe('toolCatalog', () => {
   });
 
   it('should have correct required params for app_status', () => {
-    const mc = toolCatalog.mission_control;
+    const mc = toolCatalog.mission_control!;
     const appStatus = mc.actions!.find((a) => a.name === 'app_status');
     expect(appStatus?.requiredParams).toContain('app');
   });
 
   it('should have notes for tools with state-changing actions', () => {
-    expect(toolCatalog.mission_control.notes).toContain('sync_app');
-    expect(toolCatalog.argocd.notes).toContain('state-changing');
+    expect(toolCatalog.mission_control!.notes).toContain('sync_app');
+    expect(toolCatalog.argocd!.notes).toContain('state-changing');
   });
 });
