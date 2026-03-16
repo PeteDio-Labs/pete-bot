@@ -19,7 +19,7 @@ describe('toolCatalog', () => {
   });
 
   it('should have valid entries for all tools', () => {
-    for (const [name, entry] of Object.entries(toolCatalog)) {
+    for (const [, entry] of Object.entries(toolCatalog)) {
       expect(entry.summary).toBeTruthy();
       expect(['action-based', 'simple']).toContain(entry.type);
       expect(entry.examples.length).toBeGreaterThan(0);
@@ -30,7 +30,7 @@ describe('toolCatalog', () => {
     const actionBased = Object.entries(toolCatalog).filter(([, e]) => e.type === 'action-based');
     expect(actionBased.length).toBeGreaterThan(0);
 
-    for (const [name, entry] of actionBased) {
+    for (const [, entry] of actionBased) {
       expect(entry.actions).toBeDefined();
       expect(entry.actions!.length).toBeGreaterThan(0);
 
@@ -47,7 +47,7 @@ describe('toolCatalog', () => {
     const simple = Object.entries(toolCatalog).filter(([, e]) => e.type === 'simple');
     expect(simple.length).toBeGreaterThan(0);
 
-    for (const [name, entry] of simple) {
+    for (const [, entry] of simple) {
       expect(entry.parameters).toBeDefined();
       expect(entry.parameters!.length).toBeGreaterThan(0);
     }
