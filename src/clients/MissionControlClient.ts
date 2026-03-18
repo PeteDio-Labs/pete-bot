@@ -71,8 +71,60 @@ export interface InfraEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface TorrentInfo {
+  hash: string;
+  name: string;
+  state: string;
+  progress: number;
+  dl_speed: number;
+  up_speed: number;
+  size?: number;
+}
+
+export interface TorrentProperties {
+  hash: string;
+  name: string;
+  comment: string;
+  total_size: number;
+  total_downloaded: number;
+  total_uploaded: number;
+  addition_date: number;
+  completion_date: number;
+}
+
+export interface TransferInfo {
+  dl_info_speed: number;
+  up_info_speed: number;
+  total_uploaded: number;
+  total_downloaded: number;
+  dht_nodes: number;
+}
+
+export interface MetricResult {
+  labels: Record<string, string>;
+  timestamp: number;
+  value: number;
+}
+
+export interface HealthMetrics {
+  clusterHealthy: boolean;
+  apiServerUp: boolean;
+  nodeCount: number;
+  nodesReady: number;
+  podCount: number;
+  podsRunning: number;
+  timestamp: number;
+}
+
+export interface OperationResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 /**
  * HTTP client for Mission Control Backend API and Notification Service
+ * This is the single integration point for all infrastructure operations.
  */
 export class MissionControlClient {
   private mcHost: string;
@@ -84,9 +136,13 @@ export class MissionControlClient {
     this.notifHost = notifHost;
   }
 
+  // ── Inventory ──────────────────────────────────────────────
+
   async getInventory(): Promise<InventoryResponse> {
     return this.makeRequest<InventoryResponse>('/api/v1/inventory');
   }
+
+  // ── ArgoCD ─────────────────────────────────────────────────
 
   async getArgoApps(): Promise<{ data: ArgoAppStatus[] }> {
     return this.makeRequest<{ data: ArgoAppStatus[] }>('/api/v1/argocd/applications');
@@ -103,9 +159,102 @@ export class MissionControlClient {
     );
   }
 
+  async getArgoAppHistory(name: string): Promise<{ data: unknown[] }> {
+    return this.makeRequest<{ data: unknown[] }>(`/api/v1/argocd/applications/${encodeURIComponent(name)}/history`);
+  }
+
+  async refreshArgoApp(name: string): Promise<{ data: SyncResult }> {
+    return this.makeRequest<{ data: SyncResult }>(
+      `/api/v1/argocd/applications/${encodeURIComponent(name)}/refresh`,
+      'POST'
+    );
+  }
+
+  // ── Proxmox ────────────────────────────────────────────────
+
   async getProxmoxNodes(): Promise<{ data: ProxmoxNode[] }> {
     return this.makeRequest<{ data: ProxmoxNode[] }>('/api/v1/proxmox/nodes');
   }
+
+  async startVM(node: string, vmid: string): Promise<{ data: OperationResult }> {
+    return this.makeRequest<{ data: OperationResult }>(
+      `/api/v1/proxmox/nodes/${encodeURIComponent(node)}/vms/${encodeURIComponent(vmid)}/start`,
+      'POST'
+    );
+  }
+
+  async stopVM(node: string, vmid: string): Promise<{ data: OperationResult }> {
+    return this.makeRequest<{ data: OperationResult }>(
+      `/api/v1/proxmox/nodes/${encodeURIComponent(node)}/vms/${encodeURIComponent(vmid)}/stop`,
+      'POST'
+    );
+  }
+
+  async startLXC(node: string, vmid: string): Promise<{ data: OperationResult }> {
+    return this.makeRequest<{ data: OperationResult }>(
+      `/api/v1/proxmox/nodes/${encodeURIComponent(node)}/lxc/${encodeURIComponent(vmid)}/start`,
+      'POST'
+    );
+  }
+
+  async stopLXC(node: string, vmid: string): Promise<{ data: OperationResult }> {
+    return this.makeRequest<{ data: OperationResult }>(
+      `/api/v1/proxmox/nodes/${encodeURIComponent(node)}/lxc/${encodeURIComponent(vmid)}/stop`,
+      'POST'
+    );
+  }
+
+  // ── qBittorrent (via MC Backend) ──────────────────────────
+
+  async getTorrents(filter?: string): Promise<{ data: TorrentInfo[] }> {
+    const path = filter
+      ? `/api/v1/qbittorrent/torrents?filter=${encodeURIComponent(filter)}`
+      : '/api/v1/qbittorrent/torrents';
+    return this.makeRequest<{ data: TorrentInfo[] }>(path);
+  }
+
+  async getTorrentDetails(hash: string): Promise<{ data: TorrentProperties }> {
+    return this.makeRequest<{ data: TorrentProperties }>(`/api/v1/qbittorrent/torrents/${encodeURIComponent(hash)}`);
+  }
+
+  async getTransferInfo(): Promise<{ data: TransferInfo }> {
+    return this.makeRequest<{ data: TransferInfo }>('/api/v1/qbittorrent/transfer');
+  }
+
+  // ── Prometheus (via MC Backend) ────────────────────────────
+
+  async getClusterHealth(): Promise<{ data: HealthMetrics }> {
+    return this.makeRequest<{ data: HealthMetrics }>('/api/v1/prometheus/cluster/health');
+  }
+
+  async getNodeCPU(): Promise<{ data: MetricResult[] }> {
+    return this.makeRequest<{ data: MetricResult[] }>('/api/v1/prometheus/nodes/cpu');
+  }
+
+  async getNodeMemory(): Promise<{ data: MetricResult[] }> {
+    return this.makeRequest<{ data: MetricResult[] }>('/api/v1/prometheus/nodes/memory');
+  }
+
+  async getPVUsage(): Promise<{ data: MetricResult[] }> {
+    return this.makeRequest<{ data: MetricResult[] }>('/api/v1/prometheus/pvs');
+  }
+
+  // ── Kubernetes (via MC Backend) ────────────────────────────
+
+  async restartDeployment(namespace: string, name: string): Promise<{ data: OperationResult }> {
+    return this.makeRequest<{ data: OperationResult }>(
+      `/api/v1/kubernetes/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+      'POST'
+    );
+  }
+
+  async getPodLogs(namespace: string, name: string, lines = 100): Promise<{ data: { logs: string } }> {
+    return this.makeRequest<{ data: { logs: string } }>(
+      `/api/v1/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?lines=${lines}`
+    );
+  }
+
+  // ── Events (Notification Service) ─────────────────────────
 
   async getRecentEvents(limit = 10): Promise<{ data: InfraEvent[] }> {
     const url = `${this.notifHost}/api/v1/events?limit=${limit}`;
@@ -135,6 +284,8 @@ export class MissionControlClient {
       throw error;
     }
   }
+
+  // ── Meta ───────────────────────────────────────────────────
 
   async isAvailable(): Promise<boolean> {
     try {

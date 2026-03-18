@@ -20,85 +20,66 @@ export interface ToolCatalogEntry {
 
 export const toolCatalog: Record<string, ToolCatalogEntry> = {
   mission_control: {
-    summary: 'Infrastructure, ArgoCD, Proxmox, events, availability',
+    summary: 'Unified infrastructure tool: ArgoCD, Proxmox, Prometheus, qBittorrent, K8s, events',
     type: 'action-based',
     actions: [
+      // Inventory
       { name: 'inventory_summary', description: 'Overall hosts and workloads', requiredParams: [], optionalParams: [] },
       { name: 'workload_status', description: 'Workloads, optionally by namespace', requiredParams: [], optionalParams: ['namespace'] },
+      // ArgoCD
       { name: 'list_apps', description: 'All ArgoCD applications', requiredParams: [], optionalParams: [] },
       { name: 'app_status', description: 'Single ArgoCD app details', requiredParams: ['app'], optionalParams: [] },
       { name: 'sync_app', description: 'Trigger an ArgoCD app sync', requiredParams: ['app'], optionalParams: [] },
-      { name: 'node_status', description: 'Proxmox node health', requiredParams: [], optionalParams: [] },
+      { name: 'app_history', description: 'ArgoCD app deployment history', requiredParams: ['app'], optionalParams: [] },
+      { name: 'refresh_app', description: 'Force ArgoCD git re-check', requiredParams: ['app'], optionalParams: [] },
+      // Proxmox
+      { name: 'node_status', description: 'Proxmox node health (CPU, memory, disk)', requiredParams: [], optionalParams: [] },
+      { name: 'start_vm', description: 'Start a Proxmox VM', requiredParams: ['node', 'vmid'], optionalParams: [] },
+      { name: 'stop_vm', description: 'Stop a Proxmox VM', requiredParams: ['node', 'vmid'], optionalParams: [] },
+      { name: 'start_lxc', description: 'Start a Proxmox LXC container', requiredParams: ['node', 'vmid'], optionalParams: [] },
+      { name: 'stop_lxc', description: 'Stop a Proxmox LXC container', requiredParams: ['node', 'vmid'], optionalParams: [] },
+      // Events
       { name: 'recent_events', description: 'Recent infrastructure events', requiredParams: [], optionalParams: ['limit'] },
+      // Prometheus
+      { name: 'cluster_health', description: 'K8s cluster health summary', requiredParams: [], optionalParams: [] },
+      { name: 'node_cpu', description: 'Node CPU usage from Prometheus', requiredParams: [], optionalParams: [] },
+      { name: 'node_memory', description: 'Node memory usage from Prometheus', requiredParams: [], optionalParams: [] },
+      { name: 'pv_usage', description: 'Persistent volume usage', requiredParams: [], optionalParams: [] },
+      // qBittorrent
+      { name: 'torrent_list', description: 'List torrents with optional filter', requiredParams: [], optionalParams: ['filter'] },
+      { name: 'torrent_details', description: 'Details for a specific torrent', requiredParams: ['hash'], optionalParams: [] },
+      { name: 'transfer_speeds', description: 'Current download/upload speeds', requiredParams: [], optionalParams: [] },
+      // K8s
+      { name: 'restart_deployment', description: 'Rolling restart a K8s deployment', requiredParams: ['namespace', 'name'], optionalParams: [] },
+      { name: 'pod_logs', description: 'Get pod logs', requiredParams: ['namespace', 'name'], optionalParams: ['lines'] },
+      // Meta
       { name: 'availability', description: 'Whether Mission Control is reachable', requiredParams: [], optionalParams: [] },
     ],
     examples: [
       'show me all argocd apps',
       'what is the status of blog-dev',
       'show proxmox node status',
-      'show recent mission control events',
+      'show recent events',
       'show workloads in namespace blog',
-    ],
-    notes: 'sync_app is state-changing; all other actions are read-only',
-  },
-  qbittorrent: {
-    summary: 'Torrent status, speeds, and transfer info',
-    type: 'action-based',
-    actions: [
-      { name: 'list', description: 'List torrents with optional filter', requiredParams: [], optionalParams: ['filter'] },
-      { name: 'details', description: 'Details for a specific torrent', requiredParams: ['hash'], optionalParams: [] },
-      { name: 'speeds', description: 'Current download/upload speeds', requiredParams: [], optionalParams: [] },
-      { name: 'transfer_info', description: 'Overall transfer statistics', requiredParams: [], optionalParams: [] },
-    ],
-    examples: [
       'show my downloads',
       'what is downloading right now',
-      'show qbit speeds',
-      'show details for torrent abc123',
+      'show cluster health',
+      'show node CPU usage',
+      'restart deployment blog-api in blog namespace',
     ],
-    notes: 'Read-only access to torrent information',
+    notes: 'sync_app, start_vm, stop_vm, start_lxc, stop_lxc, restart_deployment are state-changing; all other actions are read-only',
   },
-  infrastructure: {
-    summary: 'Kubernetes hosts, pods, Proxmox nodes, workload status',
+  web_search: {
+    summary: 'Search the web for information',
     type: 'action-based',
     actions: [
-      { name: 'inventory_summary', description: 'All hosts and workloads', requiredParams: [], optionalParams: [] },
-      { name: 'node_status', description: 'Proxmox nodes with CPU/memory', requiredParams: [], optionalParams: [] },
-      { name: 'workload_status', description: 'Workloads, optionally by namespace', requiredParams: [], optionalParams: ['namespace'] },
+      { name: 'search', description: 'Search the web', requiredParams: ['query'], optionalParams: ['max_results'] },
+      { name: 'providers', description: 'List available search providers', requiredParams: [], optionalParams: [] },
     ],
     examples: [
-      'what is running in my homelab',
-      'show proxmox node health',
-      'show workloads in blog namespace',
+      'search for kubernetes best practices',
+      'what search providers are available',
     ],
-    notes: 'Read-only',
-  },
-  argocd: {
-    summary: 'ArgoCD app sync and health status',
-    type: 'action-based',
-    actions: [
-      { name: 'list_apps', description: 'All apps with sync/health', requiredParams: [], optionalParams: [] },
-      { name: 'app_status', description: 'Single app details', requiredParams: ['app'], optionalParams: [] },
-      { name: 'sync_app', description: 'Trigger a sync', requiredParams: ['app'], optionalParams: [] },
-    ],
-    examples: [
-      'list all argocd apps',
-      'is blog-dev synced',
-      'sync mission-control-dev',
-    ],
-    notes: 'sync_app is state-changing',
-  },
-  alerts: {
-    summary: 'Recent infrastructure alerts and events',
-    type: 'action-based',
-    actions: [
-      { name: 'recent_events', description: 'Recent events from notification service', requiredParams: [], optionalParams: ['limit'] },
-    ],
-    examples: [
-      'show recent alerts',
-      'are there any recent events',
-    ],
-    notes: 'Read-only',
   },
   calculate: {
     summary: 'Evaluate math expressions',

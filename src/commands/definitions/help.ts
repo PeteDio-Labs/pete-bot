@@ -12,10 +12,7 @@ export const helpCommand = new SlashCommandBuilder()
       .addChoices(
         { name: 'tools', value: 'tools' },
         { name: 'mission_control', value: 'mission_control' },
-        { name: 'qbittorrent', value: 'qbittorrent' },
-        { name: 'infrastructure', value: 'infrastructure' },
-        { name: 'argocd', value: 'argocd' },
-        { name: 'alerts', value: 'alerts' },
+        { name: 'web_search', value: 'web_search' },
         { name: 'calculate', value: 'calculate' },
         { name: 'get_current_time', value: 'get_current_time' },
       )

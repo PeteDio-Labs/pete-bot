@@ -7,7 +7,6 @@ import { createInteractionHandler } from './events/interactionCreate.js';
 import { startMetricsServer } from './metrics/server.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
 import { logger } from './utils/index.js';
-import { QBittorrentClient } from './clients/QBittorrentClient.js';
 import { MissionControlClient } from './clients/MissionControlClient.js';
 import { registry } from './ai/ToolRegistry.js';
 import packageJson from '../package.json' with { type: 'json' };
@@ -106,20 +105,7 @@ export async function start(): Promise<void> {
     logger.debug('[Metrics] Server disabled');
   }
 
-  // Check qBittorrent client availability if enabled
-  if (config.qbittorrent.enabled) {
-    const qbitClient = new QBittorrentClient(config.qbittorrent.host);
-    const isAvailable = await qbitClient.isAvailable();
-    if (isAvailable) {
-      logger.info('[qBittorrent] Client is available');
-    } else {
-      logger.warn('[qBittorrent] Client is not available');
-    }
-  } else {
-    logger.debug('[qBittorrent] Client disabled');
-  }
-
-  // Check Mission Control availability if enabled
+  // Check Mission Control availability if enabled (qBittorrent now routes through MC Backend)
   if (config.missionControl.enabled) {
     const mcClient = new MissionControlClient(config.missionControl.url, config.notificationService.url);
     const isMcAvailable = await mcClient.isAvailable();

@@ -12,18 +12,15 @@ import { toolExecutionsTotal, toolExecutionDuration } from '../metrics/index.js'
 import { getSummarizer } from './SummarizerClient.js';
 import { logger } from '../utils/index.js';
 
-// Tools that should have their results summarized by the small model
-const SUMMARIZABLE_TOOLS = new Set(['qbittorrent']);
+// Actions that should have their results summarized by the small model
+const SUMMARIZABLE_ACTIONS = new Set(['torrent_list', 'torrent_details', 'transfer_speeds']);
 
 // Tool usage hints - concise guidance for the AI on how to use each tool
 const TOOL_HINTS: Record<string, string> = {
-  qbittorrent: `Actions: list (show torrents, optional filter: downloading|seeding|completed|paused|active), details (requires hash), speeds, transfer_info. Use "list" for "show downloads" questions.`,
   calculate: `Evaluate math expressions. Examples: "2+2", "sqrt(16)", "pow(2,8)". Supports +,-,*,/,% and functions: sqrt, pow, sin, cos, tan, log, abs, ceil, floor, round, PI, E.`,
   get_current_time: `Get current time. Optional timezone param (IANA format: "America/New_York", "Europe/London"). Defaults to UTC.`,
-  mission_control: `Actions: inventory_summary, workload_status (optional namespace), list_apps, app_status (requires app), sync_app (requires app), node_status, recent_events (optional limit), availability. Use this as the default tool for Mission Control, homelab, ArgoCD, Proxmox, and alert questions.`,
-  infrastructure: `Actions: inventory_summary (all hosts & workloads), node_status (Proxmox nodes with CPU/memory), workload_status (optional namespace filter). Use inventory_summary for "what's running" questions.`,
-  argocd: `Actions: list_apps (all ArgoCD apps with sync/health), app_status (requires app name), sync_app (requires app name). Use list_apps for general status questions.`,
-  alerts: `Actions: recent_events (optional limit, default 10). Returns recent infrastructure events and alerts.`,
+  mission_control: `Unified tool for ALL infrastructure operations. Actions: inventory_summary, workload_status (optional namespace), list_apps, app_status (requires app), sync_app (requires app), app_history (requires app), refresh_app (requires app), node_status, start_vm/stop_vm (requires node + vmid), start_lxc/stop_lxc (requires node + vmid), recent_events (optional limit), cluster_health, node_cpu, node_memory, pv_usage, torrent_list (optional filter: downloading|seeding|completed|paused|active), torrent_details (requires hash), transfer_speeds, restart_deployment (requires namespace + name), pod_logs (requires namespace + name, optional lines), availability. Use this as the default tool for Mission Control, homelab, ArgoCD, Proxmox, Prometheus, qBittorrent, K8s, and alert questions.`,
+  web_search: `Search the web. Actions: search (requires query, optional max_results), providers (list available search providers).`,
 };
 
 export class ToolExecutor {
@@ -134,7 +131,9 @@ When a user asks what you can do, what tools are available, or how to query some
         let resultContent = JSON.stringify(result);
         const summarizer = getSummarizer();
 
-        if (summarizer && SUMMARIZABLE_TOOLS.has(toolName) && result.success) {
+        const actionArg = toolArgs?.action as string | undefined;
+        const shouldSummarize = actionArg && SUMMARIZABLE_ACTIONS.has(actionArg);
+        if (summarizer && shouldSummarize && result.success) {
           try {
             logger.debug(`[ToolExecutor] Summarizing ${toolName} result with small model...`);
             const summary = await summarizer.summarize(result, userMessage);

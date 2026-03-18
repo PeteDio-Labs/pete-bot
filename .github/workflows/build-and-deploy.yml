@@ -1,4 +1,4 @@
-name: Build and Deploy Discord Bot
+name: Build and Deploy Pete Bot
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 
 env:
   NEXUS_REGISTRY: docker.toastedbytes.com
-  IMAGE_NAME: discord-ai-bot
+  IMAGE_NAME: pete-bot
 
 jobs:
   build-and-push:

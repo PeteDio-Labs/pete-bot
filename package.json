@@ -1,7 +1,7 @@
 {
-  "name": "discord-ai-bot",
+  "name": "pete-bot",
   "version": "2.0.0",
-  "description": "Discord bot with Ollama AI integration and tool support",
+  "description": "Pete Bot - conversational AI agent with Ollama and Mission Control tools",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

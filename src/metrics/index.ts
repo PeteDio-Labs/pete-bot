@@ -83,20 +83,6 @@ export const wsRequestDuration = new Histogram({
   registers: [register],
 });
 
-// qBittorrent Metrics
-export const qbitAvailable = new Gauge({
-  name: 'qbittorrent_available',
-  help: '1=qBittorrent reachable, 0=unavailable',
-  registers: [register],
-});
-
-export const qbitRequestDuration = new Histogram({
-  name: 'qbittorrent_request_duration_seconds',
-  help: 'qBittorrent API request duration in seconds',
-  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5],
-  registers: [register],
-});
-
 /**
  * Get all metrics in Prometheus format
  */
