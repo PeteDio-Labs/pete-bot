@@ -75,6 +75,14 @@ export const mcRequestDuration = new Histogram({
   registers: [register],
 });
 
+// Web Search Service Metrics
+export const wsRequestDuration = new Histogram({
+  name: 'discord_bot_web_search_duration_seconds',
+  help: 'Web search service request duration in seconds',
+  buckets: [0.1, 0.5, 1, 2, 5, 10, 15],
+  registers: [register],
+});
+
 // qBittorrent Metrics
 export const qbitAvailable = new Gauge({
   name: 'qbittorrent_available',

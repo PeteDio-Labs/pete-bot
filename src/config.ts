@@ -34,6 +34,10 @@ interface Config {
   notificationService: {
     url: string;
   };
+  webSearchService: {
+    url: string;
+    enabled: boolean;
+  };
 }
 
 function getEnvVar(name: string, defaultValue?: string): string {
@@ -81,6 +85,10 @@ export const config: Config = {
   },
   notificationService: {
     url: getEnvVar('NOTIFICATION_SERVICE_URL', 'http://notification-service.mission-control.svc.cluster.local:3002'),
+  },
+  webSearchService: {
+    url: getEnvVar('WEB_SEARCH_SERVICE_URL', 'http://web-search-service.web-search.svc.cluster.local:3003'),
+    enabled: getEnvVar('WEB_SEARCH_ENABLED', 'true') === 'true',
   },
 };
 
