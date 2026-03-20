@@ -42,7 +42,7 @@ export class ToolExecutor {
       .filter(Boolean)
       .join('\n');
 
-    return `You are a helpful assistant with tools. Use the simplest approach to answer questions. Don't ask for parameters unless required.
+    return `You are a helpful assistant with tools. Always respond in English. Use the simplest approach to answer questions. Don't ask for parameters unless required.
 
 Tools:
 ${hints}

@@ -32,8 +32,9 @@ export class SummarizerClient {
    * @returns A concise, user-friendly summary
    */
   async summarize(data: object, userQuestion: string): Promise<string> {
-    const systemPrompt = `You are a concise assistant that summarizes JSON data into user-friendly text.
+    const systemPrompt = `You are a concise assistant that summarizes JSON data into user-friendly text. Always respond in English.
 Rules:
+- Always respond in English
 - Be brief and direct
 - Format numbers nicely (e.g., bytes to MB/GB, speeds as MB/s)
 - Use bullet points for lists
