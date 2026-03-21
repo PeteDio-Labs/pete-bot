@@ -37,6 +37,8 @@ interface Config {
   eventStream: {
     enabled: boolean;
     ownerUserId: string;
+    dedupWindowMs: number;
+    triageTimeoutMs: number;
   };
   webSearchService: {
     url: string;
@@ -93,6 +95,8 @@ export const config: Config = {
   eventStream: {
     enabled: getEnvVar('EVENT_STREAM_ENABLED', 'true') === 'true',
     ownerUserId: getEnvVar('OWNER_USER_ID', ''),
+    dedupWindowMs: parseInt(getEnvVar('DEDUP_WINDOW_MS', '60000'), 10),
+    triageTimeoutMs: parseInt(getEnvVar('TRIAGE_TIMEOUT_MS', '10000'), 10),
   },
   webSearchService: {
     url: getEnvVar('WEB_SEARCH_SERVICE_URL', 'http://web-search-service.web-search.svc.cluster.local:3003'),

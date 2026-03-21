@@ -285,6 +285,56 @@ export class MissionControlClient {
     }
   }
 
+  // ── Event Publishing (Notification Service) ────────────────
+
+  async publishEvent(event: {
+    source: string;
+    type: string;
+    severity: string;
+    message: string;
+    namespace?: string;
+    affected_service?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ id: string }> {
+    const url = `${this.notifHost}/api/v1/events`;
+    const start = Date.now();
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(event),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+
+      const duration = (Date.now() - start) / 1000;
+      mcRequestDuration.observe(duration);
+
+      if (!response.ok) {
+        throw new Error(`Notification Service API error: ${response.status} ${response.statusText}`);
+      }
+
+      return (await response.json()) as { id: string };
+    } catch (error: unknown) {
+      const duration = (Date.now() - start) / 1000;
+      mcRequestDuration.observe(duration);
+
+      if (error instanceof Error) {
+        throw new Error(`Failed to publish event: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  // ── Workload Status (Kubernetes) ─────────────────────────
+
+  async getWorkloadStatus(namespace?: string): Promise<{ data: unknown }> {
+    const path = namespace
+      ? `/api/v1/inventory/workloads?namespace=${encodeURIComponent(namespace)}`
+      : '/api/v1/inventory/workloads';
+    return this.makeRequest<{ data: unknown }>(path);
+  }
+
   // ── Meta ───────────────────────────────────────────────────
 
   async isAvailable(): Promise<boolean> {

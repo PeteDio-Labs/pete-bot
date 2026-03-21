@@ -1,15 +1,30 @@
-// Interaction event handler - routes commands to handlers
-import type { Interaction } from 'discord.js';
+// Interaction event handler - routes commands and button interactions to handlers
+import type { Interaction, ButtonInteraction } from 'discord.js';
 import type { OllamaClient } from '../ai/OllamaClient.js';
 import { handleAskCommand, handleInfoCommand, handleToolsCommand, handleHelpCommand } from '../commands/handlers/index.js';
 import { discordMessagesProcessed, discordRequestDuration } from '../metrics/index.js';
 import { logger } from '../utils/index.js';
 
+type ButtonHandler = (interaction: ButtonInteraction) => Promise<void>;
+
 export function createInteractionHandler(
   ollamaClient: OllamaClient,
-  allowedUsers: string[]
+  allowedUsers: string[],
+  buttonHandler?: ButtonHandler,
 ): (interaction: Interaction) => Promise<void> {
   return async function handleInteraction(interaction: Interaction): Promise<void> {
+    // Handle button interactions (remediation approve/reject)
+    if (interaction.isButton()) {
+      if (buttonHandler) {
+        try {
+          await buttonHandler(interaction);
+        } catch (err) {
+          logger.error('Button handler error:', err);
+        }
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const { commandName } = interaction;

@@ -10,6 +10,9 @@ import { logger } from './utils/index.js';
 import { MissionControlClient } from './clients/MissionControlClient.js';
 import { registry } from './ai/ToolRegistry.js';
 import { startEventStream } from './listeners/eventStream.js';
+import { startHealthPoller } from './listeners/healthPoller.js';
+import { initRemediationDB } from './listeners/remediationHandler.js';
+import { createButtonHandler } from './listeners/buttonHandler.js';
 import packageJson from '../package.json' with { type: 'json' };
 
 // Version info - read dynamically from package.json
@@ -30,6 +33,18 @@ const ollamaClient = new OllamaClient({
   timeout: config.ollama.timeout,
 });
 
+// Initialize MC client for button handler
+const mcClient = new MissionControlClient(
+  config.missionControl.url,
+  config.notificationService.url,
+);
+
+// Initialize remediation DB
+initRemediationDB();
+
+// Create button handler for remediation approve/reject
+const buttonHandler = createButtonHandler(config.eventStream.ownerUserId, mcClient);
+
 // Event: Bot ready
 client.once('clientReady', async () => {
   logger.info(`Discord bot logged in as ${client.user?.tag}`);
@@ -48,9 +63,18 @@ client.once('clientReady', async () => {
 
   // Start SSE event stream listener for DM alerts
   if (config.eventStream.enabled) {
-    startEventStream(client, config.missionControl.url, config.eventStream.ownerUserId);
+    startEventStream(client, config.missionControl.url, config.eventStream.ownerUserId, {
+      dedupWindowMs: config.eventStream.dedupWindowMs,
+      triageTimeoutMs: config.eventStream.triageTimeoutMs,
+      notificationServiceUrl: config.notificationService.url,
+    });
   } else {
     logger.debug('[EventStream] Disabled');
+  }
+
+  // Start health poller for proactive event detection
+  if (config.eventStream.enabled && config.missionControl.enabled) {
+    startHealthPoller(mcClient);
   }
 
   // Print startup summary after everything is initialized
@@ -68,8 +92,11 @@ client.on('error', (error) => {
   discordBotUp.set(0);
 });
 
-// Event: Interaction (slash command)
-client.on('interactionCreate', createInteractionHandler(ollamaClient, config.discord.allowedUsers));
+// Event: Interaction (slash command + button clicks)
+client.on(
+  'interactionCreate',
+  createInteractionHandler(ollamaClient, config.discord.allowedUsers, buttonHandler),
+);
 
 /**
  * Print startup banner using raw output
@@ -92,6 +119,11 @@ function printStartupSummary(): void {
   logger.raw('═══════════════════════════════════════════════════════');
   logger.info('✓ Discord bot ready');
   logger.info('✓ Slash commands registered');
+  logger.info('✓ Remediation DB initialized');
+  if (config.eventStream.enabled) {
+    logger.info('✓ Event stream + triage active');
+    logger.info('✓ Health poller active');
+  }
   logger.raw('═══════════════════════════════════════════════════════');
   logger.raw('');
 }
@@ -115,7 +147,6 @@ export async function start(): Promise<void> {
 
   // Check Mission Control availability if enabled (qBittorrent now routes through MC Backend)
   if (config.missionControl.enabled) {
-    const mcClient = new MissionControlClient(config.missionControl.url, config.notificationService.url);
     const isMcAvailable = await mcClient.isAvailable();
     if (isMcAvailable) {
       logger.info('[Mission Control] Backend is available');

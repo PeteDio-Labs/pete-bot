@@ -96,6 +96,53 @@ export const sseDmsSent = new Counter({
   registers: [register],
 });
 
+// Event Dedup Metrics
+export const sseEventsDeduplicated = new Counter({
+  name: 'discord_bot_sse_events_deduplicated_total',
+  help: 'Total events suppressed by deduplication',
+  labelNames: ['source', 'type'],
+  registers: [register],
+});
+
+// Triage Metrics
+export const triageInvestigationsRun = new Counter({
+  name: 'discord_bot_triage_investigations_total',
+  help: 'Total triage investigations executed',
+  labelNames: ['source', 'type', 'result'],
+  registers: [register],
+});
+
+export const triageInvestigationDuration = new Histogram({
+  name: 'discord_bot_triage_investigation_duration_seconds',
+  help: 'Triage investigation duration in seconds',
+  labelNames: ['source', 'type'],
+  buckets: [0.5, 1, 2, 5, 10],
+  registers: [register],
+});
+
+// Remediation Metrics
+export const remediationTasksTotal = new Counter({
+  name: 'discord_bot_remediation_tasks_total',
+  help: 'Total remediation tasks created',
+  labelNames: ['action', 'state'],
+  registers: [register],
+});
+
+// Health Poller Metrics
+export const healthPollerRuns = new Counter({
+  name: 'discord_bot_health_poller_runs_total',
+  help: 'Total health poller execution cycles',
+  labelNames: ['poller', 'result'],
+  registers: [register],
+});
+
+export const healthPollerEventsPublished = new Counter({
+  name: 'discord_bot_health_poller_events_published_total',
+  help: 'Total events published by health poller',
+  labelNames: ['poller', 'severity'],
+  registers: [register],
+});
+
 // Web Search Service Metrics
 export const wsRequestDuration = new Histogram({
   name: 'discord_bot_web_search_duration_seconds',
