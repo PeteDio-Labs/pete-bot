@@ -235,6 +235,17 @@ export class MissionControlClient {
     return this.makeRequest<{ data: MetricResult[] }>('/api/v1/prometheus/nodes/memory');
   }
 
+  async getNodeMemoryRatio(): Promise<{ data: MetricResult[] }> {
+    const query = encodeURIComponent('1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)');
+    const result = await this.makeRequest<{ data: { data: { result: Array<{ metric: Record<string, string>; value: [number, string] }> } } }>(`/api/v1/prometheus/query?query=${query}`);
+    const metrics = result.data.data.result.map((r) => ({
+      labels: r.metric,
+      timestamp: r.value[0],
+      value: parseFloat(r.value[1]),
+    }));
+    return { data: metrics };
+  }
+
   async getPVUsage(): Promise<{ data: MetricResult[] }> {
     return this.makeRequest<{ data: MetricResult[] }>('/api/v1/prometheus/pvs');
   }
