@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MissionControlClient } from './MissionControlClient.js';
 import * as metrics from '../metrics/index.js';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _global = global as any;
+
 describe('MissionControlClient', () => {
   let client: MissionControlClient;
 
@@ -20,7 +23,7 @@ describe('MissionControlClient', () => {
         },
       };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockInventory,
       });
@@ -28,7 +31,7 @@ describe('MissionControlClient', () => {
       const result = await client.getInventory();
 
       expect(result).toEqual(mockInventory);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/inventory',
         expect.any(Object)
       );
@@ -43,7 +46,7 @@ describe('MissionControlClient', () => {
         ],
       };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockApps,
       });
@@ -51,7 +54,7 @@ describe('MissionControlClient', () => {
       const result = await client.getArgoApps();
 
       expect(result).toEqual(mockApps);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/argocd/applications',
         expect.any(Object)
       );
@@ -64,7 +67,7 @@ describe('MissionControlClient', () => {
         data: { name: 'blog-dev', syncStatus: 'Synced', healthStatus: 'Healthy' },
       };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockApp,
       });
@@ -72,21 +75,21 @@ describe('MissionControlClient', () => {
       const result = await client.getArgoAppStatus('blog-dev');
 
       expect(result).toEqual(mockApp);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/argocd/applications/blog-dev',
         expect.any(Object)
       );
     });
 
     it('encodes app name in URL', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ data: {} }),
       });
 
       await client.getArgoAppStatus('app with spaces');
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/argocd/applications/app%20with%20spaces',
         expect.any(Object)
       );
@@ -97,7 +100,7 @@ describe('MissionControlClient', () => {
     it('sends POST request', async () => {
       const mockResult = { data: { success: true, message: 'Sync initiated' } };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockResult,
       });
@@ -105,7 +108,7 @@ describe('MissionControlClient', () => {
       const result = await client.syncArgoApp('blog-dev');
 
       expect(result).toEqual(mockResult);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/argocd/applications/blog-dev/sync',
         expect.objectContaining({ method: 'POST' })
       );
@@ -118,7 +121,7 @@ describe('MissionControlClient', () => {
         data: [{ node: 'pedro', status: 'online', cpu: 0.15, maxcpu: 8 }],
       };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockNodes,
       });
@@ -126,7 +129,7 @@ describe('MissionControlClient', () => {
       const result = await client.getProxmoxNodes();
 
       expect(result).toEqual(mockNodes);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/proxmox/nodes',
         expect.any(Object)
       );
@@ -139,7 +142,7 @@ describe('MissionControlClient', () => {
         data: [{ id: '1', source: 'kubernetes', type: 'deployment', severity: 'info', message: 'test' }],
       };
 
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => mockEvents,
       });
@@ -147,21 +150,21 @@ describe('MissionControlClient', () => {
       const result = await client.getRecentEvents(5);
 
       expect(result).toEqual(mockEvents);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-notif:3002/api/v1/events?limit=5',
         expect.any(Object)
       );
     });
 
     it('uses default limit of 10', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ data: [] }),
       });
 
       await client.getRecentEvents();
 
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-notif:3002/api/v1/events?limit=10',
         expect.any(Object)
       );
@@ -170,19 +173,19 @@ describe('MissionControlClient', () => {
 
   describe('isAvailable()', () => {
     it('returns true when API responds', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
+      _global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
 
       const result = await client.isAvailable();
 
       expect(result).toBe(true);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(_global.fetch).toHaveBeenCalledWith(
         'http://test-mc:3000/api/v1/argocd/status',
         expect.any(Object)
       );
     });
 
     it('returns false on connection error', async () => {
-      global.fetch = vi.fn().mockRejectedValueOnce(new Error('Connection failed'));
+      _global.fetch = vi.fn().mockRejectedValueOnce(new Error('Connection failed'));
 
       const result = await client.isAvailable();
 
@@ -190,7 +193,7 @@ describe('MissionControlClient', () => {
     });
 
     it('returns false on non-200 status', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 500 });
+      _global.fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 500 });
 
       const result = await client.isAvailable();
 
@@ -200,7 +203,7 @@ describe('MissionControlClient', () => {
 
   describe('metrics', () => {
     it('records request duration on each call', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
+      _global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({ data: [] }),
       });
@@ -212,7 +215,7 @@ describe('MissionControlClient', () => {
     });
 
     it('sets availability gauge to 1 on success', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
+      _global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
 
       await client.isAvailable();
 
@@ -221,7 +224,7 @@ describe('MissionControlClient', () => {
     });
 
     it('sets availability gauge to 0 on failure', async () => {
-      global.fetch = vi.fn().mockRejectedValueOnce(new Error('Failed'));
+      _global.fetch = vi.fn().mockRejectedValueOnce(new Error('Failed'));
 
       await client.isAvailable();
 
@@ -232,7 +235,7 @@ describe('MissionControlClient', () => {
 
   describe('error handling', () => {
     it('throws on non-OK response', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 404,
         statusText: 'Not Found',
@@ -242,13 +245,13 @@ describe('MissionControlClient', () => {
     });
 
     it('throws on network error', async () => {
-      global.fetch = vi.fn().mockRejectedValueOnce(new Error('Network error'));
+      _global.fetch = vi.fn().mockRejectedValueOnce(new Error('Network error'));
 
       await expect(client.getInventory()).rejects.toThrow('Failed to fetch from Mission Control');
     });
 
     it('throws on notification service error', async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
+      _global.fetch = vi.fn().mockResolvedValueOnce({
         ok: false,
         status: 503,
         statusText: 'Service Unavailable',
