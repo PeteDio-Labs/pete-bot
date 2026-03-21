@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock the metrics before importing the module
 vi.mock('../metrics/index.js', () => ({
@@ -10,39 +10,6 @@ vi.mock('../metrics/index.js', () => ({
 // since startHealthPoller uses setInterval (hard to test directly)
 
 describe('Health Poller', () => {
-  let mockClient: {
-    getArgoApps: ReturnType<typeof vi.fn>;
-    getInventory: ReturnType<typeof vi.fn>;
-    getNodeCPU: ReturnType<typeof vi.fn>;
-    getNodeMemory: ReturnType<typeof vi.fn>;
-    publishEvent: ReturnType<typeof vi.fn>;
-  };
-
-  beforeEach(() => {
-    mockClient = {
-      getArgoApps: vi.fn().mockResolvedValue({
-        data: [
-          { name: 'app1', namespace: 'default', syncStatus: 'Synced', healthStatus: 'Healthy' },
-          { name: 'app2', namespace: 'prod', syncStatus: 'Synced', healthStatus: 'Healthy' },
-        ],
-      }),
-      getInventory: vi.fn().mockResolvedValue({
-        data: {
-          hosts: [],
-          workloads: [
-            { name: 'web', namespace: 'default', status: 'running', health_status: 'healthy' },
-          ],
-        },
-      }),
-      getNodeCPU: vi.fn().mockResolvedValue({
-        data: [{ labels: { instance: 'node1' }, value: 0.5, timestamp: 0 }],
-      }),
-      getNodeMemory: vi.fn().mockResolvedValue({
-        data: [{ labels: { instance: 'node1' }, value: 0.6, timestamp: 0 }],
-      }),
-      publishEvent: vi.fn().mockResolvedValue({ id: 'evt-1' }),
-    };
-  });
 
   it('should detect ArgoCD drift from Synced to OutOfSync', async () => {
     // Import dynamically to avoid module caching issues with mocks
