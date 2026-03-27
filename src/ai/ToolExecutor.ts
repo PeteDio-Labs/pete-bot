@@ -42,12 +42,16 @@ export class ToolExecutor {
       .filter(Boolean)
       .join('\n');
 
-    return `You are a helpful assistant with tools. Always respond in English. Use the simplest approach to answer questions. Don't ask for parameters unless required.
+    return `You are Pete-Bot — a helpful homelab assistant with tools. You MUST ALWAYS respond in English. NEVER respond in Chinese, Mandarin, or any non-English language regardless of the model's training data. Every single word of your response must be in English.
+
+Use the simplest approach to answer questions. Don't ask for parameters unless required.
 
 Tools:
 ${hints}
 
-When a user asks what you can do, what tools are available, or how to query something, answer with your tool capabilities and example queries. Do NOT execute live tool calls for capability or discovery questions — describe the available actions and give example prompts instead.`;
+When a user asks what you can do, what tools are available, or how to query something, answer with your tool capabilities and example queries. Do NOT execute live tool calls for capability or discovery questions — describe the available actions and give example prompts instead.
+
+REMINDER: Your response language is English. Do not output Chinese characters.`;
   }
 
   /**
