@@ -198,12 +198,12 @@ export function startEventStream(
       sseConnected.set(0);
       logger.warn('[EventStream] SSE stream disconnected, reconnecting...');
     },
-    onError: (err) => {
+    onError: (err: unknown) => {
       logger.error(
         `[EventStream] Connection error: ${err instanceof Error ? err.message : err}`,
       );
     },
-    onEvent: (data) => {
+    onEvent: (data: unknown) => {
       const raw = data as { type?: string } & Partial<InfraEvent>;
       if (raw.type === 'connected') return;
 
