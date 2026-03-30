@@ -1,7 +1,7 @@
 // Interaction event handler - routes commands and button interactions to handlers
 import type { Interaction, ButtonInteraction } from 'discord.js';
 import type { OllamaClient } from '../ai/OllamaClient.js';
-import { handleAskCommand, handleInfoCommand, handleToolsCommand, handleHelpCommand } from '../commands/handlers/index.js';
+import { handleAskCommand, handleInfoCommand, handleToolsCommand, handleHelpCommand, handleCodeCommand } from '../commands/handlers/index.js';
 import { discordMessagesProcessed, discordRequestDuration } from '../metrics/index.js';
 import { logger } from '../utils/index.js';
 
@@ -11,6 +11,7 @@ export function createInteractionHandler(
   ollamaClient: OllamaClient,
   allowedUsers: string[],
   buttonHandler?: ButtonHandler,
+  coderConfig?: { host: string; model: string },
 ): (interaction: Interaction) => Promise<void> {
   return async function handleInteraction(interaction: Interaction): Promise<void> {
     // Handle button interactions (remediation approve/reject)
@@ -44,6 +45,14 @@ export function createInteractionHandler(
           break;
         case 'help':
           await handleHelpCommand(interaction);
+          break;
+        case 'code':
+          await handleCodeCommand(
+            interaction,
+            coderConfig?.host ?? 'http://localhost:11434',
+            coderConfig?.model ?? 'petedio-coder',
+            allowedUsers,
+          );
           break;
         default:
           logger.warn(`Unknown command: ${commandName}`);

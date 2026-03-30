@@ -95,7 +95,10 @@ client.on('error', (error) => {
 // Event: Interaction (slash command + button clicks)
 client.on(
   'interactionCreate',
-  createInteractionHandler(ollamaClient, config.discord.allowedUsers, buttonHandler),
+  createInteractionHandler(ollamaClient, config.discord.allowedUsers, buttonHandler, {
+    host: config.ollama.host,
+    model: config.coder.model,
+  }),
 );
 
 /**
@@ -120,6 +123,7 @@ function printStartupSummary(): void {
   logger.info('✓ Discord bot ready');
   logger.info('✓ Slash commands registered');
   logger.info('✓ Remediation DB initialized');
+  logger.info(`✓ Coding agent model: ${config.coder.model}`);
   if (config.eventStream.enabled) {
     logger.info('✓ Event stream + triage active');
     logger.info('✓ Health poller active');

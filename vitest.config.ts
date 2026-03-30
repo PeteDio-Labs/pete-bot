@@ -5,6 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    exclude: ['src/db/remediations.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
   },
 });

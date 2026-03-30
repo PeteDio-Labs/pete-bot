@@ -44,6 +44,9 @@ interface Config {
     url: string;
     enabled: boolean;
   };
+  coder: {
+    model: string;
+  };
 }
 
 function getEnvVar(name: string, defaultValue?: string): string {
@@ -101,6 +104,9 @@ export const config: Config = {
   webSearchService: {
     url: getEnvVar('WEB_SEARCH_SERVICE_URL', 'http://web-search-service.web-search.svc.cluster.local:3003'),
     enabled: getEnvVar('WEB_SEARCH_ENABLED', 'true') === 'true',
+  },
+  coder: {
+    model: getEnvVar('CODER_MODEL', 'petedio-coder'),
   },
 };
 

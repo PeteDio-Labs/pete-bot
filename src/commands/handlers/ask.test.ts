@@ -3,12 +3,13 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 import type { OllamaClient } from '../../ai/OllamaClient.js';
 import type { ToolExecutionRecord } from '../../ai/types.js';
 
-// Mock ToolExecutor module
+// Must be declared before vi.mock so the hoisted factory can close over it
 const mockProcessMessage = vi.fn();
+
 vi.mock('../../ai/ToolExecutor.js', () => ({
-  ToolExecutor: vi.fn().mockImplementation(() => ({
-    processMessage: mockProcessMessage,
-  })),
+  ToolExecutor: class {
+    processMessage = mockProcessMessage;
+  },
 }));
 
 // Mock utils
