@@ -107,12 +107,12 @@ describe('triageEvent', () => {
   });
 
   it('should return null for unmapped event types', async () => {
-    const event: InfraEvent = {
+    const event = {
       source: 'unknown',
       type: 'whatever',
       severity: 'warning',
       message: 'Something happened',
-    };
+    } as unknown as InfraEvent;
     const result = await triageEvent(event, mockClient());
     expect(result).toBeNull();
   });
