@@ -73,7 +73,7 @@ export function buildEventEmbed(event: InfraEvent, dedupCount?: number): EmbedBu
   }
 
   // Footer with source and dedup count
-  const footerParts = [event.source];
+  const footerParts: string[] = [event.source];
   if (dedupCount && dedupCount > 1) {
     footerParts.push(`${dedupCount} events in last 60s`);
   }
@@ -205,7 +205,7 @@ export function startEventStream(
     },
     onEvent: (data: unknown) => {
       const raw = data as { type?: string } & Partial<InfraEvent>;
-      if (raw.type === 'connected') return;
+      if ((data as { type?: string }).type === 'connected') return;
 
       const event = raw as InfraEvent;
       sseEventsReceived.inc({
