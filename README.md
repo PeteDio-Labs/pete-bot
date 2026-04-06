@@ -1,4 +1,4 @@
-# Discord Bot
+# Pete Bot
 
 Ollama-powered AI Discord bot for PeteDio homelab. Provides slash commands with an extensible tool-calling loop for infrastructure management, search, and general queries. Responses are delivered via DM.
 
@@ -112,4 +112,4 @@ src/
 
 ## Deployment
 
-Pushed to `docker.toastedbytes.com/discord-bot` via GitHub Actions. ArgoCD Image Updater handles digest bumps. K8s manifests live in `discord-bot-gitops`.
+Pushed to `docker.toastedbytes.com/pete-bot` via GitHub Actions. ArgoCD Image Updater handles digest pinning. K8s manifests live in `infrastructure/kubernetes/mission-control`. Deployed in `mission-control` namespace.
