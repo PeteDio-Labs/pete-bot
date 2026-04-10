@@ -5,7 +5,7 @@
     "": {
       "name": "discord-ai-bot",
       "dependencies": {
-        "@petedio/shared": "workspace:../../../packages/shared",
+        "@petedio/shared": "^1.0.2",
         "discord.js": "^14.16.0",
         "dotenv": "^16.4.0",
         "ollama": "^0.5.0",
@@ -24,16 +24,6 @@
         "typescript": "^5.6.0",
         "typescript-eslint": "^8.0.0",
         "vitest": "^4.0.18",
-      },
-    },
-    "../../../packages/shared": {
-      "name": "@petedio/shared",
-      "dependencies": {
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "^5",
       },
     },
   },
@@ -136,7 +126,7 @@
 
     "@paralleldrive/cuid2": ["@paralleldrive/cuid2@2.3.1", "", { "dependencies": { "@noble/hashes": "^1.1.5" } }, "sha512-XO7cAxhnTZl0Yggq6jOgjiOHhbgcO4NqFqwSmQpjK3b6TEE6Uj/jfSk6wzYyemh3+I0sHirKSetjQwn5cZktFw=="],
 
-    "@petedio/shared": ["@petedio/shared@workspace:../../../packages/shared"],
+    "@petedio/shared": ["@petedio/shared@1.0.2", "https://registry.toastedbytes.com/repository/npm-group/@petedio/shared/-/shared-1.0.2.tgz", { "dependencies": { "zod": "^4.3.6" } }, "sha512-u5Nr7A2qmIVuJ7NZ+D98tr+FV/ydgpC8EuRNe6sBIUVC+8rw99F1BWoxInq27uO0Zkaq7Yfd0hwEYZGUzYi2GQ=="],
 
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 
