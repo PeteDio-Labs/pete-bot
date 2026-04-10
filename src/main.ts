@@ -52,7 +52,7 @@ client.on('error', (error) => {
   discordBotUp.set(0);
 });
 
-client.on('interactionCreate', createInteractionHandler(config.discord.allowedUsers));
+client.on('interactionCreate', createInteractionHandler());
 
 export async function start(): Promise<void> {
   logger.info(`Starting Pete Bot v${VERSION}`);

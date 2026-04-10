@@ -4,9 +4,7 @@ import { handleHelpCommand } from '../commands/handlers/index.js';
 import { discordMessagesProcessed, discordRequestDuration } from '../metrics/index.js';
 import { logger } from '../utils/index.js';
 
-export function createInteractionHandler(
-  _allowedUsers: string[],
-): (interaction: Interaction) => Promise<void> {
+export function createInteractionHandler(): (interaction: Interaction) => Promise<void> {
   return async function handleInteraction(interaction: Interaction): Promise<void> {
     if (!interaction.isChatInputCommand()) return;
 
