@@ -123,10 +123,12 @@ export function startEventStream(
       seen.set(key, Date.now());
 
       // DM owner on critical/warning events and all agent results
+      // Cast source to string: 'agent' is a valid runtime source emitted by MC Backend
+      // even if older versions of @petedio/shared don't include it in EventSource.
       const shouldDM =
         event.severity === 'critical' ||
         event.severity === 'warning' ||
-        event.source === 'agent';
+        (event.source as string) === 'agent';
 
       if (shouldDM) {
         void sendDM(client, ownerUserId, event);
