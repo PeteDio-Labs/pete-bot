@@ -139,9 +139,9 @@ async function sendCriticalDM(
         const triageEmbed = buildTriageEmbed(report);
         const triageMessage = await alertMessage.reply({ embeds: [triageEmbed] });
 
-        // Propose remediation if triage suggests one
+        // Propose or auto-execute remediation if triage suggests one
         if (report.remediationAction) {
-          await proposeRemediation(triageMessage, event, report);
+          await proposeRemediation(triageMessage, event, report, mcClient, client, ownerUserId);
         }
       }
     }

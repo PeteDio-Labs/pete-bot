@@ -20,6 +20,12 @@ import { logger } from '../utils/index.js';
 import type { TriageReport } from './triageHandler.js';
 import type { InfraEvent } from './eventStream.js';
 
+/**
+ * Actions that are safe to execute automatically without requiring
+ * explicit approval — easily reversible, no data loss risk.
+ */
+const LOW_RISK_ACTIONS = new Set(['sync_app', 'restart_deployment']);
+
 let remediationDb: RemediationDB | null = null;
 
 export function initRemediationDB(dbPath?: string): RemediationDB {
@@ -41,13 +47,21 @@ export function getRemediationDB(): RemediationDB | null {
 }
 
 /**
- * Propose a remediation action to the user via Discord buttons.
- * Posts the triage report embed with Approve/Reject buttons.
+ * Propose or auto-execute a remediation action.
+ *
+ * Low-risk actions (sync_app, restart_deployment) execute immediately and
+ * notify Discord of the result — no buttons, no waiting.
+ *
+ * High-risk actions fall back to the button approval flow (legacy path,
+ * should be migrated to MC Web approval in future).
  */
 export async function proposeRemediation(
   alertMessage: Message,
   event: InfraEvent,
   report: TriageReport,
+  mcClient: MissionControlClient,
+  client: Client,
+  ownerUserId: string,
 ): Promise<void> {
   if (!report.remediationAction || !remediationDb) return;
 
@@ -70,6 +84,42 @@ export async function proposeRemediation(
 
   remediationTasksTotal.inc({ action: task.action, state: 'pending' });
 
+  // Auto-execute low-risk actions immediately — no human approval needed
+  if (LOW_RISK_ACTIONS.has(task.action)) {
+    logger.info(
+      `[Remediation] Auto-executing low-risk action: ${task.action} for ${service}`,
+    );
+    const autoEmbed = new EmbedBuilder()
+      .setColor(0xffa500) // orange — auto action in progress
+      .setTitle('Auto-Remediation Triggered')
+      .setDescription(report.suggestedRemediation ?? `Executing \`${task.action}\``)
+      .addFields(
+        { name: 'Action', value: `\`${task.action}\``, inline: true },
+        {
+          name: 'Parameters',
+          value:
+            Object.entries(task.params)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join('\n') || 'None',
+          inline: true,
+        },
+        { name: 'Mode', value: 'Automatic (low-risk)', inline: true },
+      )
+      .setFooter({ text: `Task ${task.id.slice(0, 8)}` })
+      .setTimestamp();
+
+    await alertMessage.reply({ embeds: [autoEmbed] });
+
+    remediationDb.updateState(task.id, 'approved', { resolvedBy: 'auto' });
+    remediationTasksTotal.inc({ action: task.action, state: 'approved' });
+
+    executeRemediation(task, mcClient, client, ownerUserId).catch((err) => {
+      logger.error('[Remediation] Auto-execution error:', err);
+    });
+    return;
+  }
+
+  // High-risk actions: fall back to Discord button approval (legacy)
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`remediation_approve_${task.id}`)
