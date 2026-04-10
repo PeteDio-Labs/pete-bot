@@ -1,6 +1,2 @@
-// Command handlers barrel export
-export { handleAskCommand } from './ask.js';
-export { handleInfoCommand } from './info.js';
-export { handleToolsCommand } from './tools.js';
+// Command handlers — only /help. Pete Bot is a notification relay.
 export { handleHelpCommand } from './help.js';
-export { handleCodeCommand, handleCodePlanApprove } from './code.js';
