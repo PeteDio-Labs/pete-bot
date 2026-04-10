@@ -16,7 +16,7 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@petedio/shared": "^0.1.0",
+    "@petedio/shared": "workspace:../../../packages/shared",
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.0",
     "ollama": "^0.5.0",

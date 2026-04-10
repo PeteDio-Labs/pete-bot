@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { BaseTool } from './BaseTool.js';
 import type { ToolSchema, ToolResult } from '../ai/types.js';
 
@@ -12,6 +13,7 @@ type RiskTier = 'READ_ONLY' | 'SAFE_MUTATE' | 'DESTRUCTIVE';
 export interface CodeOpsToolArgs {
   action:
     | 'read_file'
+    | 'write_file'
     | 'kubectl_get'
     | 'kubectl_describe'
     | 'kubectl_logs'
@@ -21,9 +23,12 @@ export interface CodeOpsToolArgs {
     | 'gh_pr_list'
     | 'gh_pr_create'
     | 'gh_run_list'
-    | 'gh_run_view';
-  // read_file
+    | 'gh_run_view'
+    | 'git_commit'
+    | 'git_push';
+  // read_file / write_file
   path?: string;
+  content?: string;
   // kubectl
   namespace?: string;
   resource?: string;
@@ -41,12 +46,21 @@ export interface CodeOpsToolArgs {
   head?: string;
   // gh run view
   run_id?: string;
+  // git commit
+  message?: string;
+  paths?: string[];
+  // git push
+  remote?: string;
+  branch?: string;
+  // working directory for git commands (default: workspace root)
+  cwd?: string;
   // DESTRUCTIVE gate
   confirmed?: boolean;
 }
 
 const RISK_MAP: Record<CodeOpsToolArgs['action'], RiskTier> = {
   read_file: 'READ_ONLY',
+  write_file: 'DESTRUCTIVE',
   kubectl_get: 'READ_ONLY',
   kubectl_describe: 'READ_ONLY',
   kubectl_logs: 'READ_ONLY',
@@ -57,6 +71,8 @@ const RISK_MAP: Record<CodeOpsToolArgs['action'], RiskTier> = {
   gh_pr_create: 'DESTRUCTIVE',
   gh_run_list: 'READ_ONLY',
   gh_run_view: 'READ_ONLY',
+  git_commit: 'DESTRUCTIVE',
+  git_push: 'DESTRUCTIVE',
 };
 
 // Allowlist of safe paths for read_file (workspace root and below)
@@ -70,8 +86,10 @@ function truncate(s: string): string {
   return s.slice(0, MAX_OUTPUT_CHARS) + `\n… [truncated ${s.length - MAX_OUTPUT_CHARS} chars]`;
 }
 
-async function run(cmd: string, args: string[], timeoutMs = 15_000): Promise<{ stdout: string; stderr: string }> {
-  const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 });
+const WORKSPACE_ROOT = '/home/pedro/PeteDio-Labs';
+
+async function run(cmd: string, args: string[], timeoutMs = 15_000, cwd?: string): Promise<{ stdout: string; stderr: string }> {
+  const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, cwd });
   return { stdout, stderr };
 }
 
@@ -81,8 +99,9 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
   readonly schema: ToolSchema = {
     name: 'code_ops',
     description:
-      'File reads, kubectl operations, and GitHub CLI commands for code inspection and PR management. ' +
-      'Risk tiers: READ_ONLY (always allowed), SAFE_MUTATE (caution), DESTRUCTIVE (requires confirmed=true from human).',
+      'File reads/writes, git operations, kubectl operations, and GitHub CLI commands for code inspection and modification. ' +
+      'Risk tiers: READ_ONLY (always allowed), SAFE_MUTATE (caution), DESTRUCTIVE (requires confirmed=true from human). ' +
+      'Full self-modification flow: read_file → write_file → git_commit → git_push → gh_pr_create.',
     parameters: {
       type: 'object',
       properties: {
@@ -90,15 +109,20 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
           type: 'string',
           description: 'Operation to perform',
           enum: [
-            'read_file',
+            'read_file', 'write_file',
             'kubectl_get', 'kubectl_describe', 'kubectl_logs', 'kubectl_exec',
             'kubectl_apply', 'kubectl_delete',
             'gh_pr_list', 'gh_pr_create', 'gh_run_list', 'gh_run_view',
+            'git_commit', 'git_push',
           ],
         },
         path: {
           type: 'string',
-          description: 'Absolute file path to read (read_file). Must be within /home/pedro/PeteDio-Labs.',
+          description: 'Absolute file path (read_file / write_file). Must be within /home/pedro/PeteDio-Labs.',
+        },
+        content: {
+          type: 'string',
+          description: 'File content to write (write_file). Overwrites the file entirely.',
         },
         namespace: {
           type: 'string',
@@ -153,9 +177,30 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
           type: 'string',
           description: 'GitHub Actions run ID (gh_run_view)',
         },
+        message: {
+          type: 'string',
+          description: 'Commit message (git_commit)',
+        },
+        paths: {
+          type: 'array',
+          description: 'Files to stage before committing (git_commit). Defaults to all changes (".") if omitted.',
+          items: { type: 'string', description: 'file path relative to cwd' },
+        },
+        remote: {
+          type: 'string',
+          description: 'Git remote name (git_push, default: origin)',
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch to push (git_push). Uses current branch if omitted.',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory for git commands (default: /home/pedro/PeteDio-Labs)',
+        },
         confirmed: {
           type: 'boolean',
-          description: 'Must be true for DESTRUCTIVE actions (kubectl_apply, kubectl_delete, gh_pr_create). Human must explicitly confirm.',
+          description: 'Must be true for DESTRUCTIVE actions (write_file, kubectl_apply, kubectl_delete, gh_pr_create, git_commit, git_push). Human must explicitly confirm.',
         },
       },
       required: ['action'],
@@ -176,6 +221,8 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
       switch (args.action) {
         case 'read_file':
           return await this.handleReadFile(args.path);
+        case 'write_file':
+          return await this.handleWriteFile(args.path, args.content);
         case 'kubectl_get':
           return await this.handleKubectlGet(args.resource, args.namespace, args.name);
         case 'kubectl_describe':
@@ -196,6 +243,10 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
           return await this.handleGhRunList(args.repo);
         case 'gh_run_view':
           return await this.handleGhRunView(args.run_id, args.repo);
+        case 'git_commit':
+          return await this.handleGitCommit(args.message, args.paths, args.cwd);
+        case 'git_push':
+          return await this.handleGitPush(args.remote, args.branch, args.cwd);
         default:
           return { success: false, error: `Unknown action: ${args.action}` };
       }
@@ -314,6 +365,47 @@ export class CodeOpsTool extends BaseTool<CodeOpsToolArgs> {
     if (repo) args.push('--repo', repo);
     const { stdout } = await run('gh', args, 30_000);
     return { success: true, action: 'gh_run_view', run_id: runId, output: truncate(stdout) };
+  }
+
+  // ── FILE WRITE ─────────────────────────────────────────────
+
+  private async handleWriteFile(path?: string, content?: string): Promise<ToolResult> {
+    if (!path) return { success: false, error: 'path is required for write_file' };
+    if (content === undefined) return { success: false, error: 'content is required for write_file' };
+
+    const allowed = ALLOWED_READ_PREFIXES.some((prefix) => path.startsWith(prefix));
+    if (!allowed) {
+      return { success: false, error: `Path "${path}" is outside allowed write area. Only paths under /home/pedro/PeteDio-Labs are permitted.` };
+    }
+
+    if (path.includes('..')) {
+      return { success: false, error: 'Path traversal (../) is not allowed' };
+    }
+
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, content, 'utf-8');
+    return { success: true, action: 'write_file', path, bytes_written: Buffer.byteLength(content, 'utf-8') };
+  }
+
+  // ── GIT ────────────────────────────────────────────────────
+
+  private async handleGitCommit(message?: string, paths?: string[], cwd?: string): Promise<ToolResult> {
+    if (!message) return { success: false, error: 'message is required for git_commit' };
+
+    const workDir = cwd ?? WORKSPACE_ROOT;
+    const stagePaths = paths && paths.length > 0 ? paths : ['.'];
+
+    await run('git', ['add', ...stagePaths], 15_000, workDir);
+    const { stdout } = await run('git', ['commit', '-m', message], 15_000, workDir);
+    return { success: true, action: 'git_commit', message, paths: stagePaths, output: truncate(stdout) };
+  }
+
+  private async handleGitPush(remote = 'origin', branch?: string, cwd?: string): Promise<ToolResult> {
+    const workDir = cwd ?? WORKSPACE_ROOT;
+    const args = ['push', remote];
+    if (branch) args.push(branch);
+    const { stdout, stderr } = await run('git', args, 30_000, workDir);
+    return { success: true, action: 'git_push', remote, branch, output: truncate(stdout || stderr) };
   }
 }
 

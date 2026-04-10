@@ -70,14 +70,47 @@ Rules:
 - Set confirmed=true in args for all DESTRUCTIVE steps (human button approval IS the gate)
 - Keep plans short — 3-8 steps max
 - For file reads use action: "read_file" with the absolute path
+- For file writes use action: "write_file" with path and content (DESTRUCTIVE)
 - For kubectl reads use action: "kubectl_get" / "kubectl_logs" / "kubectl_describe"
 - For PR creation use action: "gh_pr_create" with repo, title, body, base, head
+- For git: use action: "git_commit" (message, optional paths[]) then "git_push" (optional remote, branch)
+- Full self-modification flow: read_file → write_file → git_commit → git_push → gh_pr_create
 
 Example output:
 [
   {"step":1,"description":"Read current pipeline config","tool":"code_ops","args":{"action":"read_file","path":"/home/pedro/PeteDio-Labs/apps/blog/blog-agent/src/services/pipeline.ts"},"risk_tier":"READ_ONLY"},
-  {"step":2,"description":"Check recent pod logs","tool":"code_ops","args":{"action":"kubectl_logs","namespace":"blog-dev","name":"blog-agent","lines":50},"risk_tier":"READ_ONLY"}
+  {"step":2,"description":"Write updated pipeline config","tool":"code_ops","args":{"action":"write_file","path":"/home/pedro/PeteDio-Labs/apps/blog/blog-agent/src/services/pipeline.ts","content":"...","confirmed":true},"risk_tier":"DESTRUCTIVE"},
+  {"step":3,"description":"Commit changes","tool":"code_ops","args":{"action":"git_commit","message":"fix: update pipeline config","paths":["apps/blog/blog-agent/src/services/pipeline.ts"],"confirmed":true},"risk_tier":"DESTRUCTIVE"},
+  {"step":4,"description":"Push to remote","tool":"code_ops","args":{"action":"git_push","remote":"origin","branch":"develop","confirmed":true},"risk_tier":"DESTRUCTIVE"}
 ]`;
+
+// ── Model Routing ──────────────────────────────────────────────────────────────
+// Simple read/query tasks use the lighter 2B variant to save GPU time.
+// Complex mutation/investigation tasks use the full 4B model for quality.
+
+const COMPLEX_KEYWORDS = ['fix', 'implement', 'add', 'refactor', 'debug', 'write', 'create',
+  'update', 'migrate', 'deploy', 'build', 'change', 'modify', 'setup', 'configure', 'remove',
+  'delete', 'replace', 'integrate', 'wire', 'connect'];
+
+const SIMPLE_KEYWORDS = ['read', 'check', 'list', 'show', 'what', 'how', 'describe', 'get',
+  'status', 'view', 'find', 'inspect', 'look', 'is', 'are', 'does', 'which'];
+
+export function classifyTaskComplexity(task: string): 'simple' | 'complex' {
+  const lower = task.toLowerCase();
+  if (COMPLEX_KEYWORDS.some((k) => lower.includes(k))) return 'complex';
+  if (SIMPLE_KEYWORDS.some((k) => lower.split(/\s+/).includes(k))) return 'simple';
+  return task.length > 120 ? 'complex' : 'simple';
+}
+
+export function resolveCoderModel(task: string, baseModel: string): string {
+  // Only apply routing if using the default 4B model
+  if (!baseModel.includes('e4b') && !baseModel.includes('4b')) return baseModel;
+  const complexity = classifyTaskComplexity(task);
+  if (complexity === 'simple') {
+    return baseModel.replace('e4b', 'e2b').replace(':4b', ':2b');
+  }
+  return baseModel;
+}
 
 export async function generatePlan(task: string, ollamaHost: string, coderModel: string): Promise<CodePlan> {
   pruneExpired();
@@ -88,10 +121,11 @@ export async function generatePlan(task: string, ollamaHost: string, coderModel:
     { role: 'user', content: `Task: ${task}` },
   ];
 
-  logger.info(`[CodePlan] Generating plan for: "${task.substring(0, 80)}"`);
+  const resolvedModel = resolveCoderModel(task, coderModel);
+  logger.info(`[CodePlan] Generating plan for: "${task.substring(0, 80)}" (model: ${resolvedModel})`);
 
   const response = await client.chat({
-    model: coderModel,
+    model: resolvedModel,
     messages,
     stream: false,
   });
