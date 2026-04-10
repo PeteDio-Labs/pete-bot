@@ -1,10 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
-// Mock the metrics before importing the module
-vi.mock('../metrics/index.js', () => ({
-  healthPollerRuns: { inc: vi.fn() },
-  healthPollerEventsPublished: { inc: vi.fn() },
-}));
+// No metrics mock needed — these tests only verify the module exports a
+// function and don't exercise any metrics paths, so using the real module
+// avoids polluting the shared bun module registry for other test files.
 
 // We test the polling logic indirectly by checking publish calls
 // since startHealthPoller uses setInterval (hard to test directly)
