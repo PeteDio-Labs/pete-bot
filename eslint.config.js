@@ -6,5 +6,16 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     ignores: ['dist/**', 'node_modules/**']
+  },
+  {
+    // Match mc-backend's convention: _-prefixed args are intentionally unused
+    // (Express error middleware needs the 4-arg signature; metadata helpers
+    // accept-but-ignore positional params; etc.).
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+      ]
+    }
   }
 );
