@@ -6,6 +6,8 @@ interface Config {
     token: string;
     clientId: string;
     allowedUsers: string[];
+    /** Channel ID where PB v2 Plan notifications are posted. Required if httpServer is enabled. */
+    notifyChannelId: string;
   };
   metrics: {
     enabled: boolean;
@@ -19,6 +21,15 @@ interface Config {
     enabled: boolean;
     ownerUserId: string;
     dedupWindowMs: number;
+  };
+  /** PB.6 — HTTP server for MC → Pete Bot notify + edit-message + future webhooks. */
+  httpServer: {
+    enabled: boolean;
+    port: number;
+    /** Shared HMAC secret matching MC Backend's PETE_BOT_HMAC_SECRET (SEC.3 sealed). */
+    hmacSecret: string;
+    /** Reject inbound timestamps older than this many ms (replay protection). */
+    replayWindowMs: number;
   };
 }
 
@@ -40,6 +51,7 @@ export const config: Config = {
     token: getEnvVar('DISCORD_TOKEN'),
     clientId: getEnvVar('DISCORD_CLIENT_ID'),
     allowedUsers: parseAllowedUsers(process.env.ALLOWED_USER_IDS),
+    notifyChannelId: getEnvVar('NOTIFY_CHANNEL_ID', ''),
   },
   metrics: {
     enabled: getEnvVar('METRICS_ENABLED', 'true') === 'true',
@@ -56,6 +68,12 @@ export const config: Config = {
     enabled: getEnvVar('EVENT_STREAM_ENABLED', 'true') === 'true',
     ownerUserId: getEnvVar('OWNER_USER_ID', ''),
     dedupWindowMs: parseInt(getEnvVar('DEDUP_WINDOW_MS', '60000'), 10),
+  },
+  httpServer: {
+    enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',
+    port: parseInt(getEnvVar('HTTP_SERVER_PORT', '3015'), 10),
+    hmacSecret: getEnvVar('PETE_BOT_HMAC_SECRET', ''),
+    replayWindowMs: parseInt(getEnvVar('HTTP_REPLAY_WINDOW_MS', '300000'), 10),
   },
 };
 

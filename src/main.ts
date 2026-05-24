@@ -10,9 +10,11 @@ import { config } from './config.js';
 import { registerCommands } from './commands/registerCommands.js';
 import { createInteractionHandler } from './events/interactionCreate.js';
 import { startMetricsServer } from './metrics/server.js';
+import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
 import { logger } from './utils/index.js';
 import { startEventStream } from './listeners/eventStream.js';
+import { startExpirySweep } from './listeners/expirySweep.js';
 import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
@@ -39,6 +41,16 @@ client.once('clientReady', async () => {
     logger.debug('[EventStream] Disabled');
   }
 
+  // PB.8 — Plan expiry sweep. Same gate as the HTTP server because the
+  // sweep depends on messageCache (populated by /v1/notify) to know which
+  // Discord messages to edit. With HTTP off there are no cached messages
+  // and the sweep would no-op every tick anyway.
+  if (config.httpServer.enabled) {
+    startExpirySweep(client, { mcBackendUrl: config.missionControl.url });
+  } else {
+    logger.debug('[ExpirySweep] Disabled (httpServer is off)');
+  }
+
   logger.info(`Pete Bot v${VERSION} ready — notification relay only`);
 });
 
@@ -63,6 +75,21 @@ export async function start(): Promise<void> {
       logger.info(`[Metrics] Listening on port ${config.metrics.port}`);
     } catch (error) {
       logger.error('[Metrics] Failed to start server:', error);
+    }
+  }
+
+  // PB.6: HTTP server for MC → Pete Bot calls (/v1/notify, /v1/edit-message).
+  // Started BEFORE Discord login so the Client is ready (.channels.fetch works
+  // only after login — but the server only accepts traffic once health passes,
+  // and the routes themselves await client.channels.fetch which queues until
+  // ready. Express on a separate port doesn't depend on Discord readiness for
+  // /health, so the K8s readiness probe can pass independently.
+  if (config.httpServer.enabled) {
+    try {
+      await startHttpServer(client);
+      logger.info(`[HTTP] Listening on port ${config.httpServer.port}`);
+    } catch (error) {
+      logger.error('[HTTP] Failed to start server:', error);
     }
   }
 

@@ -112,4 +112,4 @@ src/
 
 ## Deployment
 
-Pushed to `docker.toastedbytes.com/pete-bot` via GitHub Actions. ArgoCD Image Updater handles digest pinning. K8s manifests live in `infrastructure/kubernetes/mission-control`. Deployed in `mission-control` namespace.
+Pushed to `docker.pdlab.dev/pete-bot` via GitHub Actions. ArgoCD Image Updater handles digest pinning. K8s manifests live in `infrastructure/kubernetes/mission-control`. Deployed in `mission-control` namespace.
