@@ -3,15 +3,15 @@
  *
  * Express app on port 3015 (configurable). Routes:
  *   GET  /health           — liveness + readiness probe (no auth)
- *   POST /v1/notify        — render + post a fresh Plan (HMAC verified)
- *   POST /v1/edit-message  — edit a previously-posted Plan message (HMAC verified)
+ *   POST /v1/alert         — Uptime Kuma webhook → the owner's DM (bearer token)
  *
  * Kept separate from the metrics server (port 9090) so:
  *   - Prometheus can scrape /metrics on a port unaffected by app traffic
  *   - K8s NetworkPolicy can scope MC→Pete Bot traffic to 3015 only
  *   - Outage in app server doesn't affect metrics scraping
  *
- * Auth: every /v1/* route runs through hmacVerify with PETE_BOT_HMAC_SECRET.
+ * Auth: /v1/alert checks a bearer token. HMAC is gone with the Mission Control
+ * routes it protected — Kuma cannot sign a body, so it could never have used it.
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
@@ -19,9 +19,7 @@ import type { Server } from 'node:http';
 import type { Client } from 'discord.js';
 import { config } from '../config.js';
 import { logger } from '../utils/index.js';
-import { hmacVerify } from './middleware/hmac.js';
-import { createNotifyHandler } from './routes/notify.js';
-import { createEditMessageHandler } from './routes/editMessage.js';
+import { createAlertHandler } from './routes/alert.js';
 import { cacheSize } from './messageCache.js';
 
 let server: Server | null = null;
@@ -55,14 +53,12 @@ export async function startHttpServer(client: Client): Promise<Server> {
     });
   });
 
-  // ── HMAC-protected app routes ────────────────────────────────────
-  const hmac = hmacVerify({
-    secret: config.httpServer.hmacSecret,
-    replayWindowMs: config.httpServer.replayWindowMs,
-  });
-
-  app.post('/v1/notify', hmac, createNotifyHandler(client));
-  app.post('/v1/edit-message', hmac, createEditMessageHandler(client));
+  // ── Alert intake, bearer-gated rather than HMAC ──────────────────
+  // Uptime Kuma's generic webhook cannot sign a body, so hmacVerify cannot gate the
+  // route it posts to. The handler checks a bearer token itself. Keep it off the
+  // `hmac` chain deliberately; do not "fix" this by adding hmac and wondering why
+  // Kuma 401s.
+  app.post('/v1/alert', createAlertHandler(client));
 
   // ── 404 ─────────────────────────────────────────────────────────
   app.use((req, res) => {

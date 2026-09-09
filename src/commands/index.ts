@@ -1,4 +1,3 @@
-// Commands module barrel export
+// Commands. One: /ask, forwarded to mtrace.
+export { allCommands, askCommand } from './definitions/index.js';
 export { registerCommands } from './registerCommands.js';
-export * from './definitions/index.js';
-export * from './handlers/index.js';
