@@ -2,8 +2,15 @@
 
 A Discord surface for the PeteDio homelab. It holds no tools of its own.
 
-**`/ask <question>`** forwards to [mtrace](https://github.com/PeteDio-Labs/petedio-media-control)
-on media-dash-237 and renders the answer. mtrace owns the tool set and the routing,
+**Type at it in the DM, or use `/ask <question>`.** Either forwards to
+[mtrace](https://github.com/PeteDio-Labs/petedio-media-control) on media-dash-237 and
+renders the answer.
+
+> ⚠ **Plain messages need the Message Content intent**, which is privileged: enable it in
+> the Developer Portal under **Bot → Privileged Gateway Intents**. Requesting it while it
+> is disabled makes login fail outright, which the deploy's login check catches. With it
+> off but not requested, `content` arrives empty and the bot appears to ignore you —
+> which is why it answers that case explicitly instead of staying quiet. mtrace owns the tool set and the routing,
 including the deterministic keyword router that answers when Ollama is unreachable — so
 the CLI and Discord cannot disagree about the same stack.
 
