@@ -1,0 +1,128 @@
+# CD — deploy on merge.
+#
+# On push to main the self-hosted homelab runner compiles the standalone binary and
+# deploys it to media-dash-237 by running petedio-iac's configure-pete-bot.yml.
+#
+# ⚠ THE vault-action BLOCK BELOW IS COPIED FROM petedio-water-fast's deploy.yml, NOT
+# written from the role's requirements. PET-355 spent six merge-and-watch cycles on a
+# block written the other way: it omitted `path` and `jwtGithubAudience`, and both
+# failures returned a byte-identical `permission denied` that pointed at the Vault role
+# rather than the request. If you change this block, diff it against that file again.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-pete-bot # serialize deploys against LXC 237
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # mint the GitHub OIDC token vault-action exchanges for a Vault token
+
+jobs:
+  deploy:
+    # ⚠ PIN x64. [self-hosted, homelab] also matches pete-pi-1, which is arm64. A run
+    # there fails on the docker socket — and that is the lucky outcome, because this job
+    # COMPILES the binary on the runner and 237 is amd64, so an arm64 build would install
+    # cleanly and never execute.
+    runs-on: [self-hosted, linux, x64, homelab]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pete-bot
+
+      # The play lives in petedio-iac, where it is reviewed and where the operator's own
+      # scripts/deploy-pete-bot.sh runs the identical thing by hand.
+      - uses: actions/checkout@v4
+        with:
+          repository: PeteDio-Labs/petedio-iac
+          path: iac
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Compile the standalone binary
+        working-directory: pete-bot
+        run: |
+          bun install --frozen-lockfile
+          bun run build:binary
+          test -x dist/pete-bot
+          file dist/pete-bot | grep -qi 'x86-64\|x86_64'
+
+      # vault-action's caCertificate wants BASE64-encoded PEM and cannot read a file.
+      - name: Encode Vault CA
+        id: vault_ca
+        working-directory: iac/environments/homelab
+        run: echo "b64=$(base64 -w0 vault-ca.crt)" >> "$GITHUB_OUTPUT"
+
+      - name: Vault — SSH key + app secrets via OIDC
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          secrets: |
+            kv/data/iac/lxc-ssh private_key | LXC_SSH_KEY ;
+            kv/data/services/pete-bot discord_token | PB_TOKEN ;
+            kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
+            kv/data/services/pete-bot owner_user_id | PB_OWNER ;
+            kv/data/services/pete-bot alert_bearer_token | PB_BEARER ;
+            kv/data/services/media/dashboard api_token | MTRACE_TOKEN
+
+      - name: Stage the secrets as files, never as arguments
+        run: |
+          umask 077
+          printf '%s\n' "$LXC_SSH_KEY" > "$RUNNER_TEMP/lxc_ssh_key"
+          python3 - <<'PY'
+          import json, os
+          json.dump({
+              "pete_bot_binary_src":        os.environ["BIN"],
+              "pete_bot_discord_token":     os.environ["PB_TOKEN"],
+              "pete_bot_discord_client_id": os.environ["PB_CLIENT"],
+              "pete_bot_owner_user_id":     os.environ["PB_OWNER"],
+              "pete_bot_alert_bearer":      os.environ["PB_BEARER"],
+              "pete_bot_mtrace_token":      os.environ["MTRACE_TOKEN"],
+              "ansible_ssh_private_key_file": "/key",
+          }, open(os.environ["OUT"], "w"))
+          PY
+        env:
+          OUT: ${{ runner.temp }}/extra.json
+          BIN: /src/dist/pete-bot
+
+      # ⚠ -i POINTS AT THE DIRECTORY. media_dash lives in inventory/media-dash.yml, split
+      # out so an unrelated edit cannot redeploy it. hosts.yml does not carry that group,
+      # and ansible-playbook exits 0 on no-hosts-matched — a green deploy that installed
+      # nothing. PET-302 is that incident; the guard below is its fix.
+      #
+      # ⚠ python:3.12-slim from Docker Hub, NOT docker.pdlab.dev. registry-106 will not
+      # restore, so a private image cannot be pulled and is cached on neither runner.
+      - name: Deploy to media-dash-237
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/iac:/iac:ro" \
+            -v "$PWD/pete-bot:/src:ro" \
+            -v "$RUNNER_TEMP/lxc_ssh_key:/key:ro" \
+            -v "$RUNNER_TEMP/extra.json:/extra.json:ro" \
+            -w /iac/ansible \
+            -e ANSIBLE_HOST_KEY_CHECKING=False \
+            python:3.12-slim sh -c \
+            "apt-get update -q >/dev/null && apt-get install -y -q openssh-client rsync >/dev/null && \
+             pip install -q ansible-core && \
+             ansible-galaxy collection install community.general ansible.posix && \
+             if ansible-playbook -i inventory/ playbooks/configure-pete-bot.yml --list-hosts | grep -q 'hosts (0):'; then \
+               echo '::error title=deploy::No hosts matched. The inventory does not carry media_dash.'; exit 1; \
+             fi && \
+             ansible-playbook -i inventory/ playbooks/configure-pete-bot.yml -e @/extra.json"
+
+      # No off-box health check. The play already proves more from the target: it waits
+      # on /health AND greps the journal for 'logged in as', which is what a bad token or
+      # a revoked app breaks while /health stays perfectly green.
