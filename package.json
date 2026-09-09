@@ -17,7 +17,6 @@
     "build:binary": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/pete-bot"
   },
   "dependencies": {
-    "@petedio/shared": "^1.0.2",
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.0",
     "express": "^4.22.1",
