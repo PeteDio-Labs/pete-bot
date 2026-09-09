@@ -12,6 +12,8 @@ import { config } from '../config.js';
 export interface AskResult {
   text: string;
   routedBy?: string;
+  /** Split by mtrace, not summed: a slow route and a slow tool have different causes. */
+  timing?: { routeMs?: number; toolMs?: number; totalMs?: number };
 }
 
 export async function ask(question: string): Promise<AskResult> {
@@ -33,8 +35,14 @@ export async function ask(question: string): Promise<AskResult> {
     throw new Error(`mtrace returned ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = (await res.json()) as { result?: { text?: string }; text?: string; routed_by?: string };
-  const text = data.result?.text ?? data.text;
+  const data = (await res.json()) as {
+    result?: { text?: string; via?: string; timing?: AskResult['timing'] };
+    text?: string;
+    via?: string;
+    timing?: AskResult['timing'];
+  };
+  const inner = data.result ?? data;
+  const text = inner.text;
   if (!text) throw new Error('mtrace returned no text');
-  return { text, routedBy: data.routed_by };
+  return { text, routedBy: inner.via, timing: inner.timing };
 }
