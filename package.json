@@ -13,7 +13,8 @@
     "clean": "rm -rf dist",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "build:binary": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/pete-bot"
   },
   "dependencies": {
     "@petedio/shared": "^1.0.2",
