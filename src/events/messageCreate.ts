@@ -17,6 +17,7 @@ import { ChannelType, EmbedBuilder } from 'discord.js';
 import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { ask } from '../clients/mtraceClient.js';
+import { footer } from '../utils/footer.js';
 
 const COLOR_OK = 0x57f287;
 const COLOR_ERR = 0xed4245;
@@ -45,11 +46,12 @@ export function createMessageHandler(_client: Client) {
     await message.channel.sendTyping().catch(() => {});
 
     try {
-      const { text, routedBy } = await ask(question);
+      const { text, routedBy, timing } = await ask(question);
       const embed = new EmbedBuilder()
         .setColor(COLOR_OK)
         .setDescription(text.length > 4000 ? `${text.slice(0, 3997)}...` : text);
-      if (routedBy) embed.setFooter({ text: `routed by ${routedBy}` });
+      const f = footer(routedBy, timing);
+      if (f) embed.setFooter({ text: f });
       await message.reply({ embeds: [embed] });
       logger.info(`DM answered (${text.length} chars, routed by ${routedBy ?? 'unknown'})`);
     } catch (err) {
