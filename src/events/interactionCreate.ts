@@ -27,6 +27,10 @@ function authorised(interaction: ChatInputCommandInteraction): boolean {
 
 async function handleAsk(interaction: ChatInputCommandInteraction): Promise<void> {
   const question = interaction.options.getString('question', true);
+  // ⚠ LOG THE SUCCESS PATH TOO. Logging only failures makes a working /ask
+  // indistinguishable from one that never arrived — which cost a round of guessing at
+  // whether Discord had delivered the interaction at all. Say what was asked.
+  logger.info(`/ask: ${question.slice(0, 120)}`);
 
   // Ephemeral: the answer describes internal infrastructure, and a user-installed app
   // can be invoked in someone else's server where that should not be readable.
@@ -39,6 +43,7 @@ async function handleAsk(interaction: ChatInputCommandInteraction): Promise<void
       .setDescription(text.length > 4000 ? `${text.slice(0, 3997)}...` : text);
     if (routedBy) embed.setFooter({ text: `routed by ${routedBy}` });
     await interaction.editReply({ embeds: [embed] });
+    logger.info(`/ask answered (${text.length} chars, routed by ${routedBy ?? 'unknown'})`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error('/ask failed:', message);

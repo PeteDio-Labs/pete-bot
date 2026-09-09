@@ -9,10 +9,11 @@
  * It holds no tools of its own. The Mission Control, ArgoCD and Kubernetes clients
  * this started as are gone with the cluster they queried.
  */
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { config } from './config.js';
 import { registerCommands } from './commands/registerCommands.js';
 import { createInteractionHandler } from './events/interactionCreate.js';
+import { createMessageHandler } from './events/messageCreate.js';
 import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
@@ -21,8 +22,20 @@ import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
 
+// ⚠ MessageContent IS PRIVILEGED. It must be enabled in the Developer Portal under
+// Bot → Privileged Gateway Intents, or login fails outright with a disallowed-intents
+// error. That failure is loud and the deploy's login check catches it.
+//
+// ⚠ Partials.Channel IS REQUIRED FOR DMs. Without it discord.js drops messageCreate for
+// a DM channel it has not cached, which for an app that lives only in DMs means it
+// silently receives nothing — the failure looks exactly like the intent being off.
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+  partials: [Partials.Channel, Partials.Message],
 });
 
 client.once('clientReady', async () => {
@@ -35,7 +48,7 @@ client.once('clientReady', async () => {
 
   await registerCommands();
 
-  logger.info(`Pete Bot v${VERSION} ready — /ask and /v1/alert`);
+  logger.info(`Pete Bot v${VERSION} ready — /ask, plain DMs, and /v1/alert`);
 });
 
 client.on('disconnect', () => {
@@ -49,6 +62,7 @@ client.on('error', (error) => {
 });
 
 client.on('interactionCreate', createInteractionHandler());
+client.on('messageCreate', createMessageHandler(client));
 
 export async function start(): Promise<void> {
   logger.info(`Starting Pete Bot v${VERSION}`);
