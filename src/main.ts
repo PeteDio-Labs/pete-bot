@@ -1,9 +1,13 @@
 /**
- * Pete Bot — Discord notification relay.
+ * Pete Bot — a Discord surface for the homelab, and nothing more.
  *
- * Connects to MC Backend's SSE stream and DMs the owner on critical/warning
- * infrastructure events and agent completions. No AI, no tools, no slash
- * command execution — Mission Control is the brain, agents do the work.
+ * Two jobs. /ask forwards a question to mtrace on media-dash-237 and renders the
+ * answer; mtrace owns the tool set and the routing, including the keyword fallback
+ * that answers when Ollama is down. POST /v1/alert takes an Uptime Kuma webhook and
+ * puts it in the owner's DM, editing the original message on recovery.
+ *
+ * It holds no tools of its own. The Mission Control, ArgoCD and Kubernetes clients
+ * this started as are gone with the cluster they queried.
  */
 import { Client, GatewayIntentBits } from 'discord.js';
 import { config } from './config.js';
@@ -13,8 +17,6 @@ import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
 import { logger } from './utils/index.js';
-import { startEventStream } from './listeners/eventStream.js';
-import { startExpirySweep } from './listeners/expirySweep.js';
 import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
@@ -33,25 +35,7 @@ client.once('clientReady', async () => {
 
   await registerCommands();
 
-  if (config.eventStream.enabled) {
-    startEventStream(client, config.missionControl.url, config.eventStream.ownerUserId, {
-      dedupWindowMs: config.eventStream.dedupWindowMs,
-    });
-  } else {
-    logger.debug('[EventStream] Disabled');
-  }
-
-  // PB.8 — Plan expiry sweep. Same gate as the HTTP server because the
-  // sweep depends on messageCache (populated by /v1/notify) to know which
-  // Discord messages to edit. With HTTP off there are no cached messages
-  // and the sweep would no-op every tick anyway.
-  if (config.httpServer.enabled) {
-    startExpirySweep(client, { mcBackendUrl: config.missionControl.url });
-  } else {
-    logger.debug('[ExpirySweep] Disabled (httpServer is off)');
-  }
-
-  logger.info(`Pete Bot v${VERSION} ready — notification relay only`);
+  logger.info(`Pete Bot v${VERSION} ready — /ask and /v1/alert`);
 });
 
 client.on('disconnect', () => {
@@ -78,7 +62,7 @@ export async function start(): Promise<void> {
     }
   }
 
-  // PB.6: HTTP server for MC → Pete Bot calls (/v1/notify, /v1/edit-message).
+  // HTTP server for inbound alerts (/v1/alert) and the notify/edit pair.
   // Started BEFORE Discord login so the Client is ready (.channels.fetch works
   // only after login — but the server only accepts traffic once health passes,
   // and the routes themselves await client.channels.fetch which queues until

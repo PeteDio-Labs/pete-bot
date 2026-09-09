@@ -1,12 +1,39 @@
 # Pete Bot
 
-Ollama-powered AI Discord bot for PeteDio homelab. Provides slash commands with an extensible tool-calling loop for infrastructure management, search, and general queries. Responses are delivered via DM.
+A Discord surface for the PeteDio homelab. It holds no tools of its own.
+
+**`/ask <question>`** forwards to [mtrace](https://github.com/PeteDio-Labs/petedio-media-control)
+on media-dash-237 and renders the answer. mtrace owns the tool set and the routing,
+including the deterministic keyword router that answers when Ollama is unreachable — so
+the CLI and Discord cannot disagree about the same stack.
+
+**`POST /v1/alert`** takes an Uptime Kuma webhook and puts it in the owner's DM, editing
+the original message when the service recovers rather than posting a second one.
+
+## It is a user-installed app, not a server bot
+
+It is installed to one Discord account and lives in no server. Commands declare
+`integration_types: [1]` and the `PRIVATE_CHANNEL` context, which is what makes `/ask`
+work in a DM with the app.
+
+> ⚠ **The DM push is the part to verify, not assume.** `POST /v1/alert` calls
+> `users.fetch().createDM().send()`. Discord permits that after user-initiated contact
+> and refuses it with `50007` otherwise. Opening the DM once and running `/ask` should
+> satisfy that permanently — but until a `/v1/alert` call has been delivered with no
+> mutual guild, treat alerting as unproven. See PET-375.
+
+## What this used to be
+
+An Ollama tool-calling bot for Mission Control, ArgoCD and Kubernetes. All three are
+torn down, so the tool layer, the SSE event stream, the plan-expiry sweep and the
+HMAC-gated Mission Control routes are gone. `pete-bot-gitops` deploys to a cluster that
+no longer exists.
 
 ## Quick Start
 
 ```bash
 bun install
-cp .env.example .env  # configure DISCORD_TOKEN, DISCORD_CLIENT_ID, ALLOWED_USER_IDS
+cp .env.example .env  # configure DISCORD_TOKEN, DISCORD_CLIENT_ID, OWNER_USER_ID
 bun dev
 ```
 

@@ -62,19 +62,7 @@ export const sseEventsDeduplicated = new Counter({
 // outcome: 'edited' (success), 'no_cache' (cache miss — RETRO.23),
 //          'discord_failed' (channel/message fetch or edit blew up),
 //          'fetch_failed' (MC backend list call failed)
-export const expirySweepProcessed = new Counter({
-  name: 'discord_bot_expiry_sweep_processed_total',
-  help: 'Plans handled by the PB.8 expiry sweep, by outcome',
-  labelNames: ['outcome'],
-  registers: [register],
-});
 
-export const expirySweepTicks = new Counter({
-  name: 'discord_bot_expiry_sweep_ticks_total',
-  help: 'Total ticks of the PB.8 expiry sweep timer',
-  labelNames: ['status'],
-  registers: [register],
-});
 
 export async function getMetrics(): Promise<string> {
   return register.metrics();
