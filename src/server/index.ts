@@ -5,34 +5,30 @@
  *   GET  /health           — liveness + readiness probe (no auth)
  *   POST /v1/alert         — Uptime Kuma webhook → the owner's DM (bearer token)
  *
- * Kept separate from the metrics server (port 9090) so:
- *   - Prometheus can scrape /metrics on a port unaffected by app traffic
- *   - K8s NetworkPolicy can scope MC→Pete Bot traffic to 3015 only
- *   - Outage in app server doesn't affect metrics scraping
+ * Kept separate from the metrics server (port 9090) so Prometheus scrapes a port that
+ * app traffic cannot affect, and so a NetworkPolicy can scope inbound alerts to 3015.
  *
  * Auth: /v1/alert checks a bearer token. HMAC is gone with the Mission Control
  * routes it protected — Kuma cannot sign a body, so it could never have used it.
+ *
+ * ⚠ createApp IS SEPARATE FROM startHttpServer ON PURPOSE. Binding a port inside the
+ * only constructor makes every route test race every other test file for it, which is
+ * part of why this server shipped with no tests at all (PET-384).
  */
 
-import express, { type Request, type Response, type NextFunction } from 'express';
+import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import type { Server } from 'node:http';
 import type { Client } from 'discord.js';
 import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
-import { cacheSize } from './messageCache.js';
+import { size as openIncidents } from './alertStore.js';
 
 let server: Server | null = null;
 
-export async function startHttpServer(client: Client): Promise<Server> {
-  if (server) {
-    throw new Error('HTTP server is already running');
-  }
-
+export function createApp(client: Client): Express {
   const app = express();
 
-  // rawBody capture so HMAC verify works against the literal request bytes.
-  // Mirrors the pattern in MC backend's app.ts (RETRO.13).
   app.use(
     express.json({
       limit: '512kb',
@@ -42,13 +38,13 @@ export async function startHttpServer(client: Client): Promise<Server> {
     }),
   );
 
-  // ── Health (public, no auth) ─────────────────────────────────────
+  // ── Health (public, no auth, carries nothing sensitive) ──────────
   app.get('/health', (_req, res) => {
     res.json({
       ok: true,
       service: 'pete-bot-http',
       uptimeSeconds: process.uptime(),
-      messageCacheSize: cacheSize(),
+      alertBatches: openIncidents(),
       timestamp: new Date().toISOString(),
     });
   });
@@ -60,16 +56,24 @@ export async function startHttpServer(client: Client): Promise<Server> {
   // Kuma 401s.
   app.post('/v1/alert', createAlertHandler(client));
 
-  // ── 404 ─────────────────────────────────────────────────────────
   app.use((req, res) => {
     res.status(404).json({ error: 'not_found', path: req.path });
   });
 
-  // ── Error handler ───────────────────────────────────────────────
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error('Pete Bot HTTP unhandled error', { error: err.message });
     res.status(500).json({ error: 'internal_error' });
   });
+
+  return app;
+}
+
+export async function startHttpServer(client: Client): Promise<Server> {
+  if (server) {
+    throw new Error('HTTP server is already running');
+  }
+
+  const app = createApp(client);
 
   return new Promise((resolve, reject) => {
     const httpServer = app.listen(config.httpServer.port, () => {

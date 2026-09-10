@@ -1,4 +1,20 @@
-name: Build and Deploy Pete Bot
+# CI — lint, typecheck, test, and compile the artifact the deploy actually ships.
+#
+# ⚠ IT RUNS `bun run test:run`, NOT `bun test`. This repo is a vitest project — the
+# config, the setup file that loads .env.test, and the mocking the suite depends on are
+# all vitest's. `bun test` walks the same files with a different runner, ignores
+# vitest.setup.ts, and supports none of vi.mock/vi.stubGlobal/vi.resetModules. It
+# reported 36 passed for months only because the four surviving tests happened to use no
+# vitest feature at all. Two runners that agree by coincidence are one runner that will
+# disagree the first time a real test is written, which is exactly what happened.
+#
+# ⚠ IT NO LONGER PUSHES A DOCKER IMAGE. It pushed to docker.pdlab.dev — registry-106,
+# which will not restore — so this workflow failed on EVERY push to main while the
+# deploy that matters succeeded beside it. A check that is always red is a check nobody
+# reads, and it was burying the lint/typecheck/test signal. The real deploy is
+# deploy.yml: it compiles a standalone binary and installs it on media-dash-237. The
+# cluster this image was built for is torn down.
+name: ci
 
 on:
   push:
@@ -8,12 +24,8 @@ on:
     branches:
       - main
 
-env:
-  NEXUS_REGISTRY: docker.pdlab.dev
-  IMAGE_NAME: pete-bot
-
 jobs:
-  build-and-push:
+  check:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,10 +38,7 @@ jobs:
           bun-version: 1.3.11
 
       - name: Install dependencies
-        run: |
-          echo "//registry.pdlab.dev/repository/npm-group/:_auth=${{ secrets.NEXUS_NPM_TOKEN }}" >> .npmrc
-          bun install --frozen-lockfile
-          sed -i '/_auth=/d' .npmrc
+        run: bun install --frozen-lockfile
 
       - name: Lint
         run: bun run lint
@@ -38,38 +47,14 @@ jobs:
         run: bun run typecheck
 
       - name: Run tests
-        run: bun test
+        run: bun run test:run
 
       - name: Build TypeScript
         run: bun run build
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Nexus Docker Registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.NEXUS_REGISTRY }}
-          username: ${{ secrets.NEXUS_USERNAME }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
-
-      - name: Build and push Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.NEXUS_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.NEXUS_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          secrets: |
-            npmrc_auth=//registry.pdlab.dev/repository/npm-group/:_auth=${{ secrets.NEXUS_NPM_TOKEN }}
-
-      - name: Summary
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # The deploy compiles this on a homelab runner. Building it here too means a
+      # compile break is caught on the PR rather than on the merge that deploys it.
+      - name: Compile the standalone binary
         run: |
-          echo "### Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Image**: \`${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit SHA**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          bun run build:binary
+          test -x dist/pete-bot
