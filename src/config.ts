@@ -22,6 +22,25 @@ interface Config {
     token: string;
     timeoutMs: number;
   };
+  /** PET-384 — how alerts are grouped, and where that grouping is remembered. */
+  alerts: {
+    /**
+     * Two monitors failing inside this window share one DM. A node reboot takes eight
+     * services down in seconds and should read as one incident.
+     *
+     * ⚠ IT IS BOUNDED ON PURPOSE. Editing an existing message raises no Discord
+     * notification, so an unbounded window would fold a brand-new outage silently into
+     * an old message — the exact failure this alerting exists to end. Set 0 to disable
+     * grouping entirely.
+     */
+    coalesceMs: number;
+    /**
+     * Where open incidents are remembered across a restart. Empty means memory only,
+     * which costs edit-in-place: a restart between DOWN and UP orphans the DOWN message
+     * and posts the recovery separately.
+     */
+    statePath: string;
+  };
   /** PB.6 — HTTP server for inbound alerts and the notify/edit-message pair. */
   httpServer: {
     enabled: boolean;
@@ -64,6 +83,10 @@ export const config: Config = {
     // Discord's deferred-reply window is 15 minutes, so the real ceiling is
     // patience. A deep trace crosses six hosts over SSH; 60s is generous.
     timeoutMs: parseInt(getEnvVar('MTRACE_TIMEOUT_MS', '60000'), 10),
+  },
+  alerts: {
+    coalesceMs: parseInt(getEnvVar('ALERT_COALESCE_MS', '60000'), 10),
+    statePath: getEnvVar('ALERT_STATE_PATH', ''),
   },
   httpServer: {
     enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',

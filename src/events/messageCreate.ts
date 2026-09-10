@@ -18,9 +18,12 @@ import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { ask } from '../clients/mtraceClient.js';
 import { footer } from '../utils/footer.js';
+import { answerEmbeds } from '../utils/render.js';
+import { withTyping } from '../utils/typing.js';
+import { askTotal, askDuration } from '../metrics/index.js';
 
-const COLOR_OK = 0x57f287;
 const COLOR_ERR = 0xed4245;
+const SURFACE = 'dm';
 
 export function createMessageHandler(_client: Client) {
   return async function onMessage(message: Message): Promise<void> {
@@ -41,21 +44,22 @@ export function createMessageHandler(_client: Client) {
     }
 
     logger.info(`DM question: ${question.slice(0, 120)}`);
-    // mtrace crosses six hosts over SSH; without this the DM sits with no acknowledgement
-    // for several seconds and reads as a bot that ignored you.
-    await message.channel.sendTyping().catch(() => {});
+    const startedAt = Date.now();
 
     try {
-      const { text, routedBy, timing } = await ask(question);
-      const embed = new EmbedBuilder()
-        .setColor(COLOR_OK)
-        .setDescription(text.length > 4000 ? `${text.slice(0, 3997)}...` : text);
-      const f = footer(routedBy, timing);
-      if (f) embed.setFooter({ text: f });
-      await message.reply({ embeds: [embed] });
+      // ⚠ TYPING FOR THE WHOLE WAIT, not once. Discord's indicator lapses after about
+      // ten seconds and mtrace is allowed sixty, so a single ping leaves the DM looking
+      // ignored for most of a deep trace.
+      const { text, routedBy, timing, notice } = await withTyping(message.channel, () => ask(question));
+
+      const parts = [footer(routedBy, timing), notice].filter(Boolean);
+      await message.reply({ embeds: answerEmbeds(text, parts.join(' · ') || undefined) });
+
+      askTotal.inc({ surface: SURFACE, status: 'success' });
       logger.info(`DM answered (${text.length} chars, routed by ${routedBy ?? 'unknown'})`);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
+      askTotal.inc({ surface: SURFACE, status: 'failure' });
       logger.error('DM question failed:', detail);
       await message.reply({
         embeds: [
@@ -65,6 +69,8 @@ export function createMessageHandler(_client: Client) {
             .setDescription(`\`\`\`${detail.slice(0, 500)}\`\`\``),
         ],
       });
+    } finally {
+      askDuration.observe({ surface: SURFACE }, (Date.now() - startedAt) / 1000);
     }
   };
 }

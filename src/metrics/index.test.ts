@@ -1,69 +1,72 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  register,
   getMetrics,
+  resetMetrics,
   discordBotUp,
   discordWebsocketLatency,
-  discordMessagesProcessed,
-  discordRequestDuration,
-  sseEventsReceived,
-  sseConnected,
-  sseDmsSent,
-  resetMetrics,
+  askTotal,
+  askDuration,
+  alertDms,
+  alertBatchesOpen,
 } from './index.js';
 
-describe('Metrics Module', () => {
-  beforeEach(() => {
-    resetMetrics();
-  });
+beforeEach(() => resetMetrics());
 
-  it('should export metrics in Prometheus format', async () => {
-    const metrics = await getMetrics();
-    expect(metrics).toContain('# HELP');
-    expect(metrics).toContain('# TYPE');
-  });
-
-  it('should expose discord_bot_up gauge', async () => {
+describe('metrics', () => {
+  it('exports in Prometheus format', async () => {
     discordBotUp.set(1);
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_up 1');
+    expect(await getMetrics()).toContain('# HELP');
   });
 
-  it('should expose websocket latency gauge', async () => {
-    discordWebsocketLatency.set(0.045);
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_websocket_latency_seconds 0.045');
+  it('reports the Discord connection', async () => {
+    discordBotUp.set(1);
+    discordWebsocketLatency.set(0.042);
+    const dump = await getMetrics();
+    expect(dump).toContain('discord_bot_up 1');
+    expect(dump).toContain('discord_bot_websocket_latency_seconds 0.042');
   });
 
-  it('should track messages processed with labels', async () => {
-    discordMessagesProcessed.labels('help', 'success').inc();
-    const metrics = await getMetrics();
-    expect(metrics).toContain('command="help"');
-    expect(metrics).toContain('status="success"');
+  it('separates a working surface from a broken one', async () => {
+    askTotal.inc({ surface: 'ask', status: 'success' });
+    askTotal.inc({ surface: 'dm', status: 'failure' });
+    const dump = await getMetrics();
+    expect(dump).toMatch(/pete_bot_ask_total\{surface="ask",status="success"\} 1/);
+    expect(dump).toMatch(/pete_bot_ask_total\{surface="dm",status="failure"\} 1/);
   });
 
-  it('should track request duration histogram', async () => {
-    discordRequestDuration.labels('help').observe(0.1);
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_request_duration_seconds');
+  it('times the answer by surface', async () => {
+    askDuration.observe({ surface: 'ask' }, 6.8);
+    expect(await getMetrics()).toMatch(/pete_bot_ask_duration_seconds_count\{surface="ask"\} 1/);
   });
 
-  it('should track SSE events received', async () => {
-    sseEventsReceived.inc({ source: 'kubernetes', type: 'pod-failure', severity: 'critical' });
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_sse_events_received_total');
-    expect(metrics).toContain('source="kubernetes"');
+  it('counts alert deliveries by what it did', async () => {
+    alertDms.inc({ action: 'sent', status: 'success' });
+    alertDms.inc({ action: 'edited', status: 'success' });
+    const dump = await getMetrics();
+    expect(dump).toMatch(/pete_bot_alert_dms_total\{action="sent",status="success"\} 1/);
+    expect(dump).toMatch(/pete_bot_alert_dms_total\{action="edited",status="success"\} 1/);
   });
 
-  it('should track SSE connection state', async () => {
-    sseConnected.set(1);
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_sse_connected 1');
+  it('reports how many incidents are open', async () => {
+    alertBatchesOpen.set(3);
+    expect(await getMetrics()).toContain('pete_bot_alert_batches_open 3');
   });
 
-  it('should track DMs sent', async () => {
-    sseDmsSent.inc({ status: 'success' });
-    sseDmsSent.inc({ status: 'failure' });
-    const metrics = await getMetrics();
-    expect(metrics).toContain('discord_bot_sse_dms_sent_total');
+  /**
+   * ⚠ THE POINT OF THIS FILE. Five metrics shipped for months with no write site,
+   * describing an SSE layer that had been deleted. This asserts the registry holds
+   * exactly the series the code writes, so the next dead metric fails here.
+   */
+  it('registers no metric that nothing writes', async () => {
+    const names = (await register.getMetricsAsJSON()).map((m) => m.name).sort();
+    expect(names).toEqual([
+      'discord_bot_up',
+      'discord_bot_websocket_latency_seconds',
+      'pete_bot_alert_batches_open',
+      'pete_bot_alert_dms_total',
+      'pete_bot_ask_duration_seconds',
+      'pete_bot_ask_total',
+    ]);
   });
 });

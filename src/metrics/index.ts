@@ -1,8 +1,20 @@
+/**
+ * What Prometheus can actually answer about this process.
+ *
+ * ⚠ A DECLARED METRIC THAT NOTHING WRITES IS A LIE WITH A HELP STRING. This module used
+ * to export eight, of which three were ever written: `discord_bot_messages_processed`,
+ * `discord_bot_request_duration`, and four `..._sse_...` series named for an event stream
+ * deleted with Mission Control. Scraping told you the bot was connected and nothing else,
+ * so a working /ask and a completely broken one produced identical metrics. Every series
+ * below has a write site, and metrics/index.test.ts asserts the registry holds these and
+ * only these — so the next dead metric fails a test instead of being scraped for months.
+ */
 import { Registry, Counter, Gauge, Histogram } from 'prom-client';
 
 export const register = new Registry();
 
-// Discord Bot
+// ── Discord connection (written in main.ts) ───────────────────────────────────
+
 export const discordBotUp = new Gauge({
   name: 'discord_bot_up',
   help: '1=connected to Discord, 0=disconnected',
@@ -15,54 +27,43 @@ export const discordWebsocketLatency = new Gauge({
   registers: [register],
 });
 
-export const discordMessagesProcessed = new Counter({
-  name: 'discord_bot_messages_processed_total',
-  help: 'Total interactions processed',
-  labelNames: ['command', 'status'],
+// ── Answering (written in events/, PET-384) ───────────────────────────────────
+
+/**
+ * surface: 'ask' (slash command) or 'dm' (plain message).
+ * status:  'success', 'failure' (mtrace did not answer), 'refused' (not the installer).
+ */
+export const askTotal = new Counter({
+  name: 'pete_bot_ask_total',
+  help: 'Questions forwarded to mtrace, by surface and outcome',
+  labelNames: ['surface', 'status'],
   registers: [register],
 });
 
-export const discordRequestDuration = new Histogram({
-  name: 'discord_bot_request_duration_seconds',
-  help: 'Command processing duration in seconds',
-  labelNames: ['command'],
-  buckets: [0.1, 0.5, 1, 2, 5, 10],
+export const askDuration = new Histogram({
+  name: 'pete_bot_ask_duration_seconds',
+  help: 'Time from question to rendered answer, by surface',
+  labelNames: ['surface'],
+  // A deep trace crosses six hosts over SSH; the long buckets are the interesting ones.
+  buckets: [0.5, 1, 2, 5, 10, 20, 40, 60],
   registers: [register],
 });
 
-// SSE Event Stream
-export const sseEventsReceived = new Counter({
-  name: 'discord_bot_sse_events_received_total',
-  help: 'Total events received from SSE stream',
-  labelNames: ['source', 'type', 'severity'],
+// ── Alerting (written in server/routes/alert.ts) ──────────────────────────────
+
+/** action: 'sent' or 'edited'. status: 'success' or 'failure'. */
+export const alertDms = new Counter({
+  name: 'pete_bot_alert_dms_total',
+  help: 'Uptime Kuma alerts delivered to the owner DM, by action and outcome',
+  labelNames: ['action', 'status'],
   registers: [register],
 });
 
-export const sseConnected = new Gauge({
-  name: 'discord_bot_sse_connected',
-  help: '1=connected to SSE stream, 0=disconnected',
+export const alertBatchesOpen = new Gauge({
+  name: 'pete_bot_alert_batches_open',
+  help: 'Incidents currently open, each one message in the owner DM',
   registers: [register],
 });
-
-export const sseDmsSent = new Counter({
-  name: 'discord_bot_sse_dms_sent_total',
-  help: 'Total DM notifications sent',
-  labelNames: ['status'],
-  registers: [register],
-});
-
-export const sseEventsDeduplicated = new Counter({
-  name: 'discord_bot_sse_events_deduplicated_total',
-  help: 'Total events suppressed by deduplication',
-  labelNames: ['source', 'type'],
-  registers: [register],
-});
-
-// Plan Expiry Sweep (PB.8)
-// outcome: 'edited' (success), 'no_cache' (cache miss — RETRO.23),
-//          'discord_failed' (channel/message fetch or edit blew up),
-//          'fetch_failed' (MC backend list call failed)
-
 
 export async function getMetrics(): Promise<string> {
   return register.metrics();
