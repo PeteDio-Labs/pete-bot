@@ -83,8 +83,35 @@ bun run build:binary   # standalone linux-x64 executable, what the deploy ships
 |---------|--------------|
 | `/ask <question>` | Forwards the question to mtrace and renders the answer, ephemerally |
 | `/status` | Reports whether mtrace is reachable, how many incidents are open, and uptime |
+| `/update check [target]` | Shows current and available versions through GitHub Actions; changes nothing |
+| `/update apply <target> [force]` | Applies available updates through the same workflow. Plex skips itself while anyone is watching, unless `force` |
 
 A plain DM does the same thing as `/ask`, without the slash.
+
+### `/update` (PET-395)
+
+`/update` holds no access to the media hosts. It starts petedio-media-iac's
+`media-updates.yml` with a token that can run workflows in that one repo, follows the run,
+and shows the report the run printed. The run mints its own narrow Vault role and runs
+Ansible from a homelab runner.
+
+Targets are `plex`, `sonarr`, `radarr`, `prowlarr`, `arr` (all three), and `plex-and-arr`,
+the default for `check`. Each result says how the run ended: green when nothing is left to
+do, yellow for an available update or a service that skipped itself, and red for a failure.
+A run that never appears, or is still going after 30 minutes, says so. Past Discord's
+15-minute interaction token, the result arrives as a DM.
+
+To enable it:
+
+1. Create a fine-grained token limited to `PeteDio-Labs/petedio-media-iac`, with
+   **Actions** read and write.
+2. Store it in Vault without it reaching your shell history:
+
+   ```bash
+   read -rs T; printf '%s' "$T" | vault kv patch kv/services/pete-bot github_updates_token=-; unset T
+   ```
+
+3. Deploy. An empty token leaves `/update` answering that it is not configured.
 
 ## HTTP surface
 
@@ -114,6 +141,12 @@ wondering why Kuma 401s.
 | `ALERT_BEARER_TOKEN` | No | — | Token Uptime Kuma sends on `/v1/alert` |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
+| `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
+| `UPDATES_REPO` | No | `PeteDio-Labs/petedio-media-iac` | Repo that holds the update workflow |
+| `UPDATES_WORKFLOW` | No | `media-updates.yml` | The workflow `/update` dispatches |
+| `UPDATES_FIND_TIMEOUT_MS` | No | `90000` | How long a dispatched run may take to appear |
+| `UPDATES_RUN_TIMEOUT_MS` | No | `1800000` | How long `/update` follows a run |
+| `UPDATES_POLL_MS` | No | `10000` | How often it asks GitHub about the run |
 | `METRICS_ENABLED` | No | `true` | Serve `/metrics` |
 | `METRICS_PORT` | No | `9090` | Port for `/metrics` |
 | `LOG_LEVEL` | No | `info` | Pino log level |

@@ -6,21 +6,29 @@
  */
 import { describe, it, expect } from 'vitest';
 import { allCommands } from './index.js';
+import { UPDATE_TARGETS } from '../../clients/githubActions.js';
 
 const USER_INSTALL = 1;
 const CONTEXT_PRIVATE_CHANNEL = 2;
 
+interface OptionShape {
+  name: string;
+  required?: boolean;
+  choices?: Array<{ value: string }>;
+  options?: OptionShape[];
+}
+
 describe('command definitions', () => {
-  it('registers /ask and /status', () => {
-    expect(allCommands.map((c) => c.name).sort()).toEqual(['ask', 'status']);
+  it('registers /ask, /status and /update', () => {
+    expect(allCommands.map((c) => c.name).sort()).toEqual(['ask', 'status', 'update']);
   });
 
-  it.each(['ask', 'status'])('declares %s as user-installed', (name) => {
+  it.each(['ask', 'status', 'update'])('declares %s as user-installed', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.integration_types).toEqual([USER_INSTALL]);
   });
 
-  it.each(['ask', 'status'])('lets %s run in a private channel', (name) => {
+  it.each(['ask', 'status', 'update'])('lets %s run in a private channel', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.contexts).toContain(CONTEXT_PRIVATE_CHANNEL);
   });
@@ -33,5 +41,28 @@ describe('command definitions', () => {
   it('takes no options on /status', () => {
     const status = allCommands.find((c) => c.name === 'status')!;
     expect(status.options ?? []).toHaveLength(0);
+  });
+
+  // PET-395. An apply one option away from a check is the mistake the split prevents.
+  it('splits /update into check and apply, and makes apply name its target', () => {
+    const update = allCommands.find((c) => c.name === 'update')!;
+    const subs = (update.options ?? []) as unknown as OptionShape[];
+    expect(subs.map((s) => s.name)).toEqual(['check', 'apply']);
+
+    const apply = subs.find((s) => s.name === 'apply')!;
+    expect(apply.options?.find((o) => o.name === 'target')).toMatchObject({ required: true });
+    expect(apply.options?.map((o) => o.name)).toEqual(['target', 'force']);
+
+    const check = subs.find((s) => s.name === 'check')!;
+    expect(check.options?.map((o) => o.name)).toEqual(['target']);
+  });
+
+  it('offers exactly the targets the workflow accepts', () => {
+    const update = allCommands.find((c) => c.name === 'update')!;
+    const subs = (update.options ?? []) as unknown as OptionShape[];
+    for (const sub of subs) {
+      const target = sub.options?.find((o) => o.name === 'target');
+      expect(target?.choices?.map((c) => c.value)).toEqual([...UPDATE_TARGETS]);
+    }
   });
 });

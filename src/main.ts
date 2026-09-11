@@ -6,6 +6,9 @@
  * that answers when Ollama is down. POST /v1/alert takes an Uptime Kuma webhook and
  * puts it in the owner's DM, editing the original message on recovery.
  *
+ * /update (PET-395) starts a media update through GitHub Actions. The run holds the
+ * privileges; this process holds a token that can start that one workflow.
+ *
  * It holds no tools of its own. The Mission Control, ArgoCD and Kubernetes clients
  * this started as are gone with the cluster they queried.
  */
@@ -48,7 +51,7 @@ client.once('clientReady', async () => {
 
   await registerCommands();
 
-  logger.info(`Pete Bot v${VERSION} ready — /ask, plain DMs, and /v1/alert`);
+  logger.info(`Pete Bot v${VERSION} ready — /ask, /status, /update, plain DMs, and /v1/alert`);
 });
 
 client.on('disconnect', () => {
