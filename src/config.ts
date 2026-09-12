@@ -41,6 +41,20 @@ interface Config {
      */
     statePath: string;
   };
+  /**
+   * /update (PET-395). pete-bot starts petedio-media-iac's media-updates.yml and reads
+   * the run back; the run holds every privilege. This token can run workflows in that one
+   * repo and nothing else. Empty leaves /update answering "not configured".
+   */
+  updates: {
+    token: string;
+    repo: string;
+    workflow: string;
+    /** How long a dispatched run may take to appear, and to finish. */
+    findTimeoutMs: number;
+    runTimeoutMs: number;
+    pollMs: number;
+  };
   /** PB.6 — HTTP server for inbound alerts and the notify/edit-message pair. */
   httpServer: {
     enabled: boolean;
@@ -87,6 +101,16 @@ export const config: Config = {
   alerts: {
     coalesceMs: parseInt(getEnvVar('ALERT_COALESCE_MS', '60000'), 10),
     statePath: getEnvVar('ALERT_STATE_PATH', ''),
+  },
+  updates: {
+    token: getEnvVar('GITHUB_UPDATES_TOKEN', ''),
+    repo: getEnvVar('UPDATES_REPO', 'PeteDio-Labs/petedio-media-iac'),
+    workflow: getEnvVar('UPDATES_WORKFLOW', 'media-updates.yml'),
+    // A runner picks a dispatch up within seconds when idle; 90s covers a busy queue.
+    findTimeoutMs: parseInt(getEnvVar('UPDATES_FIND_TIMEOUT_MS', '90000'), 10),
+    // The workflow itself times out at 30 minutes, so following it longer is pointless.
+    runTimeoutMs: parseInt(getEnvVar('UPDATES_RUN_TIMEOUT_MS', '1800000'), 10),
+    pollMs: parseInt(getEnvVar('UPDATES_POLL_MS', '10000'), 10),
   },
   httpServer: {
     enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',

@@ -76,6 +76,7 @@ jobs:
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
             kv/data/services/pete-bot owner_user_id | PB_OWNER ;
             kv/data/services/pete-bot alert_bearer_token | PB_BEARER ;
+            kv/data/services/pete-bot github_updates_token | PB_UPDATES_TOKEN ;
             kv/data/services/media/dashboard api_token | MTRACE_TOKEN
 
       - name: Stage the secrets as files, never as arguments
@@ -91,6 +92,7 @@ jobs:
               "pete_bot_owner_user_id":     os.environ["PB_OWNER"],
               "pete_bot_alert_bearer":      os.environ["PB_BEARER"],
               "pete_bot_mtrace_token":      os.environ["MTRACE_TOKEN"],
+              "pete_bot_github_updates_token": os.environ["PB_UPDATES_TOKEN"],
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY
