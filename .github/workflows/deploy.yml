@@ -76,8 +76,37 @@ jobs:
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
             kv/data/services/pete-bot owner_user_id | PB_OWNER ;
             kv/data/services/pete-bot alert_bearer_token | PB_BEARER ;
-            kv/data/services/pete-bot github_updates_token | PB_UPDATES_TOKEN ;
             kv/data/services/media/dashboard api_token | MTRACE_TOKEN
+
+      # ⚠ A SECOND STEP EXISTS ONLY TO SCOPE `ignoreNotFound` TO ONE SECRET (PET-395).
+      #
+      # github_updates_token is genuinely optional: README.md says "an empty token leaves
+      # /update answering that it is not configured", and scripts/deploy-pete-bot.sh in
+      # petedio-iac already handles the empty case. The step above did not, so a field that
+      # was never seeded failed the whole deploy on merge with
+      #     Unable to retrieve result for data.data."github_updates_token".
+      # The documentation said absence was supported; the workflow said it was fatal.
+      #
+      # `ignoreNotFound` is a STEP-level flag, not per-secret, so tolerance cannot be
+      # expressed inside the step above — and it must not be: that step fetches the Discord
+      # token, and a silently-absent one would deploy a bot that cannot log in. Green over
+      # nothing, in a deploy. Two steps is the price of letting exactly one secret be absent.
+      #
+      # The cost is a second OIDC mint against the same `pete-bot-cd` role, reading a path
+      # it already reads. Cheap, and it buys a deploy that survives an unseeded optional.
+      - name: Vault — the optional /update token, absent is allowed
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/pete-bot github_updates_token | PB_UPDATES_TOKEN
 
       - name: Stage the secrets as files, never as arguments
         run: |
@@ -92,7 +121,10 @@ jobs:
               "pete_bot_owner_user_id":     os.environ["PB_OWNER"],
               "pete_bot_alert_bearer":      os.environ["PB_BEARER"],
               "pete_bot_mtrace_token":      os.environ["MTRACE_TOKEN"],
-              "pete_bot_github_updates_token": os.environ["PB_UPDATES_TOKEN"],
+              # .get, not [] — with ignoreNotFound above, an absent field means the env
+              # var is never set at all, and indexing would KeyError one layer below the
+              # thing that was just made tolerant. Empty is the documented state.
+              "pete_bot_github_updates_token": os.environ.get("PB_UPDATES_TOKEN", ""),
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY
