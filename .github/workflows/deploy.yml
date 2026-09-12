@@ -94,7 +94,24 @@ jobs:
       #
       # The cost is a second OIDC mint against the same `pete-bot-cd` role, reading a path
       # it already reads. Cheap, and it buys a deploy that survives an unseeded optional.
+      # ⚠ `ignoreNotFound` IS NOT ENOUGH ON ITS OWN, AND THAT IS WHY THIS STEP MAY FAIL.
+      # It tolerates a missing SECRET PATH — Vault answering 404. It does NOT tolerate a
+      # missing KEY inside a path that exists. `kv/services/pete-bot` is there and simply has
+      # no `github_updates_token`, so the selector finds nothing and the action errors:
+      #
+      #   Unable to retrieve result for data.data."github_updates_token". No match data was found.
+      #
+      # That failed the deploy twice on 2026-09-12 — once before this step was split out, and
+      # again after, with `ignoreNotFound: true` already set. The flag stays because it is
+      # correct for the path case; `continue-on-error` is what handles the key case.
+      #
+      # ⚠ CONTINUE-ON-ERROR IS SAFE HERE ONLY BECAUSE THE STRICT STEP RUNS FIRST. That step
+      # mints against the same role and reads the same path, so by the time this one runs,
+      # Vault is known reachable and the OIDC role is known good. A genuine outage fails the
+      # deploy above, loudly, as it should. MOVE THIS STEP ABOVE THAT ONE AND IT SILENTLY
+      # SWALLOWS A VAULT OUTAGE. The ordering is load-bearing.
       - name: Vault — the optional /update token, absent is allowed
+        continue-on-error: true
         uses: hashicorp/vault-action@v4
         with:
           url: https://192.168.50.223:8200
