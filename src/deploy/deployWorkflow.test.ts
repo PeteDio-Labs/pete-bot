@@ -57,14 +57,18 @@ const isTolerant = (s: VaultStep) => s['continue-on-error'] === true;
 const stagingRun =
   steps.find((s) => /stage the secrets/i.test(s.name ?? ''))?.run ?? '';
 
+/** Capture group 1 of every match, with the undefined a regex group can yield dropped. */
+const captured = (re: RegExp): Set<string> =>
+  new Set(
+    [...stagingRun.matchAll(re)]
+      .map((m) => m[1])
+      .filter((v): v is string => v !== undefined),
+  );
+
 /** env vars the staging script reads fatally: os.environ["X"] */
-const readRequired = new Set(
-  [...stagingRun.matchAll(/os\.environ\[["']([A-Z0-9_]+)["']\]/g)].map((m) => m[1]),
-);
+const readRequired = captured(/os\.environ\[["']([A-Z0-9_]+)["']\]/g);
 /** env vars it reads with a default: os.environ.get("X", ...) */
-const readOptional = new Set(
-  [...stagingRun.matchAll(/os\.environ\.get\(["']([A-Z0-9_]+)["']/g)].map((m) => m[1]),
-);
+const readOptional = captured(/os\.environ\.get\(["']([A-Z0-9_]+)["']/g);
 
 describe('deploy.yml secret contract', () => {
   it('parses, and has at least one vault step and a staging step', () => {
