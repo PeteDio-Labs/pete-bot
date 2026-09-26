@@ -11,7 +11,6 @@ vi.mock('../clients/githubActions.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../clients/githubActions.js')>()),
   runUpdate: runUpdateMock,
 }));
-vi.mock('../clients/mtraceClient.js', () => ({ ask: vi.fn(), health: vi.fn() }));
 
 import { createInteractionHandler } from './interactionCreate.js';
 import { config } from '../config.js';

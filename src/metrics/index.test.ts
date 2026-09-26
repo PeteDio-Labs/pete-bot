@@ -28,16 +28,16 @@ describe('metrics', () => {
   });
 
   it('separates a working surface from a broken one', async () => {
-    askTotal.inc({ surface: 'ask', status: 'success' });
-    askTotal.inc({ surface: 'dm', status: 'failure' });
+    askTotal.inc({ surface: 'update', status: 'success' });
+    askTotal.inc({ surface: 'status', status: 'refused' });
     const dump = await getMetrics();
-    expect(dump).toMatch(/pete_bot_ask_total\{surface="ask",status="success"\} 1/);
-    expect(dump).toMatch(/pete_bot_ask_total\{surface="dm",status="failure"\} 1/);
+    expect(dump).toMatch(/pete_bot_ask_total\{surface="update",status="success"\} 1/);
+    expect(dump).toMatch(/pete_bot_ask_total\{surface="status",status="refused"\} 1/);
   });
 
-  it('times the answer by surface', async () => {
-    askDuration.observe({ surface: 'ask' }, 6.8);
-    expect(await getMetrics()).toMatch(/pete_bot_ask_duration_seconds_count\{surface="ask"\} 1/);
+  it('times the command by surface', async () => {
+    askDuration.observe({ surface: 'update' }, 6.8);
+    expect(await getMetrics()).toMatch(/pete_bot_ask_duration_seconds_count\{surface="update"\} 1/);
   });
 
   it('counts alert deliveries by what it did', async () => {

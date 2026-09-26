@@ -120,6 +120,13 @@ describe('deploy.yml secret contract', () => {
     expect(isTolerant(fetchedBy.get('PB_TOKEN')!)).toBe(false);
   });
 
+  // PET-518. pete-bot calls nothing on mtrace, and that secret path also holds mtrace's
+  // SSH key. A read of it here is a read the pete-bot-cd role no longer grants.
+  it('never reads the mtrace secret', () => {
+    const paths = vaultSteps.flatMap((s) => s.with.secrets.split(';').map((l) => l.trim()));
+    expect(paths.filter((l) => l.includes('services/media/dashboard'))).toEqual([]);
+  });
+
   // ordering is load-bearing: continue-on-error is only safe on a step that runs AFTER a
   // strict one against the same Vault, or a real outage is swallowed.
   it('runs a strict vault step before any tolerant one', () => {

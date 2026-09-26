@@ -5,7 +5,7 @@
  * to export eight, of which three were ever written: `discord_bot_messages_processed`,
  * `discord_bot_request_duration`, and four `..._sse_...` series named for an event stream
  * deleted with Mission Control. Scraping told you the bot was connected and nothing else,
- * so a working /ask and a completely broken one produced identical metrics. Every series
+ * so a working command and a completely broken one produced identical metrics. Every series
  * below has a write site, and metrics/index.test.ts asserts the registry holds these and
  * only these — so the next dead metric fails a test instead of being scraped for months.
  */
@@ -30,19 +30,20 @@ export const discordWebsocketLatency = new Gauge({
 // ── Answering (written in events/, PET-384) ───────────────────────────────────
 
 /**
- * surface: 'ask' (slash command) or 'dm' (plain message).
- * status:  'success', 'failure' (mtrace did not answer), 'refused' (not the installer).
+ * surface: 'update', or the refused command's name. It read 'ask' and 'dm' until PET-518
+ * removed both; the series keeps its name so a dashboard query still resolves.
+ * status:  'success', 'failure', 'refused' (not the installer).
  */
 export const askTotal = new Counter({
   name: 'pete_bot_ask_total',
-  help: 'Questions forwarded to mtrace, by surface and outcome',
+  help: 'Commands handled, by surface and outcome',
   labelNames: ['surface', 'status'],
   registers: [register],
 });
 
 export const askDuration = new Histogram({
   name: 'pete_bot_ask_duration_seconds',
-  help: 'Time from question to rendered answer, by surface',
+  help: 'Time from command to rendered result, by surface',
   labelNames: ['surface'],
   // A deep trace crosses six hosts over SSH; the long buckets are the interesting ones.
   buckets: [0.5, 1, 2, 5, 10, 20, 40, 60],
