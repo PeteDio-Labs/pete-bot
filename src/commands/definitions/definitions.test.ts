@@ -19,23 +19,20 @@ interface OptionShape {
 }
 
 describe('command definitions', () => {
-  it('registers /ask, /status and /update', () => {
-    expect(allCommands.map((c) => c.name).sort()).toEqual(['ask', 'status', 'update']);
+  // PET-518. Registration replaces the whole global set, so a name missing here is a
+  // command Discord stops offering on the next start.
+  it('registers /status and /update, and no longer /ask', () => {
+    expect(allCommands.map((c) => c.name).sort()).toEqual(['status', 'update']);
   });
 
-  it.each(['ask', 'status', 'update'])('declares %s as user-installed', (name) => {
+  it.each(['status', 'update'])('declares %s as user-installed', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.integration_types).toEqual([USER_INSTALL]);
   });
 
-  it.each(['ask', 'status', 'update'])('lets %s run in a private channel', (name) => {
+  it.each(['status', 'update'])('lets %s run in a private channel', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.contexts).toContain(CONTEXT_PRIVATE_CHANNEL);
-  });
-
-  it('keeps the question required on /ask', () => {
-    const ask = allCommands.find((c) => c.name === 'ask')!;
-    expect(ask.options?.[0]).toMatchObject({ name: 'question', required: true });
   });
 
   it('takes no options on /status', () => {

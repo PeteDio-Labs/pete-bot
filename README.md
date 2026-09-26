@@ -1,27 +1,22 @@
 # Pete Bot
 
-A Discord surface for the PeteDio homelab. It holds no tools of its own.
-
-**Type at it in the DM, or use `/ask <question>`.** Either forwards to
-[mtrace](https://github.com/PeteDio-Labs/petedio-media-control) on media-dash-237 and
-renders the answer. mtrace owns the tool set and the routing, including the
-deterministic keyword router that answers when Ollama is unreachable — so the CLI and
-Discord cannot disagree about the same stack.
+A Discord surface for the PeteDio homelab. It relays alerts and starts media updates,
+and it holds no tools of its own.
 
 **`POST /v1/alert`** takes an Uptime Kuma webhook and puts it in the owner's DM. One
 message per incident, edited in place.
 
-> ⚠ **Plain messages need the Message Content intent**, which is privileged: enable it in
-> the Developer Portal under **Bot → Privileged Gateway Intents**. Requesting it while it
-> is disabled makes login fail outright, which the deploy's login check catches. With it
-> off but not requested, `content` arrives empty and the bot appears to ignore you —
-> which is why it answers that case explicitly instead of staying quiet.
+**`/update`** starts petedio-media-iac's update workflow and reports what the run did.
+
+It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
+and plain-DM questions went in PET-518, when Bobbert took over asking mtrace with its own
+token. The bot reads no messages, so it requests no privileged intent.
 
 ## It is a user-installed app, not a server bot
 
 It is installed to one Discord account and lives in no server. Commands declare
-`integration_types: [1]` and the `PRIVATE_CHANNEL` context, which is what makes `/ask`
-work in a DM with the app.
+`integration_types: [1]` and the `PRIVATE_CHANNEL` context, which is what makes its
+commands work in a DM with the app.
 
 An app in zero servers **can** start a DM. Verified 2026-09-09 against a 0-guild account
 with no prior contact: `users.fetch(id).createDM().send()` succeeded. The documentation
@@ -43,21 +38,6 @@ Vault outage reached nobody (PET-374). So `/v1/alert` groups:
 
 Open incidents live in `ALERT_STATE_PATH`, so a restart between the failure and the
 recovery still edits the original message instead of orphaning it.
-
-## Answers are paged, never truncated
-
-An answer longer than one embed is split across sequential embeds. mtrace's long answers
-are its deep ones — a trace crossing six hosts over SSH — and a trace states its
-conclusion last, so cutting the tail throws away the answer and keeps the preamble.
-
-Every reply footers with how long it took, split:
-
-```
-routed by keyword · 6.8s (route 1ms, tool 6770ms)
-```
-
-Route and tool are reported separately because they fail for different reasons. A slow
-route means the inference host is busy or asleep; a slow tool means the media stack is.
 
 ## Quick start
 
@@ -81,12 +61,9 @@ bun run build:binary   # standalone linux-x64 executable, what the deploy ships
 
 | Command | What it does |
 |---------|--------------|
-| `/ask <question>` | Forwards the question to mtrace and renders the answer, ephemerally |
-| `/status` | Reports whether mtrace is reachable, how many incidents are open, and uptime |
+| `/status` | Reports how many incidents are open, whether `/update` is configured, and uptime |
 | `/update check [target]` | Shows current and available versions through GitHub Actions; changes nothing |
 | `/update apply <target> [force]` | Applies available updates through the same workflow. Plex skips itself while anyone is watching, unless `force` |
-
-A plain DM does the same thing as `/ask`, without the slash.
 
 ### `/update` (PET-395)
 
@@ -133,9 +110,6 @@ wondering why Kuma 401s.
 | `DISCORD_TOKEN` | Yes | — | Discord bot token |
 | `DISCORD_CLIENT_ID` | Yes | — | Discord application client id |
 | `OWNER_USER_ID` | Yes | — | The only account this app answers, and the only one it DMs |
-| `MTRACE_URL` | No | `http://127.0.0.1:8237` | mtrace on the same host, over loopback |
-| `MTRACE_API_TOKEN` | No | — | Bearer for mtrace's `/api` routes |
-| `MTRACE_TIMEOUT_MS` | No | `60000` | `fetch` has no default timeout; this is the bound |
 | `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health` and `/v1/alert` |
 | `HTTP_SERVER_PORT` | No | `3015` | Port for the above |
 | `ALERT_BEARER_TOKEN` | No | — | Token Uptime Kuma sends on `/v1/alert` |
@@ -155,14 +129,14 @@ wondering why Kuma 401s.
 
 Every series below has a write site, and a test asserts the registry holds these and
 only these — five metrics once shipped for months describing an event stream that had
-been deleted, so a working `/ask` and a broken one scraped identically.
+been deleted, so a working command and a broken one scraped identically.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `discord_bot_up` | Gauge | — | 1 connected, 0 disconnected |
 | `discord_bot_websocket_latency_seconds` | Gauge | — | Websocket ping |
-| `pete_bot_ask_total` | Counter | `surface`, `status` | Questions by surface (`ask`/`dm`) and outcome |
-| `pete_bot_ask_duration_seconds` | Histogram | `surface` | Question to rendered answer |
+| `pete_bot_ask_total` | Counter | `surface`, `status` | Commands by surface (`update`, or the refused command) and outcome |
+| `pete_bot_ask_duration_seconds` | Histogram | `surface` | Command to rendered result |
 | `pete_bot_alert_dms_total` | Counter | `action`, `status` | Alerts delivered, sent vs edited |
 | `pete_bot_alert_batches_open` | Gauge | — | Incidents currently open |
 
@@ -170,19 +144,20 @@ been deleted, so a working `/ask` and a broken one scraped identically.
 
 ```
 src/
-├── clients/      # mtraceClient — ask() and health(), the only thing it knows how to call
-├── commands/     # /ask and /status definitions, and registration
-├── events/       # interactionCreate (slash), messageCreate (plain DMs)
+├── clients/      # githubActions — starts and follows the /update run
+├── commands/     # /status and /update definitions, and registration
+├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server
 ├── server/       # HTTP app, /v1/alert, and the incident store
-└── utils/        # logger, answer paging, typing keepalive, the footer
+└── utils/        # logger
 ```
 
 ## What this used to be
 
 An Ollama tool-calling bot for Mission Control, ArgoCD and Kubernetes. All three are torn
 down, so the tool layer, the SSE event stream, the plan-expiry sweep and the HMAC-gated
-Mission Control routes are gone with them.
+Mission Control routes are gone with them. It then forwarded `/ask` and plain DMs to mtrace
+until PET-518 handed that job to Bobbert.
 
 ## Deployment
 

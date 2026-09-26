@@ -16,12 +16,6 @@ interface Config {
     enabled: boolean;
     port: number;
   };
-  /** mtrace on media-dash-237 answers the questions. This app only asks and renders. */
-  mtrace: {
-    url: string;
-    token: string;
-    timeoutMs: number;
-  };
   /** PET-384 — how alerts are grouped, and where that grouping is remembered. */
   alerts: {
     /**
@@ -88,15 +82,6 @@ export const config: Config = {
   metrics: {
     enabled: getEnvVar('METRICS_ENABLED', 'true') === 'true',
     port: parseInt(getEnvVar('METRICS_PORT', '9090'), 10),
-  },
-  mtrace: {
-    // Loopback: this app runs on media-dash-237 beside mtrace, which binds
-    // 127.0.0.1 (PET-355). Nothing about this integration widens that bind.
-    url: getEnvVar('MTRACE_URL', 'http://127.0.0.1:8237'),
-    token: getEnvVar('MTRACE_API_TOKEN', ''),
-    // Discord's deferred-reply window is 15 minutes, so the real ceiling is
-    // patience. A deep trace crosses six hosts over SSH; 60s is generous.
-    timeoutMs: parseInt(getEnvVar('MTRACE_TIMEOUT_MS', '60000'), 10),
   },
   alerts: {
     coalesceMs: parseInt(getEnvVar('ALERT_COALESCE_MS', '60000'), 10),

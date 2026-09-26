@@ -1,12 +1,12 @@
-// /status — is the thing that answers questions actually up?
+// /status — what is pete-bot holding right now?
 //
-// Without this the only way to find out is to ask a question and read the error embed,
-// which cannot tell "mtrace is down" apart from "mtrace could not answer that".
+// Open incidents, uptime, and whether /update has a token. It asks mtrace nothing: pete-bot
+// stopped calling mtrace in PET-518, and mtrace left loopback in the same change.
 import { SlashCommandBuilder, ApplicationIntegrationType, InteractionContextType } from 'discord.js';
 
 export const statusCommand = new SlashCommandBuilder()
   .setName('status')
-  .setDescription('Is mtrace reachable, and what is pete-bot holding?')
+  .setDescription('What is pete-bot holding: open incidents, uptime, /update')
   .setIntegrationTypes([ApplicationIntegrationType.UserInstall])
   .setContexts([
     InteractionContextType.Guild,

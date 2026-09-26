@@ -1,22 +1,19 @@
 /**
  * Pete Bot — a Discord surface for the homelab, and nothing more.
  *
- * Two jobs. /ask forwards a question to mtrace on media-dash-237 and renders the
- * answer; mtrace owns the tool set and the routing, including the keyword fallback
- * that answers when Ollama is down. POST /v1/alert takes an Uptime Kuma webhook and
- * puts it in the owner's DM, editing the original message on recovery.
+ * Two jobs. POST /v1/alert takes an Uptime Kuma webhook and puts it in the owner's DM,
+ * editing the original message on recovery. /update (PET-395) starts a media update
+ * through GitHub Actions; the run holds the privileges, and this process holds a token
+ * that can start that one workflow. /status reports what it is holding.
  *
- * /update (PET-395) starts a media update through GitHub Actions. The run holds the
- * privileges; this process holds a token that can start that one workflow.
- *
- * It holds no tools of its own. The Mission Control, ArgoCD and Kubernetes clients
- * this started as are gone with the cluster they queried.
+ * It asks mtrace nothing. /ask and plain-DM questions went in PET-518, when Bobbert took
+ * over asking mtrace with its own token. The Mission Control, ArgoCD and Kubernetes
+ * clients this started as are gone with the cluster they queried.
  */
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, GatewayIntentBits } from 'discord.js';
 import { config } from './config.js';
 import { registerCommands } from './commands/registerCommands.js';
 import { createInteractionHandler } from './events/interactionCreate.js';
-import { createMessageHandler } from './events/messageCreate.js';
 import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
@@ -25,20 +22,12 @@ import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
 
-// ⚠ MessageContent IS PRIVILEGED. It must be enabled in the Developer Portal under
-// Bot → Privileged Gateway Intents, or login fails outright with a disallowed-intents
-// error. That failure is loud and the deploy's login check catches it.
-//
-// ⚠ Partials.Channel IS REQUIRED FOR DMs. Without it discord.js drops messageCreate for
-// a DM channel it has not cached, which for an app that lives only in DMs means it
-// silently receives nothing — the failure looks exactly like the intent being off.
+// No privileged intent and no partials. The app reads no messages since PET-518: slash
+// commands arrive as interactions, and alert DMs go out over REST. MessageContent and
+// Partials.Channel existed only for plain-DM questions. Requesting MessageContent again
+// makes login fail outright if the Developer Portal has it off.
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-  partials: [Partials.Channel, Partials.Message],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
 });
 
 client.once('clientReady', async () => {
@@ -51,7 +40,7 @@ client.once('clientReady', async () => {
 
   await registerCommands();
 
-  logger.info(`Pete Bot v${VERSION} ready — /ask, /status, /update, plain DMs, and /v1/alert`);
+  logger.info(`Pete Bot v${VERSION} ready — /status, /update, and /v1/alert`);
 });
 
 client.on('disconnect', () => {
@@ -65,7 +54,6 @@ client.on('error', (error) => {
 });
 
 client.on('interactionCreate', createInteractionHandler());
-client.on('messageCreate', createMessageHandler(client));
 
 export async function start(): Promise<void> {
   logger.info(`Starting Pete Bot v${VERSION}`);
