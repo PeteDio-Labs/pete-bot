@@ -5,11 +5,11 @@
  * channels, 0 attachments. On 2026-09-09 it logged 1724 consecutive DOWN heartbeats
  * across a nine-and-a-half-hour Vault outage and told no one (PET-374).
  *
- * WHY NOT /v1/notify. That route's schema wants a `pl_` planId and an `mcUrl` from a
+ * WHY NOT THE OLD /v1/notify. That route's schema wanted a `pl_` planId and an `mcUrl` from a
  * Mission Control that no longer exists, and it is HMAC-gated. Kuma's generic webhook
  * cannot sign a body, so it could never satisfy either. This route takes Kuma's own
  * shape and authenticates with a bearer token, which is the strongest thing the sender
- * can actually produce.
+ * can actually produce. (PET-579 later reused the name for an unrelated free-text route.)
  *
  * WHY IT EDITS. One message per incident, edited in place (PET-384). Kuma's native
  * Discord provider posts DOWN and UP as unrelated messages, and this route used to post
