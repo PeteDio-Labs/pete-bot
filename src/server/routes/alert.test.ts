@@ -44,6 +44,18 @@ describe('auth', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  // PET-584: sessions on claude-247 and codex-248 hold the notify token, and must not be
+  // able to post a fake DOWN with it.
+  it('refuses the notify bearer', async () => {
+    const { client, send } = fakeDiscord();
+    await request(createApp(client))
+      .post('/v1/alert')
+      .set('authorization', 'Bearer test-notify-token')
+      .send(downPayload('vault'))
+      .expect(401);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('accepts the configured bearer', async () => {
     const { client } = fakeDiscord();
     await request(createApp(client))

@@ -62,6 +62,12 @@ interface Config {
      * The HMAC routes keep HMAC.
      */
     alertToken: string;
+    /**
+     * Bearer token for POST /v1/notify (PET-584). Separate from alertToken, so a session
+     * that can DM the owner cannot also post a fake monitor alert. Empty refuses every
+     * request.
+     */
+    notifyToken: string;
   };
 }
 
@@ -101,6 +107,7 @@ export const config: Config = {
     enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',
     port: parseInt(getEnvVar('HTTP_SERVER_PORT', '3015'), 10),
     alertToken: getEnvVar('ALERT_BEARER_TOKEN', ''),
+    notifyToken: getEnvVar('NOTIFY_BEARER_TOKEN', ''),
   },
 };
 

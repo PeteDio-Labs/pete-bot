@@ -100,14 +100,16 @@ Port 3015, separate from the metrics port so app traffic cannot affect a scrape.
 | Route | Auth | What it does |
 |-------|------|--------------|
 | `GET /health` | none | Liveness. Carries uptime and the number of open incidents |
-| `POST /v1/alert` | bearer | Uptime Kuma webhook → the owner's DM |
-| `POST /v1/notify` | bearer | `{from, message}` → one DM to the owner. Records nothing |
+| `POST /v1/alert` | alert bearer | Uptime Kuma webhook → the owner's DM |
+| `POST /v1/notify` | notify bearer | `{from, message}` → one DM to the owner. Records nothing |
 
 `/v1/alert` takes a **bearer token, not HMAC**, and that is forced rather than chosen:
 Kuma's generic webhook cannot sign a body. Do not "fix" this by adding HMAC and
 wondering why Kuma 401s.
 
-`/v1/notify` uses the same `ALERT_BEARER_TOKEN`. The body is `{"from": "<1–100 characters>",
+`/v1/notify` takes its own `NOTIFY_BEARER_TOKEN` (PET-584), and neither token opens the
+other route. The notify token sits on the session hosts, so a session that can DM the owner
+cannot post a fake alert. The body is `{"from": "<1–100 characters>",
 "message": "<1–1800 characters>"}`, and unknown keys are ignored. The DM leads with the
 sender in bold so a phone's notification preview says who is talking, and it pings no one,
 whatever the text mentions. A success returns `{ok, action: "sent", channelId, messageId}`.
@@ -123,7 +125,8 @@ message id, never the text.
 | `OWNER_USER_ID` | Yes | — | The only account this app answers, and the only one it DMs |
 | `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health`, `/v1/alert` and `/v1/notify` |
 | `HTTP_SERVER_PORT` | No | `3015` | Port for the above |
-| `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert` and `/v1/notify`. Uptime Kuma sends it on `/v1/alert` |
+| `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert`, which Uptime Kuma sends. Empty refuses every alert |
+| `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |

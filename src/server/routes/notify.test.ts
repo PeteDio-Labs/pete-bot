@@ -1,14 +1,14 @@
 /**
  * POST /v1/notify — a free-text DM for the owner (PET-579).
  *
- * It shares /v1/alert's bearer and must touch no incident state.
+ * It has its own bearer (PET-584) and must touch no incident state.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../index.js';
 import { reset, size } from '../alertStore.js';
 
-const TOKEN = 'test-alert-token';
+const TOKEN = 'test-notify-token';
 
 function fakeDiscord(sendImpl?: () => Promise<{ id: string }>) {
   const send = vi.fn(sendImpl ?? (async () => ({ id: 'msg-1' })));
@@ -34,6 +34,17 @@ describe('auth', () => {
     await request(createApp(client))
       .post('/v1/notify')
       .set('authorization', 'Bearer wrong-token-here')
+      .send({ from: 'a', message: 'b' })
+      .expect(401);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  // PET-584: the alert token stays with Uptime Kuma and opens /v1/alert only.
+  it('refuses the alert bearer', async () => {
+    const { client, send } = fakeDiscord();
+    await request(createApp(client))
+      .post('/v1/notify')
+      .set('authorization', 'Bearer test-alert-token')
       .send({ from: 'a', message: 'b' })
       .expect(401);
     expect(send).not.toHaveBeenCalled();
