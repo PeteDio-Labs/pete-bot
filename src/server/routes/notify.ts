@@ -6,9 +6,11 @@
  * message would arrive as a red DOWN embed and add incident state that never recovers.
  * This route sends the text and records nothing.
  *
- * WHY THE SAME TOKEN. ALERT_BEARER_TOKEN already lets its holder put 2000 characters of
- * text in an alert embed, so a second route behind it adds no reach and needs no second
- * secret. Split the token if a caller ever joins that should not be able to alert.
+ * WHY ITS OWN TOKEN (PET-584). This route is the first way every session reaches Pedro,
+ * so its token sits on claude-247 and codex-248, readable by their session users. Those
+ * sessions must not be able to post a fake DOWN alert, so NOTIFY_BEARER_TOKEN opens this
+ * route alone, and ALERT_BEARER_TOKEN stays with Uptime Kuma. Neither opens the other's
+ * route. The route shipped on the alert token in PET-579, and PET-584 split it.
  *
  * WHY `content` AND NOT AN EMBED. Pedro reads this on a phone, and the notification
  * preview shows a message's content. The sender's name leads the first line, so the
@@ -29,8 +31,8 @@ const NotifySchema = z.object({
 
 export function createNotifyHandler(client: Client) {
   return async function notifyHandler(req: Request, res: Response): Promise<void> {
-    // Same bearer check as /v1/alert: length first, then value.
-    const expected = config.httpServer.alertToken;
+    // The bearer check /v1/alert uses, against this route's own token.
+    const expected = config.httpServer.notifyToken;
     const got = (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
     if (!expected || got.length !== expected.length || got !== expected) {
       res.status(401).json({ error: 'unauthorized' });

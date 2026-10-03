@@ -75,7 +75,8 @@ jobs:
             kv/data/services/pete-bot discord_token | PB_TOKEN ;
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
             kv/data/services/pete-bot owner_user_id | PB_OWNER ;
-            kv/data/services/pete-bot alert_bearer_token | PB_BEARER
+            kv/data/services/pete-bot alert_bearer_token | PB_BEARER ;
+            kv/data/services/pete-bot notify_bearer_token | PB_NOTIFY_BEARER
 
       # ⚠ A SECOND STEP EXISTS ONLY TO SCOPE `ignoreNotFound` TO ONE SECRET (PET-395).
       #
@@ -136,6 +137,9 @@ jobs:
               "pete_bot_discord_client_id": os.environ["PB_CLIENT"],
               "pete_bot_owner_user_id":     os.environ["PB_OWNER"],
               "pete_bot_alert_bearer":      os.environ["PB_BEARER"],
+              # Required, in the strict step above (PET-584): /v1/notify is how every
+              # session reaches Pedro, so a deploy without its token must fail, not ship.
+              "pete_bot_notify_bearer":     os.environ["PB_NOTIFY_BEARER"],
               # .get, not [] — with ignoreNotFound above, an absent field means the env
               # var is never set at all, and indexing would KeyError one layer below the
               # thing that was just made tolerant. Empty is the documented state.
@@ -155,11 +159,11 @@ jobs:
       # ⚠ python:3.12-slim from Docker Hub, NOT docker.pdlab.dev. registry-106 will not
       # restore, so a private image cannot be pulled and is cached on neither runner.
       #
-      # ⚠ THE GALAXY INSTALL RETRIES ON PURPOSE (PET-583). runner-232's IPv4 egress resets
-      # connections to galaxy's S3 redirect target now and then: on 2026-10-03, 1 of 6 test
-      # downloads died with "Connection reset by peer", and the deploy of PET-579's merge
-      # failed three times on it. The same install passes from the Mac, so the network is at
-      # fault, not the unpinned versions. Five attempts, then a real failure.
+      # ⚠ THE GALAXY INSTALL RETRIES ON PURPOSE (PET-583). The .50 LAN's IPv4 egress resets
+      # about one connection in ten to galaxy's S3 redirect target, from runner-232 and
+      # runner-233 alike. The deploy of PET-579's merge failed three times on it. The Mac,
+      # on the .86 mesh, saw no reset in ten tries, so the network is at fault, not the
+      # unpinned versions. Five attempts, then a real failure.
       - name: Deploy to media-dash-237
         run: |
           docker run --rm --network host \
