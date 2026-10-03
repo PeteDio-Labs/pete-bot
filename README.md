@@ -6,6 +6,9 @@ and it holds no tools of its own.
 **`POST /v1/alert`** takes an Uptime Kuma webhook and puts it in the owner's DM. One
 message per incident, edited in place.
 
+**`POST /v1/notify`** puts one free-text message in the same DM, for a session that has
+something to tell the owner. It adds no incident state.
+
 **`/update`** starts petedio-media-iac's update workflow and reports what the run did.
 
 It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
@@ -98,10 +101,18 @@ Port 3015, separate from the metrics port so app traffic cannot affect a scrape.
 |-------|------|--------------|
 | `GET /health` | none | Liveness. Carries uptime and the number of open incidents |
 | `POST /v1/alert` | bearer | Uptime Kuma webhook → the owner's DM |
+| `POST /v1/notify` | bearer | `{from, message}` → one DM to the owner. Records nothing |
 
 `/v1/alert` takes a **bearer token, not HMAC**, and that is forced rather than chosen:
 Kuma's generic webhook cannot sign a body. Do not "fix" this by adding HMAC and
 wondering why Kuma 401s.
+
+`/v1/notify` uses the same `ALERT_BEARER_TOKEN`. The body is `{"from": "<1–100 characters>",
+"message": "<1–1800 characters>"}`, and unknown keys are ignored. The DM leads with the
+sender in bold so a phone's notification preview says who is talking, and it pings no one,
+whatever the text mentions. A success returns `{ok, action: "sent", channelId, messageId}`.
+A bad body returns 400, and a Discord failure returns 502. The log holds the sender and the
+message id, never the text.
 
 ## Environment variables
 
@@ -110,9 +121,9 @@ wondering why Kuma 401s.
 | `DISCORD_TOKEN` | Yes | — | Discord bot token |
 | `DISCORD_CLIENT_ID` | Yes | — | Discord application client id |
 | `OWNER_USER_ID` | Yes | — | The only account this app answers, and the only one it DMs |
-| `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health` and `/v1/alert` |
+| `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health`, `/v1/alert` and `/v1/notify` |
 | `HTTP_SERVER_PORT` | No | `3015` | Port for the above |
-| `ALERT_BEARER_TOKEN` | No | — | Token Uptime Kuma sends on `/v1/alert` |
+| `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert` and `/v1/notify`. Uptime Kuma sends it on `/v1/alert` |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
@@ -148,7 +159,7 @@ src/
 ├── commands/     # /status and /update definitions, and registration
 ├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server
-├── server/       # HTTP app, /v1/alert, and the incident store
+├── server/       # HTTP app, /v1/alert, /v1/notify, and the incident store
 └── utils/        # logger
 ```
 

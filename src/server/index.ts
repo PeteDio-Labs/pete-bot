@@ -4,6 +4,7 @@
  * Express app on port 3015 (configurable). Routes:
  *   GET  /health           — liveness + readiness probe (no auth)
  *   POST /v1/alert         — Uptime Kuma webhook → the owner's DM (bearer token)
+ *   POST /v1/notify        — free-text message → the owner's DM (bearer token)
  *
  * Kept separate from the metrics server (port 9090) so Prometheus scrapes a port that
  * app traffic cannot affect, and so a NetworkPolicy can scope inbound alerts to 3015.
@@ -22,6 +23,7 @@ import type { Client } from 'discord.js';
 import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
+import { createNotifyHandler } from './routes/notify.js';
 import { size as openIncidents } from './alertStore.js';
 
 let server: Server | null = null;
@@ -55,6 +57,9 @@ export function createApp(client: Client): Express {
   // `hmac` chain deliberately; do not "fix" this by adding hmac and wondering why
   // Kuma 401s.
   app.post('/v1/alert', createAlertHandler(client));
+
+  // ── Free-text notify, same bearer as /v1/alert (PET-579) ─────────
+  app.post('/v1/notify', createNotifyHandler(client));
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not_found', path: req.path });
