@@ -154,6 +154,12 @@ jobs:
       #
       # ⚠ python:3.12-slim from Docker Hub, NOT docker.pdlab.dev. registry-106 will not
       # restore, so a private image cannot be pulled and is cached on neither runner.
+      #
+      # ⚠ THE GALAXY INSTALL RETRIES ON PURPOSE (PET-583). runner-232's IPv4 egress resets
+      # connections to galaxy's S3 redirect target now and then: on 2026-10-03, 1 of 6 test
+      # downloads died with "Connection reset by peer", and the deploy of PET-579's merge
+      # failed three times on it. The same install passes from the Mac, so the network is at
+      # fault, not the unpinned versions. Five attempts, then a real failure.
       - name: Deploy to media-dash-237
         run: |
           docker run --rm --network host \
@@ -166,7 +172,11 @@ jobs:
             python:3.12-slim sh -c \
             "apt-get update -q >/dev/null && apt-get install -y -q openssh-client rsync >/dev/null && \
              pip install -q ansible-core && \
-             ansible-galaxy collection install community.general ansible.posix && \
+             for try in 1 2 3 4 5; do \
+               ansible-galaxy collection install community.general ansible.posix && break; \
+               [ \$try -lt 5 ] || exit 1; \
+               echo galaxy install attempt \$try failed, retrying >&2; sleep 5; \
+             done && \
              if ansible-playbook -i inventory/ playbooks/configure-pete-bot.yml --list-hosts | grep -q 'hosts (0):'; then \
                echo '::error title=deploy::No hosts matched. The inventory does not carry media_dash.'; exit 1; \
              fi && \
