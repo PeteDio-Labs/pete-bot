@@ -5,6 +5,7 @@
  *   GET  /health           — liveness + readiness probe (no auth)
  *   POST /v1/alert         — Uptime Kuma webhook → the owner's DM (bearer token)
  *   POST /v1/notify        — free-text message → the owner's DM (bearer token)
+ *   POST /v1/llm/v1/messages — the Anthropic API gateway (per-caller bearer, PET-617)
  *
  * Kept separate from the metrics server (port 9090) so Prometheus scrapes a port that
  * app traffic cannot affect, and so a NetworkPolicy can scope inbound alerts to 3015.
@@ -25,11 +26,39 @@ import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
 import { size as openIncidents } from './alertStore.js';
+import { parseGatewaySettings } from '../gateway/config.js';
+import { createGateway, LLM_ROUTES, type Gateway } from '../gateway/route.js';
 
 let server: Server | null = null;
+let gateway: Gateway | null = null;
 
-export function createApp(client: Client): Express {
+/** Built from config once per process, so the ledger opens once. */
+function defaultGateway(): Gateway {
+  gateway ??= createGateway(
+    parseGatewaySettings({
+      apiKey: config.llm.apiKey,
+      callersJson: config.llm.callersJson,
+      ledgerPath: config.llm.ledgerPath,
+      otherTokens: [config.httpServer.alertToken, config.httpServer.notifyToken],
+    }),
+  );
+  return gateway;
+}
+
+export interface AppOptions {
+  /** Tests inject a gateway with a fake fetch and an in-memory ledger. */
+  gateway?: Gateway;
+}
+
+export function createApp(client: Client, options: AppOptions = {}): Express {
   const app = express();
+  const llm = options.gateway ?? defaultGateway();
+
+  // ⚠ REGISTERED BEFORE THE GLOBAL PARSER ON PURPOSE. An agent's request carries its
+  // whole conversation and every tool result, which passes 512kb long before it passes
+  // the model's context. express.json skips a body already parsed, so this limit wins
+  // on the gateway's paths and 512kb holds everywhere else.
+  app.use('/v1/llm', express.json({ limit: '8mb' }));
 
   app.use(
     express.json({
@@ -47,6 +76,9 @@ export function createApp(client: Client): Express {
       service: 'pete-bot-http',
       uptimeSeconds: process.uptime(),
       alertBatches: openIncidents(),
+      // off, misconfigured or on. Off is normal until a key is seeded; the deploy
+      // fails on misconfigured.
+      llm: llm.state,
       timestamp: new Date().toISOString(),
     });
   });
@@ -60,6 +92,11 @@ export function createApp(client: Client): Express {
 
   // ── Free-text notify, same bearer as /v1/alert (PET-579) ─────────
   app.post('/v1/notify', createNotifyHandler(client));
+
+  // ── Anthropic API gateway, one bearer and one cap per caller (PET-617) ──
+  app.post(LLM_ROUTES, (req, res, next) => {
+    llm.handle(req, res).catch(next);
+  });
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not_found', path: req.path });
