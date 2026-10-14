@@ -4,7 +4,7 @@
  * as a command that simply is not there, never as an error. PET-89's lesson: assert the
  * emitted shape, not the builder that produced it.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import { allCommands } from './index.js';
 import { UPDATE_TARGETS } from '../../clients/githubActions.js';
 

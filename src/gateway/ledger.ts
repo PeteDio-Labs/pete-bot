@@ -1,16 +1,16 @@
 /**
  * The gateway's spend ledger: one row per answered request (PET-617).
  *
- * WHY node:sqlite AND NOT bun:sqlite. The deploy runs pete-bot as a Bun binary, but
- * vitest runs the suite under Node, where `bun:sqlite` does not load. `node:sqlite` loads
- * under both, and in the compiled binary, so the tests exercise the same database code
- * that ships. It needs Node 22.5 or later, which is why CI sets up Node 22.
+ * WHY bun:sqlite. pete-bot runs under Bun alone: the service is a compiled Bun binary,
+ * and `bun test` runs the suite, so the tests exercise the same database code that ships.
+ * The first draft used `node:sqlite` for vitest under Node, and Bun 1.3.11 has no such
+ * module, so that binary crashed at startup with the gateway off.
  *
  * ⚠ THE CAP READS THIS FILE, SO IT MUST OUTLIVE A RESTART. An in-memory ledger would
  * reset every caller's spend to zero on each deploy. The gateway refuses to start
  * without a ledger path; only tests pass ':memory:'.
  */
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { Database, type Statement } from 'bun:sqlite';
 
 export interface LedgerEntry {
   caller: string;
@@ -29,12 +29,12 @@ export function monthOf(at: Date): string {
 }
 
 export class Ledger {
-  private readonly db: DatabaseSync;
-  private readonly insert: StatementSync;
-  private readonly spent: StatementSync;
+  private readonly db: Database;
+  private readonly insert: Statement;
+  private readonly spent: Statement;
 
   constructor(path: string) {
-    this.db = new DatabaseSync(path);
+    this.db = new Database(path, { create: true, strict: true });
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS llm_usage (
@@ -79,11 +79,17 @@ export class Ledger {
 
   /** What a caller has spent in the month `at` falls in, in nano-dollars. */
   spentNanoUsd(caller: string, at = new Date()): number {
-    const row = this.spent.get(caller, monthOf(at)) as { total: number | bigint };
-    return Number(row.total);
+    const row = this.spent.get(caller, monthOf(at)) as { total: number | bigint } | null;
+    return Number(row?.total ?? 0);
   }
 
+  /**
+   * bun:sqlite keeps a database open while a prepared statement holds it, so the
+   * statements are finalized first. After close, every read and write throws.
+   */
   close(): void {
+    this.insert.finalize();
+    this.spent.finalize();
     this.db.close();
   }
 }

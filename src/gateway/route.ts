@@ -17,20 +17,28 @@
  * WHAT IT REFUSES, AND WHY EACH STATUS. The SDK retries 408, 409, 429 and 5xx, so every
  * refusal a retry cannot fix is a 4xx it does not retry:
  *
- *   503  the gateway is off or misconfigured (a retry may succeed after a deploy)
+ *   503  the gateway is off or misconfigured, or its ledger failed (a retry may succeed
+ *        after a deploy or a restart)
  *   401  no bearer, or one that matches no caller
- *   400  no model, no max_tokens, or `stream: true`
+ *   400  no model, no max_tokens, `stream: true`, a parameter the gateway cannot price,
+ *        or a code execution tool
  *   403  a model this caller may not use, or a caller already at its monthly cap
+ *   429  the caller already has MAX_IN_FLIGHT requests open (the SDK retries this one)
  *
  * ⚠ THE CAP IS CHECKED BEFORE A REQUEST, SO ONE REQUEST CAN CROSS IT. The cost is known
  * only from the response. A caller at $14.99 of $15 gets one more answer, and is refused
- * after it. Concurrent requests from one caller can each cross it once.
+ * after it. MAX_IN_FLIGHT bounds the overshoot: at most that many answers cross the cap.
+ *
+ * ⚠ A PARAMETER MISSING FROM ALLOWED_PARAMS IS REFUSED. Some parameters change the price
+ * of the same tokens: `speed: "fast"`, `inference_geo` and `service_tier` all bill above
+ * the rates in pricing.ts, so a cap that forwarded them would undercount. Add a parameter
+ * here only once pricing.ts prices whatever it changes.
  *
  * ⚠ NO STREAMING YET. The ledger reads `usage` from a whole response. A streamed response
  * spreads it across events, and that parsing is not written.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '../utils/index.js';
 import type { Caller, GatewaySettings } from './config.js';
@@ -47,16 +55,58 @@ const UPSTREAM_TIMEOUT_MS = 10 * 60 * 1000;
 /** Response headers the caller's SDK reads, passed back unchanged. */
 const PASSTHROUGH_HEADERS = ['request-id', 'retry-after', 'anthropic-organization-id'];
 
+/** At most this many open requests per caller, so concurrent answers cannot all cross the cap. */
+export const MAX_IN_FLIGHT = 2;
+
+/** The Messages API parameters the gateway forwards. Each bills at the rates in pricing.ts. */
+const ALLOWED_PARAMS = new Set([
+  'model',
+  'max_tokens',
+  'messages',
+  'system',
+  'stop_sequences',
+  'temperature',
+  'top_p',
+  'top_k',
+  'tools',
+  'tool_choice',
+  'metadata',
+  'thinking',
+  'output_config',
+  'stream',
+]);
+
 const RequestSchema = z
   .object({
     model: z.string().min(1),
     max_tokens: z.number().int().positive(),
     stream: z.literal(false).optional(),
+    tools: z
+      .array(
+        z
+          .object({ type: z.string().optional() })
+          .passthrough()
+          // Code execution bills by container time, which pricing.ts does not price.
+          .refine((t) => !t.type?.startsWith('code_execution'), 'code execution is not priced by the gateway'),
+      )
+      .optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((body, ctx) => {
+    for (const key of Object.keys(body)) {
+      if (!ALLOWED_PARAMS.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: 'is not a parameter the gateway can price' });
+      }
+    }
+  });
 
 export interface Gateway {
   readonly state: GatewaySettings['state'];
+  /**
+   * Refuse a request with no valid token before its body is read. The server mounts this
+   * ahead of the 8 MB parser, so an unauthenticated caller never makes it parse 8 MB.
+   */
+  guard(req: Request, res: Response, next: NextFunction): void;
   handle(req: Request, res: Response): Promise<void>;
   close(): void;
 }
@@ -71,6 +121,21 @@ export interface GatewayDeps {
 /** The error shape the Anthropic API returns, so the caller's SDK reads it as one. */
 function refuse(res: Response, status: number, type: string, message: string): void {
   res.status(status).json({ type: 'error', error: { type, message } });
+}
+
+/**
+ * The server's last error handler answers 500, which the SDK retries with the same body.
+ * A body the parser refused (too large, or not JSON) fails the same way every time, so
+ * the gateway's paths answer the parser's own 4xx in the API's error shape.
+ */
+export function gatewayErrorHandler(err: unknown, _req: Request, res: Response, next: NextFunction): void {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status !== 'number' || status < 400 || status > 499) {
+    next(err);
+    return;
+  }
+  if (status === 413) refuse(res, 413, 'request_too_large', 'the request body is larger than the gateway accepts');
+  else refuse(res, status, 'invalid_request_error', 'the request body could not be read as JSON');
 }
 
 const digest = (s: string): Buffer => createHash('sha256').update(s).digest();
@@ -93,31 +158,81 @@ function presentedToken(req: Request): string {
 
 const usd = (nano: number): string => `$${(nano / 1e9).toFixed(2)}`;
 
+/**
+ * The most a request could cost, for an answer whose `usage` is missing. One input token
+ * per character of the request body is an upper bound, since a token is at least one
+ * character, and the answer can be at most max_tokens long.
+ */
+function worstCase(body: string, maxTokens: number): Usage {
+  return { input_tokens: body.length, output_tokens: maxTokens };
+}
+
+/** A gateway that refuses everything, for the off and misconfigured states. */
+function closedGateway(state: 'off' | 'misconfigured'): Gateway {
+  const closed = (_req: Request, res: Response): void => refuse(res, 503, 'api_error', `the LLM gateway is ${state}`);
+  return {
+    state,
+    guard: closed,
+    async handle(req, res) {
+      closed(req, res);
+    },
+    close() {},
+  };
+}
+
 export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {}): Gateway {
   if (settings.state !== 'on') {
     if (settings.state === 'misconfigured') {
       logger.error(`LLM gateway is misconfigured and will refuse every request: ${settings.reason}`);
     }
-    return {
-      state: settings.state,
-      async handle(_req, res) {
-        refuse(res, 503, 'api_error', `the LLM gateway is ${settings.state}`);
-      },
-      close() {},
-    };
+    return closedGateway(settings.state);
   }
 
   const { apiKey, callers } = settings;
   const doFetch = deps.fetch ?? fetch;
   const now = deps.now ?? (() => new Date());
-  const ledger = deps.ledger ?? new Ledger(settings.ledgerPath);
+
+  // An unwritable ledger path disables the gateway, not the bot (see config.ts).
+  let ledger: Ledger;
+  try {
+    ledger = deps.ledger ?? new Ledger(settings.ledgerPath);
+  } catch (err) {
+    logger.error(
+      `LLM gateway is misconfigured and will refuse every request: LLM_LEDGER_PATH cannot be opened: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return closedGateway('misconfigured');
+  }
+
+  /**
+   * Set when an answered request could not be recorded. Its cost is missing from the
+   * ledger, so no cap can be trusted until a restart, and every later request gets a 503.
+   */
+  let ledgerBroken = false;
+  const inFlight = new Map<string, number>();
   logger.info(`LLM gateway is on for ${callers.map((c) => c.name).join(', ')}`);
 
-  async function handle(req: Request, res: Response): Promise<void> {
+  function callerOf(req: Request): Caller | undefined {
     const presented = presentedToken(req);
-    const caller = presented ? findCaller(callers, presented) : undefined;
+    return presented ? findCaller(callers, presented) : undefined;
+  }
+
+  function guard(req: Request, res: Response, next: NextFunction): void {
+    if (!callerOf(req)) {
+      refuse(res, 401, 'authentication_error', 'unknown gateway token');
+      return;
+    }
+    next();
+  }
+
+  async function handle(req: Request, res: Response): Promise<void> {
+    const caller = callerOf(req);
     if (!caller) {
       refuse(res, 401, 'authentication_error', 'unknown gateway token');
+      return;
+    }
+
+    if (ledgerBroken) {
+      refuse(res, 503, 'api_error', 'the LLM gateway ledger failed a write; restart pete-bot after fixing it');
       return;
     }
 
@@ -127,7 +242,7 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       refuse(res, 400, 'invalid_request_error', `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}`);
       return;
     }
-    const { model } = parsed.data;
+    const { model, max_tokens: maxTokens } = parsed.data;
 
     const alias = canonicalModel(model);
     if (!alias || !caller.models.has(alias)) {
@@ -149,6 +264,22 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       return;
     }
 
+    const open = inFlight.get(caller.name) ?? 0;
+    if (open >= MAX_IN_FLIGHT) {
+      res.setHeader('retry-after', '1');
+      refuse(res, 429, 'rate_limit_error', `${caller.name} already has ${open} requests open`);
+      return;
+    }
+    inFlight.set(caller.name, open + 1);
+    try {
+      await forward(req, res, caller, model, maxTokens);
+    } finally {
+      inFlight.set(caller.name, (inFlight.get(caller.name) ?? 1) - 1);
+    }
+  }
+
+  async function forward(req: Request, res: Response, caller: Caller, model: string, maxTokens: number): Promise<void> {
+    const body = JSON.stringify(req.body);
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-api-key': apiKey,
@@ -162,7 +293,7 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       upstream = await doFetch(UPSTREAM, {
         method: 'POST',
         headers,
-        body: JSON.stringify(req.body),
+        body,
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
     } catch (err) {
@@ -172,10 +303,20 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       return;
     }
 
-    const text = await upstream.text();
+    const requestId = upstream.headers.get('request-id') ?? undefined;
+    let text: string;
+    try {
+      text = await upstream.text();
+    } catch (err) {
+      // The API may have answered, and spent the tokens, before the body broke off.
+      logger.error(`LLM gateway lost the API's answer for ${caller.name}: ${err instanceof Error ? err.message : String(err)}`);
+      if (upstream.ok) recordUsage(caller, model, undefined, worstCase(body, maxTokens), requestId);
+      refuse(res, 502, 'api_error', 'the API answer was cut off');
+      return;
+    }
 
     if (upstream.ok) {
-      recordUsage(caller, model, text, upstream.headers.get('request-id') ?? undefined);
+      recordUsage(caller, model, text, worstCase(body, maxTokens), requestId);
     }
 
     res.status(upstream.status);
@@ -188,15 +329,23 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
   }
 
   /**
-   * Price and record one answered request. A failure here is logged and the answer still
-   * goes back: the tokens are spent either way, and a 5xx would make the SDK retry and
-   * spend them again.
+   * Price and record one answered request. An answer with no readable `usage` is priced
+   * at `fallback`, the most it could have cost, so the ledger never undercounts.
+   *
+   * A failed write is logged and the answer still goes back: the tokens are spent either
+   * way, and a 5xx would make the SDK retry and spend them again. The failure latches
+   * ledgerBroken, so the next request is refused instead of spending past an unknown total.
    */
-  function recordUsage(caller: Caller, requested: string, text: string, requestId?: string): void {
+  function recordUsage(caller: Caller, requested: string, text: string | undefined, fallback: Usage, requestId?: string): void {
     try {
-      const body = JSON.parse(text) as { model?: string; usage?: Usage };
-      const model = typeof body.model === 'string' && priceFor(body.model) ? body.model : requested;
-      const usage = body.usage ?? {};
+      let parsed: { model?: unknown; usage?: Usage | null } = {};
+      try {
+        parsed = text === undefined ? {} : (JSON.parse(text) as typeof parsed);
+      } catch {
+        logger.warn(`LLM gateway: ${caller.name} got an answer that is not JSON; pricing it at the worst case`);
+      }
+      const model = typeof parsed.model === 'string' && priceFor(parsed.model) ? parsed.model : requested;
+      const usage = parsed.usage && typeof parsed.usage === 'object' ? parsed.usage : fallback;
       const cost = costNanoUsd(priceFor(model)!, usage);
       const cacheWrite =
         (usage.cache_creation?.ephemeral_5m_input_tokens ?? 0) + (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) ||
@@ -217,14 +366,16 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       // Who, what and how much. Never the prompt or the answer.
       logger.info(`LLM gateway: ${caller.name} ${model} in=${usage.input_tokens ?? 0} out=${usage.output_tokens ?? 0} cost=${usd(cost)}`);
     } catch (err) {
+      ledgerBroken = true;
       logger.error(
-        `LLM gateway answered ${caller.name} but could not record the cost: ${err instanceof Error ? err.message : String(err)}`,
+        `LLM gateway answered ${caller.name} but could not record the cost, so it refuses every request until a restart: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
   return {
     state: 'on',
+    guard,
     handle,
     close: () => ledger.close(),
   };

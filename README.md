@@ -54,11 +54,14 @@ bun dev
 
 ```bash
 bun dev            # dev server (hot reload)
-bun test           # run tests
+bun test           # run tests (Bun is the only runtime; see bunfig.toml)
 bun run typecheck
 bun run lint
 bun run build:binary   # standalone linux-x64 executable, what the deploy ships
+scripts/smoke-binary.sh   # start that binary and check it loads, as CI does
 ```
+
+Bun 1.4.2 or later is required.
 
 ## Commands
 
@@ -124,14 +127,23 @@ monthly cap in dollars and a list of models, set in `LLM_GATEWAY_CALLERS`. Every
 request goes into a SQLite ledger at `LLM_LEDGER_PATH`, with its tokens and its cost in
 integer nano-dollars, and the cap reads that ledger. The gateway refuses:
 
-- every request with 503 while it is off (no key) or misconfigured, and `/health` says which
-- an unknown token with 401
-- a missing `model` or `max_tokens`, or `stream: true`, with 400. Streaming is not written yet
+- every request with 503 while it is off (no key) or misconfigured, and `/health` says which.
+  A ledger path that cannot be opened makes it misconfigured
+- an unknown token with 401, before the body is read
+- a missing `model` or `max_tokens`, `stream: true`, a body that is not JSON, a code execution
+  tool, or any parameter the gateway cannot price, with 400. `speed`, `inference_geo` and
+  `service_tier` bill above the published rates, so they are refused. Streaming is not
+  written yet
+- a body over 8 MB with 413
 - a model the caller was not given, or a caller at its cap, with 403, which the SDK does not
   retry
+- a caller's third concurrent request with 429, which the SDK retries
+- every request with 503 after a ledger write fails, until a restart
 
-The cap is checked before a request, so one request can cross it. The log holds the caller,
-the model, the token counts and the cost, never the prompt or the answer.
+The cap is checked before a request, so one request can cross it, and at most two can,
+since a caller may have two open. An answer with no `usage` is recorded at the most it
+could have cost. The log holds the caller, the model, the token counts and the cost, never
+the prompt or the answer.
 
 ## Environment variables
 

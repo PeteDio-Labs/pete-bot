@@ -4,7 +4,7 @@
  * Every route test injects a fake fetch, so no test can reach the real API or spend a
  * cent. The ledger is real SQLite, in memory or in a temp file.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ import { createApp } from '../server/index.js';
 import { parseGatewaySettings, type GatewayEnv } from './config.js';
 import { Ledger, monthOf } from './ledger.js';
 import { costNanoUsd, priceFor, PRICES } from './pricing.js';
-import { createGateway } from './route.js';
+import { createGateway, MAX_IN_FLIGHT } from './route.js';
 
 const PM_TOKEN = 'pm-agent-token-0123456789abcdefghijklmnopqrstuv';
 const MAP_TOKEN = 'lab-map-token-0123456789abcdefghijklmnopqrstuvw';
@@ -265,7 +265,7 @@ describe('POST /v1/llm/v1/messages auth', () => {
   it('accepts the token as x-api-key, which the SDK sends when given apiKey', async () => {
     const { app, fetchFn } = setup();
     await request(app).post('/v1/llm/v1/messages').set('x-api-key', PM_TOKEN).send(body()).expect(200);
-    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -275,6 +275,12 @@ describe('POST /v1/llm/v1/messages payload', () => {
     ['no max_tokens', { max_tokens: undefined }],
     ['a fractional max_tokens', { max_tokens: 1.5 }],
     ['stream: true', { stream: true }],
+    // Each of these bills above the rates in pricing.ts, so the cap would undercount.
+    ['speed: "fast"', { speed: 'fast' }],
+    ['inference_geo', { inference_geo: 'us' }],
+    ['service_tier', { service_tier: 'auto' }],
+    ['a parameter it does not know', { mcp_servers: [] }],
+    ['a code execution tool', { tools: [{ type: 'code_execution_20250825', name: 'code_execution' }] }],
   ])('refuses %s with 400', async (_name, over) => {
     const { app, fetchFn } = setup();
     const res = await post(app).send(body(over)).expect(400);
@@ -292,6 +298,46 @@ describe('POST /v1/llm/v1/messages payload', () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
+  it('forwards the parameters it can price, and client and web search tools', async () => {
+    const { app, fetchFn } = setup();
+    await post(app)
+      .send(
+        body({
+          system: 'You write the morning brief.',
+          temperature: 0.2,
+          stop_sequences: ['END'],
+          thinking: { type: 'adaptive' },
+          output_config: { effort: 'low' },
+          metadata: { user_id: 'pm-agent' },
+          tool_choice: { type: 'auto' },
+          tools: [
+            { name: 'read_pr', description: 'Read a PR', input_schema: { type: 'object' } },
+            { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
+          ],
+        }),
+      )
+      .expect(200);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an unauthenticated body before parsing it, even one past the 8mb limit', async () => {
+    const { app, fetchFn } = setup();
+    const huge = JSON.stringify(body({ messages: [{ role: 'user', content: 'x'.repeat(9 * 1024 * 1024) }] }));
+    // 401, not 413: the guard answered before the parser read the body.
+    await request(app).post('/v1/llm/v1/messages').set('content-type', 'application/json').send(huge).expect(401);
+    // With a token, the parser refuses it as the API would: a 413 the SDK does not retry.
+    const tooBig = await post(app).set('content-type', 'application/json').send(huge).expect(413);
+    expect(tooBig.body.error.type).toBe('request_too_large');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('refuses a body that is not JSON with a 400, not a 500 the SDK would retry', async () => {
+    const { app, fetchFn } = setup();
+    const res = await post(app).set('content-type', 'application/json').send('{"model":').expect(400);
+    expect(res.body.error.type).toBe('invalid_request_error');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it('accepts a dated snapshot of an allowed model', async () => {
     const { app } = setup();
     await post(app).send(body({ model: 'claude-haiku-4-5-20251001' })).expect(200);
@@ -301,7 +347,7 @@ describe('POST /v1/llm/v1/messages payload', () => {
     const { app, fetchFn } = setup();
     const big = 'x'.repeat(1024 * 1024);
     await post(app).send(body({ messages: [{ role: 'user', content: big }] })).expect(200);
-    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -393,7 +439,7 @@ describe('POST /v1/llm/v1/messages monthly cap', () => {
     const { app, fetchFn } = setup({ ledger });
     await post(app).send(body()).expect(200);
     await post(app).send(body()).expect(403);
-    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it('holds each caller to its own cap', async () => {
@@ -409,5 +455,108 @@ describe('POST /v1/llm/v1/messages monthly cap', () => {
     ledger.record(entry('pm-agent', 15e9), new Date('2026-10-31T23:59:59Z'));
     const { app } = setup({ ledger, now: new Date('2026-11-01T00:00:00Z') });
     await post(app).send(body()).expect(200);
+  });
+});
+
+// ── review fixes (pete-bot#30, round 1) ──────────────────────────────────────
+
+/** A fetch that answers only when released, so a test can hold requests open. */
+function heldUpstream() {
+  const releases: Array<() => void> = [];
+  const fetchFn = vi.fn(
+    (_url: string | URL | Request, _init?: RequestInit) =>
+      new Promise<Response>((resolve) => {
+        releases.push(() =>
+          resolve(new Response(JSON.stringify(answer()), { status: 200, headers: { 'content-type': 'application/json' } })),
+        );
+      }),
+  );
+  return { fetchFn, releaseAll: () => releases.splice(0).forEach((r) => r()) };
+}
+
+describe('POST /v1/llm/v1/messages concurrency', () => {
+  it(`holds each caller to ${MAX_IN_FLIGHT} open requests with a 429 the SDK retries`, async () => {
+    const { fetchFn, releaseAll } = heldUpstream();
+    const { app } = setup({ fetch: fetchFn as never });
+    const open = Array.from({ length: MAX_IN_FLIGHT }, () => post(app).send(body()).then((r) => r.status));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchFn).toHaveBeenCalledTimes(MAX_IN_FLIGHT);
+
+    const extra = await post(app).send(body()).expect(429);
+    expect(extra.body.error.type).toBe('rate_limit_error');
+    expect(extra.headers['retry-after']).toBe('1');
+    // Another caller has its own allowance.
+    const other = post(app, MAP_TOKEN).send(body()).then((r) => r.status);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchFn).toHaveBeenCalledTimes(MAX_IN_FLIGHT + 1);
+
+    releaseAll();
+    const statuses: number[] = await Promise.all([...open, other]);
+    expect(statuses).toEqual(Array<number>(MAX_IN_FLIGHT + 1).fill(200));
+    // The slots are free again.
+    const after = post(app).send(body()).then((r) => r.status);
+    await new Promise((r) => setTimeout(r, 50));
+    releaseAll();
+    expect(await after).toBe(200);
+  });
+});
+
+describe('POST /v1/llm/v1/messages ledger failures', () => {
+  it('is misconfigured, not crashed, when the ledger path cannot be opened', async () => {
+    const fetchFn = upstream();
+    const gateway = createGateway(parseGatewaySettings(env({ ledgerPath: '/nonexistent/dir/ledger.sqlite' })), {
+      fetch: fetchFn as unknown as typeof fetch,
+    });
+    expect(gateway.state).toBe('misconfigured');
+    const app = createApp({} as never, { gateway });
+    await post(app).send(body()).expect(503);
+    expect((await request(app).get('/health').expect(200)).body.llm).toBe('misconfigured');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('returns the answer after a failed write, then refuses every request', async () => {
+    const ledger = new Ledger(':memory:');
+    ledger.record = () => {
+      throw new Error('disk full');
+    };
+    const { app, fetchFn } = setup({ ledger });
+    // The tokens are spent, so the answer goes back rather than a 5xx the SDK would retry.
+    await post(app).send(body()).expect(200);
+    const res = await post(app, MAP_TOKEN).send(body()).expect(503);
+    expect(res.body.error.message).toContain('ledger');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /v1/llm/v1/messages answers with no usage', () => {
+  // The most the request could cost: one input token per body character, plus max_tokens out.
+  const worst = (sent: object, maxTokens = 1024) => JSON.stringify(sent).length * 1000 + maxTokens * 5000;
+
+  it('prices an answer with no usage at the worst case', async () => {
+    const sent = body();
+    const { app, ledger } = setup({ fetch: upstream(200, answer({ usage: undefined })) });
+    await post(app).send(sent).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
+  });
+
+  it('prices an answer that is not JSON at the worst case', async () => {
+    const sent = body();
+    const fetchFn = vi.fn(async () => new Response('<html>oops</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    const { app, ledger } = setup({ fetch: fetchFn as never });
+    await post(app).send(sent).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
+  });
+
+  it('answers 502 and records the worst case when the answer breaks off', async () => {
+    const sent = body();
+    const broken = new ReadableStream({
+      start(c) {
+        c.error(new Error('socket hang up'));
+      },
+    });
+    const fetchFn = vi.fn(async () => new Response(broken, { status: 200 }));
+    const { app, ledger } = setup({ fetch: fetchFn as never });
+    await post(app).send(sent).expect(502);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
   });
 });

@@ -6,7 +6,7 @@
  *   off            ANTHROPIC_API_KEY is empty. Pedro has not seeded a key yet, so the
  *                  route answers 503 and the rest of the bot runs as before.
  *   misconfigured  A key is set, but a guard setting is missing or malformed. The route
- *                  answers 503, /health says so, and the deploy fails on it.
+ *                  answers 503, and /health reports it so a deploy check can fail on it.
  *   on             Every check below passed.
  *
  * ⚠ A BAD SETTING DISABLES THE GATEWAY, NOT THE BOT. The bun-app rule is to refuse to

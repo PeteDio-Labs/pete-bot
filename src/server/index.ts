@@ -27,7 +27,7 @@ import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
 import { size as openIncidents } from './alertStore.js';
 import { parseGatewaySettings } from '../gateway/config.js';
-import { createGateway, LLM_ROUTES, type Gateway } from '../gateway/route.js';
+import { createGateway, gatewayErrorHandler, LLM_ROUTES, type Gateway } from '../gateway/route.js';
 
 let server: Server | null = null;
 let gateway: Gateway | null = null;
@@ -57,8 +57,9 @@ export function createApp(client: Client, options: AppOptions = {}): Express {
   // ⚠ REGISTERED BEFORE THE GLOBAL PARSER ON PURPOSE. An agent's request carries its
   // whole conversation and every tool result, which passes 512kb long before it passes
   // the model's context. express.json skips a body already parsed, so this limit wins
-  // on the gateway's paths and 512kb holds everywhere else.
-  app.use('/v1/llm', express.json({ limit: '8mb' }));
+  // on the gateway's paths and 512kb holds everywhere else. The guard runs first, so a
+  // caller with no valid token is refused before 8mb is read.
+  app.use('/v1/llm', (req, res, next) => llm.guard(req, res, next), express.json({ limit: '8mb' }));
 
   app.use(
     express.json({
@@ -76,8 +77,8 @@ export function createApp(client: Client, options: AppOptions = {}): Express {
       service: 'pete-bot-http',
       uptimeSeconds: process.uptime(),
       alertBatches: openIncidents(),
-      // off, misconfigured or on. Off is normal until a key is seeded; the deploy
-      // fails on misconfigured.
+      // off, misconfigured or on. Off is normal until a key is seeded. Misconfigured
+      // means a guard setting is wrong, and the deploy check should fail on it.
       llm: llm.state,
       timestamp: new Date().toISOString(),
     });
@@ -97,6 +98,7 @@ export function createApp(client: Client, options: AppOptions = {}): Express {
   app.post(LLM_ROUTES, (req, res, next) => {
     llm.handle(req, res).catch(next);
   });
+  app.use('/v1/llm', gatewayErrorHandler);
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not_found', path: req.path });
