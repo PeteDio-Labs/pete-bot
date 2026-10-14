@@ -99,9 +99,10 @@ Port 3015, separate from the metrics port so app traffic cannot affect a scrape.
 
 | Route | Auth | What it does |
 |-------|------|--------------|
-| `GET /health` | none | Liveness. Carries uptime and the number of open incidents |
+| `GET /health` | none | Liveness. Carries uptime, the number of open incidents, and the gateway state in `llm` |
 | `POST /v1/alert` | alert bearer | Uptime Kuma webhook → the owner's DM |
 | `POST /v1/notify` | notify bearer | `{from, message}` → one DM to the owner. Records nothing |
+| `POST /v1/llm/v1/messages` | a caller's gateway bearer | The Messages API, proxied with the homelab's key. `/v1/llm/messages` is the same route |
 
 `/v1/alert` takes a **bearer token, not HMAC**, and that is forced rather than chosen:
 Kuma's generic webhook cannot sign a body. Do not "fix" this by adding HMAC and
@@ -116,6 +117,22 @@ whatever the text mentions. A success returns `{ok, action: "sent", channelId, m
 A bad body returns 400, and a Discord failure returns 502. The log holds the sender and the
 message id, never the text.
 
+`/v1/llm/v1/messages` is the Anthropic API gateway (PET-617). The homelab's one Anthropic key
+lives in this process, and no caller holds it. A caller points the official SDK at
+`http://<host>:3015/v1/llm`, with its own gateway token as `apiKey`. Each caller has a
+monthly cap in dollars and a list of models, set in `LLM_GATEWAY_CALLERS`. Every answered
+request goes into a SQLite ledger at `LLM_LEDGER_PATH`, with its tokens and its cost in
+integer nano-dollars, and the cap reads that ledger. The gateway refuses:
+
+- every request with 503 while it is off (no key) or misconfigured, and `/health` says which
+- an unknown token with 401
+- a missing `model` or `max_tokens`, or `stream: true`, with 400. Streaming is not written yet
+- a model the caller was not given, or a caller at its cap, with 403, which the SDK does not
+  retry
+
+The cap is checked before a request, so one request can cross it. The log holds the caller,
+the model, the token counts and the cost, never the prompt or the answer.
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
@@ -129,6 +146,9 @@ message id, never the text.
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
+| `ANTHROPIC_API_KEY` | No | — | The key the gateway forwards with. Empty leaves the gateway off |
+| `LLM_GATEWAY_CALLERS` | With a key | — | JSON: caller name to `{token, monthlyCapUsd, models}`. See `.env.example` |
+| `LLM_LEDGER_PATH` | With a key | — | The SQLite spend ledger. It must survive a restart |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
 | `UPDATES_REPO` | No | `PeteDio-Labs/petedio-media-iac` | Repo that holds the update workflow |
 | `UPDATES_WORKFLOW` | No | `media-updates.yml` | The workflow `/update` dispatches |
@@ -159,6 +179,7 @@ been deleted, so a working command and a broken one scraped identically.
 ```
 src/
 ├── clients/      # githubActions — starts and follows the /update run
+├── gateway/      # the Anthropic API gateway: settings, pricing, ledger and route
 ├── commands/     # /status and /update definitions, and registration
 ├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server
