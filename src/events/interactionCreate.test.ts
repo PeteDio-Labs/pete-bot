@@ -2,7 +2,7 @@
  * /status and the owner gate. The gate and the deferred reply are characterization; the
  * metrics are PET-384 (UC-4, UC-6). /ask went in PET-518, and /update has its own file.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'bun:test';
 import { MessageFlags } from 'discord.js';
 import { createInteractionHandler } from './interactionCreate.js';
 import { config } from '../config.js';
@@ -28,16 +28,17 @@ function fakeInteraction(over: Record<string, unknown> = {}) {
 
 const handler = () => createInteractionHandler();
 const fetchMock = vi.fn();
+const realFetch = globalThis.fetch;
 const originalToken = config.updates.token;
 
 beforeEach(() => {
   register.resetMetrics();
   fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  globalThis.fetch = realFetch;
   config.updates.token = originalToken;
 });
 
@@ -45,7 +46,7 @@ describe('who it answers', () => {
   it('refuses anyone but the installer', async () => {
     const { interaction, reply, deferReply } = fakeInteraction({ user: { id: '999' } });
     await handler()(interaction);
-    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(1);
     expect(deferReply).not.toHaveBeenCalled();
   });
 
@@ -98,7 +99,7 @@ describe('/status', () => {
   it('refuses /status from anyone but the installer too', async () => {
     const { interaction, reply, deferReply } = fakeInteraction({ user: { id: '999' } });
     await handler()(interaction);
-    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(1);
     expect(deferReply).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,7 @@
  *
  * It has its own bearer (PET-584) and must touch no incident state.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'bun:test';
 import request from 'supertest';
 import { createApp } from '../index.js';
 import { reset, size } from '../alertStore.js';

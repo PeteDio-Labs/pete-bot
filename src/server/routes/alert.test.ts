@@ -4,7 +4,7 @@
  * Auth and schema are characterization: they ship today and must not move. The
  * send-once-then-edit behaviour is PET-384 (UC-1, UC-7).
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'bun:test';
 import request from 'supertest';
 import { createApp } from '../index.js';
 import { reset } from '../alertStore.js';

@@ -131,7 +131,7 @@ async function deliver(
  * failed, and a run still going when this stopped following it are three different
  * messages, and none of them reads as success.
  */
-async function handleUpdate(interaction: ChatInputCommandInteraction): Promise<void> {
+async function handleUpdate(interaction: ChatInputCommandInteraction, run: typeof runUpdate): Promise<void> {
   const mode = interaction.options.getSubcommand(true) as UpdateMode;
   const target = (interaction.options.getString('target') ?? 'plex-and-arr') as UpdateTarget;
   // force exists only on apply; a check never forces.
@@ -162,7 +162,7 @@ async function handleUpdate(interaction: ChatInputCommandInteraction): Promise<v
   }
 
   try {
-    const outcome = await runUpdate(mode, target, force, {
+    const outcome = await run(mode, target, force, {
       onStarted: async (run) => {
         await interaction.editReply({
           embeds: [
@@ -195,7 +195,13 @@ async function handleUpdate(interaction: ChatInputCommandInteraction): Promise<v
   }
 }
 
-export function createInteractionHandler() {
+export interface InteractionDeps {
+  /** Tests pass a fake, so /update never reaches GitHub. */
+  runUpdate?: typeof runUpdate;
+}
+
+export function createInteractionHandler(deps: InteractionDeps = {}) {
+  const run = deps.runUpdate ?? runUpdate;
   return async function onInteraction(interaction: Interaction): Promise<void> {
     if (!interaction.isChatInputCommand()) return;
 
@@ -212,7 +218,7 @@ export function createInteractionHandler() {
     }
 
     if (interaction.commandName === 'status') await handleStatus(interaction);
-    else if (interaction.commandName === 'update') await handleUpdate(interaction);
+    else if (interaction.commandName === 'update') await handleUpdate(interaction, run);
   };
 }
 

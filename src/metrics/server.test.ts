@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 import request from 'supertest';
 import { startMetricsServer, stopMetricsServer, getMetricsApp } from './server.js';
 import { discordBotUp } from './index.js';
@@ -56,13 +56,15 @@ describe('Metrics Server', () => {
       await startMetricsServer(9092);
       await stopMetricsServer();
       
-      // Server should be stopped - this will throw or timeout
-      try {
-        await request(`http://localhost:9092`).get('/health').timeout(100);
-        expect.fail('Server should be stopped');
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      // Server should be stopped, so the request fails or times out
+      const reached = await request(`http://localhost:9092`)
+        .get('/health')
+        .timeout(100)
+        .then(
+          () => true,
+          () => false,
+        );
+      expect(reached).toBe(false);
     });
   });
 });
