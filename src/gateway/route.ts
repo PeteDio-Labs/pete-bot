@@ -34,6 +34,13 @@
  * the rates in pricing.ts, so a cap that forwarded them would undercount. Add a parameter
  * here only once pricing.ts prices whatever it changes.
  *
+ * ⚠ AN ANSWER WITH NO READABLE USAGE SPENDS THE REST OF THE CAP. Nothing in the request
+ * bounds its cost: an image or PDF by URL, a web search, a fetched page and a tool's
+ * system prompt all bill input tokens the body does not show. So when an answered
+ * request's `usage` is missing, partial or unreadable, the ledger charges the caller
+ * whatever is left of its monthly cap, and the caller is refused until the month turns
+ * over or its cap rises. The charge is in the ledger, so it survives a restart.
+ *
  * ⚠ NO STREAMING YET. The ledger reads `usage` from a whole response. A streamed response
  * spreads it across events, and that parsing is not written.
  */
@@ -158,13 +165,11 @@ function presentedToken(req: Request): string {
 
 const usd = (nano: number): string => `$${(nano / 1e9).toFixed(2)}`;
 
-/**
- * The most a request could cost, for an answer whose `usage` is missing. One input token
- * per character of the request body is an upper bound, since a token is at least one
- * character, and the answer can be at most max_tokens long.
- */
-function worstCase(body: string, maxTokens: number): Usage {
-  return { input_tokens: body.length, output_tokens: maxTokens };
+/** A usage object the ledger can price: both required meters are numbers. */
+function readableUsage(usage: unknown): Usage | undefined {
+  if (!usage || typeof usage !== 'object') return undefined;
+  const u = usage as Usage;
+  return typeof u.input_tokens === 'number' && typeof u.output_tokens === 'number' ? u : undefined;
 }
 
 /** A gateway that refuses everything, for the off and misconfigured states. */
@@ -242,7 +247,7 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
       refuse(res, 400, 'invalid_request_error', `${issue?.path.join('.') || 'body'}: ${issue?.message ?? 'invalid'}`);
       return;
     }
-    const { model, max_tokens: maxTokens } = parsed.data;
+    const { model } = parsed.data;
 
     const alias = canonicalModel(model);
     if (!alias || !caller.models.has(alias)) {
@@ -272,13 +277,13 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
     }
     inFlight.set(caller.name, open + 1);
     try {
-      await forward(req, res, caller, model, maxTokens);
+      await forward(req, res, caller, model);
     } finally {
       inFlight.set(caller.name, (inFlight.get(caller.name) ?? 1) - 1);
     }
   }
 
-  async function forward(req: Request, res: Response, caller: Caller, model: string, maxTokens: number): Promise<void> {
+  async function forward(req: Request, res: Response, caller: Caller, model: string): Promise<void> {
     const body = JSON.stringify(req.body);
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -310,13 +315,13 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
     } catch (err) {
       // The API may have answered, and spent the tokens, before the body broke off.
       logger.error(`LLM gateway lost the API's answer for ${caller.name}: ${err instanceof Error ? err.message : String(err)}`);
-      if (upstream.ok) recordUsage(caller, model, undefined, worstCase(body, maxTokens), requestId);
+      if (upstream.ok) recordUsage(caller, model, undefined, requestId);
       refuse(res, 502, 'api_error', 'the API answer was cut off');
       return;
     }
 
     if (upstream.ok) {
-      recordUsage(caller, model, text, worstCase(body, maxTokens), requestId);
+      recordUsage(caller, model, text, requestId);
     }
 
     res.status(upstream.status);
@@ -329,24 +334,34 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
   }
 
   /**
-   * Price and record one answered request. An answer with no readable `usage` is priced
-   * at `fallback`, the most it could have cost, so the ledger never undercounts.
+   * Price and record one answered request. An answer with no readable `usage` is charged
+   * the rest of the caller's monthly cap, because nothing bounds what it cost. The header
+   * says why.
    *
    * A failed write is logged and the answer still goes back: the tokens are spent either
    * way, and a 5xx would make the SDK retry and spend them again. The failure latches
    * ledgerBroken, so the next request is refused instead of spending past an unknown total.
    */
-  function recordUsage(caller: Caller, requested: string, text: string | undefined, fallback: Usage, requestId?: string): void {
+  function recordUsage(caller: Caller, requested: string, text: string | undefined, requestId?: string): void {
     try {
-      let parsed: { model?: unknown; usage?: Usage | null } = {};
+      const at = now();
+      let parsed: { model?: unknown; usage?: unknown } = {};
       try {
         parsed = text === undefined ? {} : (JSON.parse(text) as typeof parsed);
       } catch {
-        logger.warn(`LLM gateway: ${caller.name} got an answer that is not JSON; pricing it at the worst case`);
+        // Fall through: an answer that is not JSON has no readable usage.
       }
       const model = typeof parsed.model === 'string' && priceFor(parsed.model) ? parsed.model : requested;
-      const usage = parsed.usage && typeof parsed.usage === 'object' ? parsed.usage : fallback;
-      const cost = costNanoUsd(priceFor(model)!, usage);
+      const readable = readableUsage(parsed.usage);
+      const usage: Usage = readable ?? {};
+      const cost = readable
+        ? costNanoUsd(priceFor(model)!, readable)
+        : Math.max(caller.capNanoUsd - ledger.spentNanoUsd(caller.name, at), 0);
+      if (!readable) {
+        logger.warn(
+          `LLM gateway: ${caller.name} got an answer with no readable usage, so it is charged the rest of its cap (${usd(cost)}) and refused until the month turns over`,
+        );
+      }
       const cacheWrite =
         (usage.cache_creation?.ephemeral_5m_input_tokens ?? 0) + (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) ||
         (usage.cache_creation_input_tokens ?? 0);
@@ -361,7 +376,7 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
           costNanoUsd: cost,
           requestId,
         },
-        now(),
+        at,
       );
       // Who, what and how much. Never the prompt or the answer.
       logger.info(`LLM gateway: ${caller.name} ${model} in=${usage.input_tokens ?? 0} out=${usage.output_tokens ?? 0} cost=${usd(cost)}`);

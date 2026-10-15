@@ -62,11 +62,19 @@ const CallersSchema = z.record(z.string().regex(/^[a-z][a-z0-9-]{1,31}$/, 'is no
 
 const misconfigured = (reason: string): GatewaySettings => ({ state: 'misconfigured', reason });
 
+const isInMemory = (path: string): boolean =>
+  path === ':memory:' || (/^file:/i.test(path) && (/^file::memory:/i.test(path) || /[?&]mode=memory(&|$)/i.test(path)));
+
 export function parseGatewaySettings(env: GatewayEnv): GatewaySettings {
   if (!env.apiKey.trim()) return { state: 'off' };
 
   if (!env.ledgerPath.trim()) {
     return misconfigured('LLM_LEDGER_PATH is empty, so every cap would reset on restart');
+  }
+  // SQLite opens `:memory:`, `file::memory:` and any URI with `mode=memory` as a database
+  // that dies with the process. Tests pass `new Ledger(':memory:')` directly, not this env.
+  if (isInMemory(env.ledgerPath.trim())) {
+    return misconfigured('LLM_LEDGER_PATH names an in-memory database, so every cap would reset on restart');
   }
 
   let raw: unknown;

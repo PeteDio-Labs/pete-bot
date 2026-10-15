@@ -56,6 +56,9 @@ describe('parseGatewaySettings', () => {
 
   it.each([
     ['an empty ledger path', env({ ledgerPath: ' ' }), 'LLM_LEDGER_PATH'],
+    ['an in-memory ledger', env({ ledgerPath: ':memory:' }), 'in-memory'],
+    ['an in-memory ledger URI', env({ ledgerPath: 'file::memory:?cache=shared' }), 'in-memory'],
+    ['a memory-mode ledger URI', env({ ledgerPath: 'file:ledger.sqlite?mode=memory' }), 'in-memory'],
     ['callers that are not JSON', env({ callersJson: '{pm-agent' }), 'not valid JSON'],
     ['no callers set at all', env({ callersJson: '' }), 'not valid JSON'],
     ['no callers', env({ callersJson: '{}' }), 'names no caller'],
@@ -105,6 +108,19 @@ describe('pricing', () => {
 
   it('prices Haiku 4.5 at $1 in, $5 out, $0.10 cache read, $1.25 and $2 cache write', () => {
     expect(haiku).toEqual({ input: 1000, output: 5000, cacheRead: 100, cacheWrite5m: 1250, cacheWrite1h: 2000 });
+  });
+
+  // Opus 5.5 and Sonnet 5.5 read their cache at 0.05x input, not 0.1x.
+  it('prices Sonnet 5.5 at $2 in, $10 out, $0.10 cache read, $2.50 and $4 cache write', () => {
+    expect(PRICES['claude-sonnet-5-5']).toEqual({ input: 2000, output: 10000, cacheRead: 100, cacheWrite5m: 2500, cacheWrite1h: 4000 });
+  });
+
+  it('prices Opus 5.5 at $4 in, $20 out, $0.20 cache read, $5 and $8 cache write', () => {
+    expect(PRICES['claude-opus-5-5']).toEqual({ input: 4000, output: 20000, cacheRead: 200, cacheWrite5m: 5000, cacheWrite1h: 8000 });
+  });
+
+  it('prices a Sonnet 5.5 cache read at a tenth of a micro-dollar per token', () => {
+    expect(costNanoUsd(PRICES['claude-sonnet-5-5']!, { cache_read_input_tokens: 1_000_000 })).toBe(100_000_000);
   });
 
   it('prices a dated snapshot as its alias, and refuses a model it does not know', () => {
@@ -529,34 +545,113 @@ describe('POST /v1/llm/v1/messages ledger failures', () => {
 });
 
 describe('POST /v1/llm/v1/messages answers with no usage', () => {
-  // The most the request could cost: one input token per body character, plus max_tokens out.
-  const worst = (sent: object, maxTokens = 1024) => JSON.stringify(sent).length * 1000 + maxTokens * 5000;
+  // Nothing in a request bounds its cost, so an answer the ledger cannot price is charged
+  // the rest of the caller's cap. pm-agent's cap is $15.
+  const CAP = 15e9;
+  const broken = () =>
+    vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.error(new Error('socket hang up'));
+            },
+          }),
+          { status: 200 },
+        ),
+    );
 
-  it('prices an answer with no usage at the worst case', async () => {
-    const sent = body();
-    const { app, ledger } = setup({ fetch: upstream(200, answer({ usage: undefined })) });
-    await post(app).send(sent).expect(200);
-    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
   });
 
-  it('prices an answer that is not JSON at the worst case', async () => {
-    const sent = body();
+  it('charges the rest of the cap for an answer with no usage, and refuses the next request', async () => {
+    const { app, ledger, fetchFn } = setup({ fetch: upstream(200, answer({ usage: undefined })) });
+    await post(app).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
+    const res = await post(app).send(body()).expect(403);
+    expect(res.body.error.message).toContain('monthly cap');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('charges only what is left when the caller has already spent some', async () => {
+    const ledger = new Ledger(':memory:');
+    ledger.record(entry('pm-agent', 4e9), OCT);
+    const { app } = setup({ ledger, fetch: upstream(200, answer({ usage: undefined })) });
+    await post(app).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
+  });
+
+  it('charges the rest of the cap for an answer that is not JSON', async () => {
     const fetchFn = vi.fn(async () => new Response('<html>oops</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
     const { app, ledger } = setup({ fetch: fetchFn as never });
-    await post(app).send(sent).expect(200);
-    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
+    await post(app).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
   });
 
-  it('answers 502 and records the worst case when the answer breaks off', async () => {
-    const sent = body();
-    const broken = new ReadableStream({
-      start(c) {
-        c.error(new Error('socket hang up'));
-      },
+  it.each([
+    ['no output_tokens', { input_tokens: 10 }],
+    ['no input_tokens', { output_tokens: 10 }],
+    ['a null meter', { input_tokens: null, output_tokens: 10 }],
+    ['a string meter', { input_tokens: '10', output_tokens: 10 }],
+    ['an array', []],
+  ])('charges the rest of the cap for a usage with %s', async (_name, usage) => {
+    const { app, ledger } = setup({ fetch: upstream(200, answer({ usage })) });
+    await post(app).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
+  });
+
+  it('charges a caller only its own cap', async () => {
+    const { app, ledger } = setup({ fetch: upstream(200, answer({ usage: undefined })) });
+    await post(app).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('lab-map', OCT)).toBe(0);
+    await post(app, MAP_TOKEN).send(body()).expect(200);
+    expect(ledger.spentNanoUsd('lab-map', OCT)).toBe(30e9);
+  });
+
+  it('answers 502 and charges the rest of the cap when the answer breaks off', async () => {
+    const { app, ledger } = setup({ fetch: broken() as never });
+    await post(app).send(body()).expect(502);
+    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
+  });
+
+  // The case the request body cannot bound: an image by URL bills input tokens for pixels
+  // the gateway never sees, so no count of the body's characters is an upper bound.
+  it('refuses spend after an image request whose answer broke off, across a restart', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'ledger-'));
+    const path = join(dir, 'llm-ledger.sqlite');
+    const image = body({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'url', url: 'https://example.com/huge.png' } },
+            { type: 'text', text: 'Describe it.' },
+          ],
+        },
+      ],
     });
-    const fetchFn = vi.fn(async () => new Response(broken, { status: 200 }));
-    const { app, ledger } = setup({ fetch: fetchFn as never });
-    await post(app).send(sent).expect(502);
-    expect(ledger.spentNanoUsd('pm-agent', OCT)).toBe(worst(sent));
+
+    const first = setup({ ledger: new Ledger(path), fetch: broken() as never });
+    await post(first.app).send(image).expect(502);
+    expect(first.ledger.spentNanoUsd('pm-agent', OCT)).toBe(CAP);
+    first.ledger.close();
+
+    const fetchFn = upstream();
+    const second = setup({ ledger: new Ledger(path), fetch: fetchFn });
+    const res = await post(second.app).send(image).expect(403);
+    expect(res.body.error.message).toContain('monthly cap');
+    expect(fetchFn).not.toHaveBeenCalled();
+    second.ledger.close();
+  });
+
+  it('lifts the refusal when the month turns over', async () => {
+    const ledger = new Ledger(':memory:');
+    const { app } = setup({ ledger, fetch: upstream(200, answer({ usage: undefined })) });
+    await post(app).send(body()).expect(200);
+    const nov = setup({ ledger, now: new Date('2026-11-01T00:00:00Z') });
+    await post(nov.app).send(body()).expect(200);
   });
 });

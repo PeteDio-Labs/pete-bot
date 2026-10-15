@@ -36,12 +36,15 @@ const perMTok = (input: number, output: number, cacheRead: number): ModelPrice =
 });
 
 /**
- * Keyed by the alias a caller sends. A response names the dated snapshot, such as
+ * Keyed by the alias a caller sends. Opus 5.5 and Sonnet 5.5 read their cache at 0.05x
+ * input, not the usual 0.1x, so pass each cache-read rate as published.
+ *
+ * A response names the dated snapshot, such as
  * `claude-haiku-4-5-20251001`, so `priceFor` also matches an alias followed by a date.
  */
 export const PRICES: Readonly<Record<string, ModelPrice>> = {
   'claude-haiku-4-5': perMTok(1, 5, 0.1),
-  'claude-sonnet-5-5': perMTok(2, 10, 0.2),
+  'claude-sonnet-5-5': perMTok(2, 10, 0.1),
   'claude-opus-5-5': perMTok(4, 20, 0.2),
 };
 
