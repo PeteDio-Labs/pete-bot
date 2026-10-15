@@ -141,8 +141,11 @@ integer nano-dollars, and the cap reads that ledger. The gateway refuses:
 - every request with 503 after a ledger write fails, until a restart
 
 The cap is checked before a request, so one request can cross it, and at most two can,
-since a caller may have two open. An answer with no `usage` is recorded at the most it
-could have cost. The log holds the caller, the model, the token counts and the cost, never
+since a caller may have two open. An answer whose `usage` is missing, partial or
+unreadable is charged the rest of the caller's monthly cap, because nothing in a request
+bounds its cost: an image by URL, a web search or a tool's system prompt bills tokens the
+body does not show. The charge is in the ledger, so the caller is refused, across
+restarts, until the month turns over or its cap rises. The log holds the caller, the model, the token counts and the cost, never
 the prompt or the answer.
 
 ## Environment variables
