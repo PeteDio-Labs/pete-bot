@@ -26,6 +26,7 @@ import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
 import { size as openIncidents } from './alertStore.js';
+import { deskHealth } from '../desk/index.js';
 import { parseGatewaySettings } from '../gateway/config.js';
 import { createGateway, gatewayErrorHandler, LLM_ROUTES, type Gateway } from '../gateway/route.js';
 
@@ -80,6 +81,9 @@ export function createApp(client: Client, options: AppOptions = {}): Express {
       // off, misconfigured or on. Off is normal until a key is seeded. Misconfigured
       // means a guard setting is wrong, and the deploy check should fail on it.
       llm: llm.state,
+      // off, misconfigured, starting or running (PET-645). Running carries what the last
+      // poll read, so "nothing to merge" and "read nothing" look different.
+      desk: deskHealth(),
       timestamp: new Date().toISOString(),
     });
   });

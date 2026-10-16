@@ -11,6 +11,9 @@ something to tell the owner. It adds no incident state.
 
 **`/update`** starts petedio-media-iac's update workflow and reports what the run did.
 
+**The merge desk** merges low-risk PRs after a clean Codex review, and DMs a Merge button
+for the rest (PET-645).
+
 It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
 and plain-DM questions went in PET-518, when Bobbert took over asking mtrace with its own
 token. The bot reads no messages, so it requests no privileged intent.
@@ -41,6 +44,42 @@ Vault outage reached nobody (PET-374). So `/v1/alert` groups:
 
 Open incidents live in `ALERT_STATE_PATH`, so a restart between the failure and the
 recovery still edits the original message instead of orphaning it.
+
+## The merge desk (PET-645)
+
+The merge desk merges low-risk pull requests without a person, and asks Pedro for one tap
+on the rest. It polls every open PR in `DESK_REPOS` every three minutes and decides each one
+from facts GitHub reports. No model decides a merge.
+
+| Step | What the desk checks |
+|---|---|
+| Is it ours? | Not a draft, not a fork, authored by someone on `DESK_AUTHORS`, aimed at the default branch, and not labelled `merge-desk/hold` |
+| Tier | petedio-iac's `scripts/pr-blast-radius.py`, read from petedio-iac's default branch and run against the base repository's workflows on its default branch. A renamed file counts by both paths |
+| Codex | A review of the head SHA by `petedio-codex-review[bot]`. None yet: the desk queues `codex-review <repo> <n> <effort>` on codex-248, with `low`, `medium` or `high` for tiers 0, 1 and 2 |
+| Gates | No conflict, every check run and status passed, and no unresolved review thread |
+| Who merges | Tiers 0 and 1 with "No blocking findings" merge here. Tier 2, or a Codex "Escalate to Pedro", arrive as a DM with a **Merge** button |
+
+The merge is a squash pinned to the reviewed head, so a push after the review blocks it
+until Codex reviews the new head. The desk approves the PR first, which satisfies a
+required review and records the evidence. After the merge it reads the default branch
+back, then posts one comment on the PR and one DM.
+
+A tap merges only the SHA on its button, only for the owner, and only after the desk
+reads every fact again. A moved head, a new thread or a red check refuses the tap and
+says why.
+
+After two blocking Codex rounds the desk stops, comments once, and DMs both reviews with a
+**Review again** button that grants one more round.
+
+`DESK_MODE=dry-run` runs every step except the approval and the merge, and DMs each merge
+it would have made. Use it first on a new repository. `/health` reports the desk as `off`,
+`misconfigured` (with the reason), `starting` or `running`, and a running desk names the
+PRs its last poll read.
+
+What the desk needs on the host is in `.env.example`: pete-bot's own GitHub App key, an
+ssh key that codex-248 forces to `codex-review-gate`, a pinned `known_hosts` for 248, and
+`python3` with PyYAML for the classifier. The App needs **Contents** and **Pull requests**
+write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
 ## Quick start
 
