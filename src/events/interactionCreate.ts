@@ -7,7 +7,7 @@
  * without it the user sees "The application did not respond" while the work succeeds
  * unseen.
  */
-import type { Interaction, ChatInputCommandInteraction } from 'discord.js';
+import type { Interaction, ChatInputCommandInteraction, ButtonInteraction } from 'discord.js';
 import { EmbedBuilder, MessageFlags } from 'discord.js';
 import { config } from '../config.js';
 import { logger } from '../utils/index.js';
@@ -20,6 +20,8 @@ import {
 } from '../clients/githubActions.js';
 import { size as openIncidents } from '../server/alertStore.js';
 import { askTotal, askDuration } from '../metrics/index.js';
+import { getDesk } from '../desk/index.js';
+import { BUTTON_PREFIX, type MergeDesk } from '../desk/desk.js';
 
 const COLOR_OK = 0x57f287;
 const COLOR_WARN = 0xfee75c;
@@ -195,14 +197,50 @@ async function handleUpdate(interaction: ChatInputCommandInteraction, run: typeo
   }
 }
 
+/**
+ * A merge desk button (PET-645). The owner check comes first, then the desk reads every
+ * fact again before it merges anything. The answer is ephemeral; the desk's own DM and
+ * PR comment carry the record.
+ */
+async function handleDeskButton(interaction: ButtonInteraction, desk: MergeDesk | null): Promise<void> {
+  if (interaction.user.id !== config.discord.ownerUserId) {
+    askTotal.inc({ surface: 'desk', status: 'refused' });
+    logger.warn(`Refused a merge desk button from ${interaction.user.id}`);
+    await interaction.reply({ content: 'This app answers only the account that installed it.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!desk) {
+    await interaction.editReply({ content: 'The merge desk is off on this host, so nothing was merged.' });
+    return;
+  }
+  try {
+    const answer = await desk.tap(interaction.customId);
+    askTotal.inc({ surface: 'desk', status: 'success' });
+    await interaction.editReply({ content: answer });
+  } catch (err) {
+    askTotal.inc({ surface: 'desk', status: 'failure' });
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(`merge desk button failed: ${message}`);
+    await interaction.editReply({ content: `Nothing was merged: ${message.slice(0, 300)}` });
+  }
+}
+
 export interface InteractionDeps {
   /** Tests pass a fake, so /update never reaches GitHub. */
   runUpdate?: typeof runUpdate;
+  /** Tests pass a fake desk; production reads the one main.ts started. */
+  desk?: () => MergeDesk | null;
 }
 
 export function createInteractionHandler(deps: InteractionDeps = {}) {
   const run = deps.runUpdate ?? runUpdate;
+  const desk = deps.desk ?? getDesk;
   return async function onInteraction(interaction: Interaction): Promise<void> {
+    if (typeof interaction.isButton === 'function' && interaction.isButton() && interaction.customId.startsWith(`${BUTTON_PREFIX}:`)) {
+      await handleDeskButton(interaction, desk());
+      return;
+    }
     if (!interaction.isChatInputCommand()) return;
 
     if (!authorised(interaction)) {

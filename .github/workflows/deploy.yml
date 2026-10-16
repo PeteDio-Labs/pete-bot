@@ -125,6 +125,28 @@ jobs:
           secrets: |
             kv/data/services/pete-bot github_updates_token | PB_UPDATES_TOKEN
 
+      # The merge desk's App (PET-645), optional in the same way and for the same reasons as
+      # the /update token above, and placed after the strict step for the same reason. Until
+      # scripts/seed-pete-bot-desk-app.sh runs, the fields are absent, this step fails
+      # quietly, and the play leaves DESK_MODE empty: the desk stays off. The play turns the
+      # desk on only when all three fields arrive, so a partial read leaves it off too.
+      - name: Vault — the optional merge desk App, absent is allowed
+        continue-on-error: true
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/pete-bot desk_app_id | PB_DESK_APP_ID ;
+            kv/data/services/pete-bot desk_installation_id | PB_DESK_INSTALLATION_ID ;
+            kv/data/services/pete-bot desk_app_pem | PB_DESK_APP_PEM
+
       - name: Stage the secrets as files, never as arguments
         run: |
           umask 077
@@ -144,6 +166,10 @@ jobs:
               # var is never set at all, and indexing would KeyError one layer below the
               # thing that was just made tolerant. Empty is the documented state.
               "pete_bot_github_updates_token": os.environ.get("PB_UPDATES_TOKEN", ""),
+              # .get for the same reason. All three or the play keeps the desk off.
+              "pete_bot_desk_app_id":          os.environ.get("PB_DESK_APP_ID", ""),
+              "pete_bot_desk_installation_id": os.environ.get("PB_DESK_INSTALLATION_ID", ""),
+              "pete_bot_desk_app_pem":         os.environ.get("PB_DESK_APP_PEM", ""),
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY

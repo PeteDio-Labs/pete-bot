@@ -114,3 +114,44 @@ describe('metrics', () => {
     );
   });
 });
+
+// PET-645. A merge desk button is checked against the owner before the desk sees it.
+describe('merge desk buttons', () => {
+  function button(userId: string) {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      isButton: () => true,
+      isChatInputCommand: () => false,
+      customId: `desk:merge:petedio-vault:3:${'a'.repeat(40)}`,
+      user: { id: userId },
+      reply,
+      deferReply,
+      editReply,
+    } as never;
+    return { interaction, reply, editReply };
+  }
+
+  it('refuses anyone but the owner, without asking the desk', async () => {
+    const tap = vi.fn();
+    const { interaction, reply } = button('999');
+    await createInteractionHandler({ desk: () => ({ tap }) as never })(interaction);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(tap).not.toHaveBeenCalled();
+  });
+
+  it("passes the owner's tap to the desk and shows its answer", async () => {
+    const tap = vi.fn().mockResolvedValue('Merged as mmmmmmm on `main`.');
+    const { interaction, editReply } = button(OWNER);
+    await createInteractionHandler({ desk: () => ({ tap }) as never })(interaction);
+    expect(tap).toHaveBeenCalledWith(`desk:merge:petedio-vault:3:${'a'.repeat(40)}`);
+    expect(editReply).toHaveBeenCalledWith({ content: 'Merged as mmmmmmm on `main`.' });
+  });
+
+  it('says the desk is off when it is', async () => {
+    const { interaction, editReply } = button(OWNER);
+    await createInteractionHandler({ desk: () => null })(interaction);
+    expect(editReply.mock.calls[0]![0].content).toContain('merge desk is off');
+  });
+});
