@@ -55,23 +55,60 @@ describe('GitHubApp', () => {
     expect(await gh.merge('r', 1, 'a'.repeat(40), 't')).toEqual({ ok: false, status: 409, message: 'Head branch was modified' });
   });
 
-  it('counts check runs and statuses, and treats skipped as passed', async () => {
+  it('counts check runs and statuses, and keeps skipped and neutral apart from passed', async () => {
     const { f } = fakeFetch((url) => {
       if (url.endsWith('/access_tokens')) return tokenResponse();
       if (url.includes('/check-runs')) {
         return Response.json({
-          total_count: 3,
+          total_count: 4,
           check_runs: [
             { name: 'ci', status: 'completed', conclusion: 'success' },
             { name: 'skip', status: 'completed', conclusion: 'skipped' },
+            { name: 'meh', status: 'completed', conclusion: 'neutral' },
             { name: 'slow', status: 'in_progress', conclusion: null },
           ],
         });
       }
-      return Response.json({ statuses: [{ context: 'legacy', state: 'failure' }] });
+      return Response.json({ state: 'failure', total_count: 1, statuses: [{ context: 'legacy', state: 'failure' }] });
     });
     const gh = new GitHubApp({ appId: '1', installationId: '2', privateKeyPem: PEM, org: 'o', fetchImpl: f });
-    expect(await gh.checks('r', 'a'.repeat(40))).toEqual({ total: 4, passed: 2, pending: ['slow'], failed: ['legacy (failure)'] });
+    expect(await gh.checks('r', 'a'.repeat(40))).toEqual({
+      total: 5,
+      passed: 1,
+      pending: ['slow'],
+      failed: ['legacy (failure)'],
+      skipped: ['skip (skipped)', 'meh (neutral)'],
+    });
+  });
+
+  it('refuses a partial status read', async () => {
+    const { f } = fakeFetch((url) => {
+      if (url.endsWith('/access_tokens')) return tokenResponse();
+      if (url.includes('/check-runs')) return Response.json({ total_count: 0, check_runs: [] });
+      return Response.json({ state: 'success', total_count: 101, statuses: [] });
+    });
+    const gh = new GitHubApp({ appId: '1', installationId: '2', privateKeyPem: PEM, org: 'o', fetchImpl: f });
+    await expect(gh.checks('r', 'a'.repeat(40))).rejects.toThrow('more than one page');
+  });
+
+  it('counts a failing combined status the list did not explain', async () => {
+    const { f } = fakeFetch((url) => {
+      if (url.endsWith('/access_tokens')) return tokenResponse();
+      if (url.includes('/check-runs')) return Response.json({ total_count: 0, check_runs: [] });
+      return Response.json({ state: 'failure', total_count: 1, statuses: [{ context: 'odd', state: 'success' }] });
+    });
+    const gh = new GitHubApp({ appId: '1', installationId: '2', privateKeyPem: PEM, org: 'o', fetchImpl: f });
+    expect((await gh.checks('r', 'a'.repeat(40))).failed).toEqual(['combined status (failure)']);
+  });
+
+  it('ignores the pending aggregate GitHub reports for a commit with no statuses', async () => {
+    const { f } = fakeFetch((url) => {
+      if (url.endsWith('/access_tokens')) return tokenResponse();
+      if (url.includes('/check-runs')) return Response.json({ total_count: 0, check_runs: [] });
+      return Response.json({ state: 'pending', total_count: 0, statuses: [] });
+    });
+    const gh = new GitHubApp({ appId: '1', installationId: '2', privateKeyPem: PEM, org: 'o', fetchImpl: f });
+    expect(await gh.checks('r', 'a'.repeat(40))).toEqual({ total: 0, passed: 0, pending: [], failed: [], skipped: [] });
   });
 
   it('refuses a partial thread read', async () => {

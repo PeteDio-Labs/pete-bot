@@ -31,6 +31,7 @@ describe('loadDeskSettings', () => {
     expect(s.settings.mode).toBe('on');
     expect(s.settings.classifierRepo).toBe('petedio-iac');
     expect(s.settings.pollMs).toBe(180_000);
+    expect(s.settings.noCiRepos.size).toBe(0);
   });
 
   it.each([
@@ -38,6 +39,7 @@ describe('loadDeskSettings', () => {
     ['no repos', { DESK_REPOS: '' }, 'DESK_REPOS'],
     ['a repo with an owner', { DESK_REPOS: 'PeteDio-Labs/x' }, 'DESK_REPOS'],
     ['no authors', { DESK_AUTHORS: ' , ' }, 'DESK_AUTHORS'],
+    ['a no-CI repo the desk does not watch', { DESK_NO_CI_REPOS: 'petedio-iac' }, 'DESK_NO_CI_REPOS'],
     ['a non-numeric App id', { DESK_APP_ID: 'abc' }, 'DESK_APP_ID'],
     ['no state path', { DESK_STATE_PATH: '' }, 'DESK_STATE_PATH'],
     ['a bad ssh target', { DESK_CODEX_SSH_TARGET: '192.168.50.248' }, 'DESK_CODEX_SSH_TARGET'],

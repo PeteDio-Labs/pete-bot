@@ -25,6 +25,11 @@ export interface DeskSettings {
   repos: string[];
   /** GitHub logins whose PRs the desk may merge. Anyone else's PR is skipped. */
   authors: ReadonlySet<string>;
+  /**
+   * Repos that run no validation on a PR, by decision. Only there may a head with no check
+   * at all merge without a tap; anywhere else, an empty list may be CI that never started.
+   */
+  noCiRepos: ReadonlySet<string>;
   appId: string;
   installationId: string;
   privateKeyPem: string;
@@ -51,6 +56,7 @@ export interface DeskEnv {
   DESK_MODE?: string;
   DESK_ORG?: string;
   DESK_REPOS?: string;
+  DESK_NO_CI_REPOS?: string;
   DESK_AUTHORS?: string;
   DESK_APP_ID?: string;
   DESK_INSTALLATION_ID?: string;
@@ -98,6 +104,9 @@ export function loadDeskSettings(
   if (repos.length === 0) return bad('DESK_REPOS is empty');
   const badRepo = repos.find((r) => !REPO_NAME.test(r));
   if (badRepo) return bad(`DESK_REPOS holds "${badRepo}", which is not a plain repository name`);
+  const noCiRepos = list(env.DESK_NO_CI_REPOS);
+  const strayNoCi = noCiRepos.find((r) => !repos.includes(r));
+  if (strayNoCi) return bad(`DESK_NO_CI_REPOS holds "${strayNoCi}", which is not on DESK_REPOS`);
 
   const authors = list(env.DESK_AUTHORS);
   if (authors.length === 0) return bad('DESK_AUTHORS is empty, so no PR could ever merge');
@@ -147,6 +156,7 @@ export function loadDeskSettings(
       org: (env.DESK_ORG ?? '').trim() || 'PeteDio-Labs',
       repos,
       authors: new Set(authors.map((a) => a.toLowerCase())),
+      noCiRepos: new Set(noCiRepos),
       appId,
       installationId,
       privateKeyPem,

@@ -13,6 +13,8 @@
  *   2. Did Codex review it?   The review must be of the head SHA. None yet: queue one.
  *                             After two blocking rounds the desk stops and tells Pedro.
  *   3. Can it merge?          No conflict, every check passed, no open review thread.
+ *                             A skipped check, or no check at all in a repo not on
+ *                             DESK_NO_CI_REPOS, goes to Pedro instead of merging.
  *   4. Who merges?            Tiers 0 and 1 with "No blocking findings" merge here.
  *                             Tier 2, or a Codex "Escalate to Pedro", waits for his tap.
  */
@@ -33,12 +35,17 @@ export interface PrMemory {
   queueFailedSha?: string;
   /** Rounds Pedro granted past MAX_ROUNDS with the "Review again" button. */
   extraRounds?: number;
+  /** The head Pedro asked Codex to review again, and when. Reviews of it before then don't count. */
+  requeueSha?: string;
+  requeuedAt?: string;
 }
 
 export interface Facts {
   repoFullName: string;
   defaultBranch: string;
   authors: ReadonlySet<string>;
+  /** True when the repo is on DESK_NO_CI_REPOS: it runs no PR validation, by decision. */
+  noCi: boolean;
   pull: PullDetail;
   classification: Classification;
   codex: CodexReview[];
@@ -77,9 +84,11 @@ export function decide(f: Facts): Decision {
 
   const rounds = blockingRounds(f.codex);
   const allowed = MAX_ROUNDS + (f.memory.extraRounds ?? 0);
-  // The newest Codex verdict on exactly this head. An older head's review never counts.
+  // The newest Codex verdict on exactly this head. An older head's review never counts, and
+  // after a "Review again" tap, neither does one posted before the tap.
+  const since = f.memory.requeueSha === sha ? Date.parse(f.memory.requeuedAt ?? '') || 0 : 0;
   const onHead = f.codex
-    .filter((r) => r.commitId === sha)
+    .filter((r) => r.commitId === sha && Date.parse(r.submittedAt) > since)
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
 
   if (!onHead) {
@@ -104,6 +113,15 @@ export function decide(f: Facts): Decision {
   if (f.checks.pending.length) return { kind: 'wait', reason: `pending: ${f.checks.pending.join(', ')}` };
   if (f.unresolvedThreads > 0) {
     return { kind: 'wait', reason: `${f.unresolvedThreads} unresolved review thread${f.unresolvedThreads === 1 ? '' : 's'}` };
+  }
+
+  // A check that never ran proves nothing. An empty list is fine only where the repo runs no
+  // validation by decision; anywhere else it may be CI that never started.
+  if (f.checks.skipped.length) {
+    return { kind: 'ask', sha, review: onHead, why: `checks did not run: ${f.checks.skipped.join(', ')}` };
+  }
+  if (f.checks.total === 0 && !f.noCi) {
+    return { kind: 'ask', sha, review: onHead, why: 'no check ran on the head' };
   }
 
   if (onHead.verdict === 'escalate') {

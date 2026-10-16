@@ -54,22 +54,24 @@ from facts GitHub reports. No model decides a merge.
 | Step | What the desk checks |
 |---|---|
 | Is it ours? | Not a draft, not a fork, authored by someone on `DESK_AUTHORS`, aimed at the default branch, and not labelled `merge-desk/hold` |
-| Tier | petedio-iac's `scripts/pr-blast-radius.py`, read from petedio-iac's default branch and run against the base repository's workflows on its default branch. A renamed file counts by both paths |
+| Tier | petedio-iac's `scripts/pr-blast-radius.py`, read from petedio-iac's default branch and run against the base repository's workflows on its default branch. A renamed file counts by both paths. Until the rules on main grade the desk's own guard paths tier 2, every PR is tier 2 |
 | Codex | A review of the head SHA by `petedio-codex-review[bot]`. None yet: the desk queues `codex-review <repo> <n> <effort>` on codex-248, with `low`, `medium` or `high` for tiers 0, 1 and 2 |
-| Gates | No conflict, every check run and status passed, and no unresolved review thread |
+| Gates | No conflict, every check run and status passed, and no unresolved review thread. A skipped or neutral check, or no check at all in a repo not on `DESK_NO_CI_REPOS`, goes to Pedro instead of merging |
 | Who merges | Tiers 0 and 1 with "No blocking findings" merge here. Tier 2, or a Codex "Escalate to Pedro", arrive as a DM with a **Merge** button |
 
 The merge is a squash pinned to the reviewed head, so a push after the review blocks it
 until Codex reviews the new head. The desk approves the PR first, which satisfies a
 required review and records the evidence. After the merge it reads the default branch
-back, then posts one comment on the PR and one DM.
+back, then posts one comment on the PR and one DM. Both are saved first and retried on
+later polls until they land.
 
 A tap merges only the SHA on its button, only for the owner, and only after the desk
 reads every fact again. A moved head, a new thread or a red check refuses the tap and
 says why.
 
 After two blocking Codex rounds the desk stops, comments once, and DMs both reviews with a
-**Review again** button that grants one more round.
+**Review again** button that queues one more round, of the same head if nothing was pushed.
+A failed Codex queue, or one cut off by a restart, gets the same button.
 
 `DESK_MODE=dry-run` runs every step except the approval and the merge, and DMs each merge
 it would have made. Use it first on a new repository. `/health` reports the desk as `off`,

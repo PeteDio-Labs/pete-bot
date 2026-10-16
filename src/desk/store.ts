@@ -17,6 +17,12 @@ export interface DeskMemory extends PrMemory {
   mergeFailedSha?: string;
   /** The merge commit, once the desk merged the PR. */
   mergedSha?: string;
+  /**
+   * What the desk still owes the PR and Pedro after a merge. It is saved before either is
+   * sent and cleared after each lands, so a failed send is retried on a later poll, even
+   * though the PR is closed by then and no longer listed.
+   */
+  notice?: { comment?: string; dm?: string };
 }
 
 export class DeskStore {
@@ -49,6 +55,15 @@ export class DeskStore {
     const next = { ...this.get(repo, n), ...change };
     this.putStmt.run(`${repo}#${n}`, JSON.stringify(next), new Date().toISOString());
     return next;
+  }
+
+  /** Every PR the desk remembers, for the checks that don't start from an open PR. */
+  entries(): { repo: string; n: number; memory: DeskMemory }[] {
+    const rows = this.db.query('SELECT pr, memory FROM desk_prs').all() as { pr: string; memory: string }[];
+    return rows.map((r) => {
+      const at = r.pr.lastIndexOf('#');
+      return { repo: r.pr.slice(0, at), n: Number(r.pr.slice(at + 1)), memory: JSON.parse(r.memory) as DeskMemory };
+    });
   }
 
   close(): void {

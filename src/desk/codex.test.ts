@@ -26,7 +26,7 @@ describe('verdictOf', () => {
   });
 
   it('ignores an unknown verdict', () => {
-    expect(verdictOf(review('## Codex review: Looks great, merge it'))).toBeNull();
+    expect(verdictOf(review('## Codex review: Unrecognized verdict'))).toBeNull();
   });
 });
 

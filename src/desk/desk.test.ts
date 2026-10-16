@@ -3,7 +3,7 @@
  * what it says once, and what a tap can and cannot do.
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MergeDesk, buttonId, parseButtonId, type Button } from './desk.js';
+import { MergeDesk, buttonId, parseButtonId, TIER2_CANARIES, type Button } from './desk.js';
 import { DeskStore } from './store.js';
 import { CodexQueue } from './codex.js';
 import type { DeskSettings } from './config.js';
@@ -19,6 +19,7 @@ const settings = (over: Partial<DeskSettings> = {}): DeskSettings => ({
   org: 'PeteDio-Labs',
   repos: [REPO],
   authors: new Set(['petedillo']),
+  noCiRepos: new Set(),
   appId: '1',
   installationId: '2',
   privateKeyPem: '',
@@ -54,6 +55,7 @@ class FakeGitHub {
     labels: [],
     state: 'open',
     merged: false,
+    mergeCommitSha: null,
     mergeable: true,
     mergeableState: 'clean',
   };
@@ -64,6 +66,9 @@ class FakeGitHub {
   comments: string[] = [];
   approvals: string[] = [];
   merges: string[] = [];
+  approveError: Error | null = null;
+  mergeError: Error | null = null;
+  commentFailures = 0;
 
   async listOpenPulls() {
     return this.pull.state === 'open' ? [this.pull] : [];
@@ -78,7 +83,7 @@ class FakeGitHub {
     return this.reviews;
   }
   async checks() {
-    return { total: 1, passed: 1, pending: [], failed: [] };
+    return { total: 1, passed: 1, pending: [], failed: [], skipped: [] };
   }
   async unresolvedThreads() {
     return this.threads;
@@ -93,25 +98,34 @@ class FakeGitHub {
     return [];
   }
   async approve(_r: string, _n: number, sha: string) {
+    if (this.approveError) throw this.approveError;
     this.approvals.push(sha);
   }
   async merge(_r: string, _n: number, sha: string) {
     this.merges.push(sha);
+    if (this.mergeError) throw this.mergeError;
     return this.mergeResult;
   }
   async onBranch() {
     return true;
   }
   async comment(_r: string, _n: number, body: string) {
+    if (this.commentFailures > 0) {
+      this.commentFailures--;
+      throw new Error('HTTP 502');
+    }
     this.comments.push(body);
   }
 }
 
-// Grades by path the way the real rules do for these fixtures: .tf is tier 2, the rest 0.
+// Grades by path the way the real rules do for these fixtures: .tf and the canaries are
+// tier 2, the rest 0. Clearing `rulesGuardDesk` plays a main that lacks the desk's rules.
+let rulesGuardDesk = true;
 const runPython = async (argv: string[]) => {
   const list = await Bun.file(argv[argv.indexOf('--paths-from') + 1]!).text();
   const paths = list.split('\n').filter(Boolean);
-  const rows = paths.map((p) => ({ path: p, tier: p.endsWith('.tf') ? 2 : 0, reason: 'fixture' }));
+  const two = (p: string) => p.endsWith('.tf') || (rulesGuardDesk && TIER2_CANARIES.includes(p));
+  const rows = paths.map((p) => ({ path: p, tier: two(p) ? 2 : 0, reason: 'fixture' }));
   return { exitCode: 0, stdout: JSON.stringify({ tier: Math.max(...rows.map((r) => r.tier)), floor_note: null, paths: rows }), stderr: '' };
 };
 
@@ -120,7 +134,7 @@ let dms: { content: string; buttons?: Button[] }[];
 let queued: string[];
 let queueOk: boolean;
 
-function makeDesk(over: Partial<DeskSettings> = {}) {
+function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memory:')) {
   const codex = new CodexQueue({
     ...settings().codex,
     spawn: async (argv) => {
@@ -132,7 +146,7 @@ function makeDesk(over: Partial<DeskSettings> = {}) {
     settings: settings(over),
     github: gh as unknown as GitHubApp,
     codex,
-    store: new DeskStore(':memory:'),
+    store,
     notifier: { dm: async (content, buttons) => void dms.push({ content, buttons }) },
     log: { info: () => {}, warn: () => {}, error: () => {} },
     runPython,
@@ -148,6 +162,7 @@ beforeEach(() => {
   dms = [];
   queued = [];
   queueOk = true;
+  rulesGuardDesk = true;
 });
 
 describe('tiers 0 and 1', () => {
@@ -273,5 +288,91 @@ describe('Codex', () => {
     expect(await desk.tap(again)).toBe('Queued one more Codex round.');
     await settle(desk);
     expect(queued).toHaveLength(1);
+  });
+});
+
+describe('review fixes (Codex round 1)', () => {
+  it('treats every PR as tier 2 while the rules on main do not guard the desk', async () => {
+    rulesGuardDesk = false;
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.merges).toEqual([]);
+    expect(dms).toHaveLength(1);
+    expect(dms[0]!.content).toContain('tier 2');
+    expect(dms[0]!.content).toContain('grade scripts/pr-blast-radius.py tier 0');
+  });
+
+  it('queues the blocked head again on Review again, without waiting for a push', async () => {
+    gh.reviews = [
+      codexReview('Changes requested', 'b'.repeat(40), '2026-01-01T01:00:00Z'),
+      codexReview('Changes requested', HEAD, '2026-01-01T02:00:00Z'),
+    ];
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.comments[0]).toContain('stopped after 2 blocking Codex rounds');
+    expect(await desk.tap(dms[0]!.buttons![0]!.customId)).toBe('Queued one more Codex round.');
+    await settle(desk);
+    expect(queued).toEqual([`codex-review ${REPO} 5 low`]);
+  });
+
+  it('reports a queue the last process left running, and Review again queues it', async () => {
+    gh.reviews = [];
+    const store = new DeskStore(':memory:');
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true });
+    const desk = makeDesk({}, store);
+    await desk.recoverOrphans();
+    expect(gh.comments[0]).toContain('pete-bot restarted while it ran');
+    const again = dms[0]!.buttons![0]!.customId;
+    expect(parseButtonId(again)?.action).toBe('again');
+    await desk.poll();
+    expect(queued).toEqual([]);
+    expect(await desk.tap(again)).toBe('Queued one more Codex round.');
+    await settle(desk);
+    expect(queued).toHaveLength(1);
+  });
+
+  it('reports a thrown approval once, then waits for a tap', async () => {
+    gh.approveError = new Error('HTTP 422 reading approval');
+    const desk = makeDesk();
+    await desk.poll();
+    await desk.poll();
+    await desk.poll();
+    expect(gh.merges).toEqual([]);
+    expect(gh.comments.filter((c) => c.includes('approval was refused'))).toHaveLength(1);
+    expect(dms.filter((d) => d.buttons?.length)).toHaveLength(1);
+  });
+
+  it('reads the PR back when the merge request throws, and counts a merge that landed', async () => {
+    gh.mergeError = new Error('timed out');
+    gh.getPull = async () => (gh.merges.length ? { ...gh.pull, state: 'closed', merged: true, mergeCommitSha: MERGED } : { ...gh.pull });
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.comments.at(-1)).toContain('merged as `mmmmmmm`');
+    expect(desk.status().merged).toBe(1);
+  });
+
+  it('calls a thrown merge failed when the PR did not merge', async () => {
+    gh.mergeError = new Error('timed out');
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.comments.at(-1)).toContain('the PR is not merged');
+    expect(desk.status().merged).toBe(0);
+  });
+
+  it('retries a merge report that failed, after the PR closed, without merging again', async () => {
+    gh.commentFailures = 1;
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.merges).toEqual([HEAD]);
+    expect(gh.comments).toEqual([]);
+    gh.pull.state = 'closed';
+    gh.pull.merged = true;
+    await desk.poll();
+    expect(gh.comments).toHaveLength(1);
+    expect(gh.comments[0]).toContain('merged as `mmmmmmm`');
+    expect(dms).toHaveLength(1);
+    await desk.poll();
+    expect(gh.comments).toHaveLength(1);
+    expect(gh.merges).toEqual([HEAD]);
   });
 });

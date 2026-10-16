@@ -28,6 +28,8 @@ export interface PullSummary {
 export interface PullDetail extends PullSummary {
   state: string;
   merged: boolean;
+  /** The merge commit once merged; GitHub's test merge commit before that. */
+  mergeCommitSha: string | null;
   /** null while GitHub is still computing it. */
   mergeable: boolean | null;
   mergeableState: string;
@@ -49,6 +51,8 @@ export interface CheckSummary {
   passed: number;
   pending: string[];
   failed: string[];
+  /** Check runs that finished skipped or neutral. They ran nothing, so they never count as a pass. */
+  skipped: string[];
 }
 
 export interface FileChange {
@@ -171,6 +175,7 @@ export class GitHubApp {
       ...summary(raw),
       state: raw.state,
       merged: Boolean(raw.merged),
+      mergeCommitSha: raw.merge_commit_sha ?? null,
       mergeable: raw.mergeable ?? null,
       mergeableState: raw.mergeable_state ?? 'unknown',
     };
@@ -198,8 +203,9 @@ export class GitHubApp {
   }
 
   /**
-   * Check runs and commit statuses on one commit. Only the latest run of each check counts,
-   * and a skipped or neutral run passes.
+   * Check runs and commit statuses on one commit. Only the latest run of each check counts.
+   * A skipped or neutral run is not a pass: it lands in `skipped`, and the desk asks Pedro.
+   * A partial read of either list throws, so a failure on page two can't go unseen.
    */
   async checks(repo: string, sha: string): Promise<CheckSummary> {
     const runs = await this.json<{ total_count: number; check_runs: RawCheckRun[] }>(
@@ -209,15 +215,19 @@ export class GitHubApp {
     if (runs.total_count > runs.check_runs.length) {
       throw new Error(`${runs.total_count} check runs on ${sha.slice(0, 7)}, more than one page; refusing a partial read`);
     }
-    const statuses = await this.json<{ statuses: { context: string; state: string }[] }>(
+    const statuses = await this.json<{ state: string; total_count: number; statuses: { context: string; state: string }[] }>(
       `reading statuses on ${sha.slice(0, 7)}`,
       `${this.repoPath(repo)}/commits/${sha}/status?per_page=100`,
     );
-    const out: CheckSummary = { total: 0, passed: 0, pending: [], failed: [] };
+    if (statuses.total_count > statuses.statuses.length) {
+      throw new Error(`${statuses.total_count} commit statuses on ${sha.slice(0, 7)}, more than one page; refusing a partial read`);
+    }
+    const out: CheckSummary = { total: 0, passed: 0, pending: [], failed: [], skipped: [] };
     for (const run of runs.check_runs) {
       out.total++;
       if (run.status !== 'completed') out.pending.push(run.name);
-      else if (['success', 'neutral', 'skipped'].includes(run.conclusion ?? '')) out.passed++;
+      else if (run.conclusion === 'success') out.passed++;
+      else if (run.conclusion === 'skipped' || run.conclusion === 'neutral') out.skipped.push(`${run.name} (${run.conclusion})`);
       else out.failed.push(`${run.name} (${run.conclusion})`);
     }
     for (const s of statuses.statuses) {
@@ -225,6 +235,11 @@ export class GitHubApp {
       if (s.state === 'success') out.passed++;
       else if (s.state === 'pending') out.pending.push(s.context);
       else out.failed.push(`${s.context} (${s.state})`);
+    }
+    // GitHub reports "pending" for a commit with no statuses, so the aggregate counts only
+    // when contexts exist. It catches a context the list above did not explain.
+    if (statuses.total_count > 0 && statuses.state !== 'success' && !out.failed.length && !out.pending.length) {
+      (statuses.state === 'pending' ? out.pending : out.failed).push(`combined status (${statuses.state})`);
     }
     return out;
   }
@@ -316,6 +331,7 @@ interface RawPull {
   draft?: boolean;
   state: string;
   merged?: boolean;
+  merge_commit_sha?: string | null;
   mergeable?: boolean | null;
   mergeable_state?: string;
   html_url: string;

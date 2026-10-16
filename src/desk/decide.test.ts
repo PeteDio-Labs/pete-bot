@@ -18,6 +18,7 @@ function facts(over: Partial<Facts> = {}, pull: Partial<Facts['pull']> = {}): Fa
     repoFullName: 'PeteDio-Labs/petedio-workspace',
     defaultBranch: 'main',
     authors: new Set(['petedillo']),
+    noCi: false,
     pull: {
       number: 7,
       title: 'docs',
@@ -30,13 +31,14 @@ function facts(over: Partial<Facts> = {}, pull: Partial<Facts['pull']> = {}): Fa
       labels: [],
       state: 'open',
       merged: false,
+      mergeCommitSha: null,
       mergeable: true,
       mergeableState: 'clean',
       ...pull,
     },
     classification: { tier: 0, reasons: ['README.md: prose'], pathCount: 1 },
     codex: [review('no-blocking')],
-    checks: { total: 2, passed: 2, pending: [], failed: [] },
+    checks: { total: 2, passed: 2, pending: [], failed: [], skipped: [] },
     unresolvedThreads: 0,
     memory: {},
     ...over,
@@ -52,14 +54,21 @@ describe('what the desk merges on its own', () => {
     expect(decide(facts({ classification: { tier: 1, reasons: [], pathCount: 1 } })).kind).toBe('merge');
   });
 
-  it('merges with zero checks, because the report names the count', () => {
-    expect(decide(facts({ checks: { total: 0, passed: 0, pending: [], failed: [] } })).kind).toBe('merge');
+  it('merges with zero checks only in a repo on DESK_NO_CI_REPOS', () => {
+    const none = { total: 0, passed: 0, pending: [], failed: [], skipped: [] };
+    expect(decide(facts({ checks: none, noCi: true })).kind).toBe('merge');
+    expect(decide(facts({ checks: none }))).toMatchObject({ kind: 'ask', why: 'no check ran on the head' });
   });
 });
 
 describe('what goes to Pedro', () => {
   it('asks for a tap on tier 2', () => {
     expect(decide(facts({ classification: { tier: 2, reasons: [], pathCount: 1 } }))).toMatchObject({ kind: 'ask', why: 'tier 2' });
+  });
+
+  it('asks for a tap when a check was skipped or neutral, even in a no-CI repo', () => {
+    const checks = { total: 2, passed: 1, pending: [], failed: [], skipped: ['validate (skipped)'] };
+    expect(decide(facts({ checks, noCi: true }))).toMatchObject({ kind: 'ask', why: 'checks did not run: validate (skipped)' });
   });
 
   it('asks for a tap when Codex escalates, whatever the tier', () => {
@@ -119,6 +128,16 @@ describe('Codex', () => {
     expect(decide(facts({ codex, memory: { extraRounds: 1 } })).kind).toBe('queue');
   });
 
+  it('queues the same head again after a Review again tap, and ignores the verdict from before it', () => {
+    const blocked = [review('changes-requested', OLD, '2026-10-16T01:00:00Z'), review('changes-requested', HEAD, '2026-10-16T02:00:00Z')];
+    expect(decide(facts({ codex: blocked })).kind).toBe('stop');
+    const memory = { extraRounds: 1, requeueSha: HEAD, requeuedAt: '2026-10-16T03:00:00.000Z' };
+    expect(decide(facts({ codex: blocked, memory }))).toEqual({ kind: 'queue', sha: HEAD, effort: 'low' });
+    expect(decide(facts({ codex: blocked, memory: { ...memory, queuedSha: HEAD, queueRunning: true } })).kind).toBe('wait');
+    const after = [...blocked, review('no-blocking', HEAD, '2026-10-16T04:00:00Z')];
+    expect(decide(facts({ codex: after, memory })).kind).toBe('merge');
+  });
+
   it('counts a commit blocked twice as one round', () => {
     const codex = [review('changes-requested', OLD, '2026-10-16T01:00:00Z'), review('changes-requested', OLD, '2026-10-16T02:00:00Z')];
     expect(blockingRounds(codex)).toHaveLength(1);
@@ -129,8 +148,8 @@ describe('the merge gates', () => {
   it.each([
     ['mergeability unknown', facts({}, { mergeable: null })],
     ['a conflict', facts({}, { mergeable: false, mergeableState: 'dirty' })],
-    ['a failing check', facts({ checks: { total: 2, passed: 1, pending: [], failed: ['ci (failure)'] } })],
-    ['a pending check', facts({ checks: { total: 2, passed: 1, pending: ['ci'], failed: [] } })],
+    ['a failing check', facts({ checks: { total: 2, passed: 1, pending: [], failed: ['ci (failure)'], skipped: [] } })],
+    ['a pending check', facts({ checks: { total: 2, passed: 1, pending: ['ci'], failed: [], skipped: [] } })],
     ['an open thread', facts({ unresolvedThreads: 1 })],
   ])('waits on %s', (_name, f) => {
     expect(decide(f).kind).toBe('wait');
