@@ -18,11 +18,18 @@ export interface DeskMemory extends PrMemory {
   /** The merge commit, once the desk merged the PR. */
   mergedSha?: string;
   /**
-   * What the desk still owes the PR and Pedro after a merge. It is saved before either is
-   * sent and cleared after each lands, so a failed send is retried on a later poll, even
-   * though the PR is closed by then and no longer listed.
+   * Reports the desk still owes the PR and Pedro: a merge, a failed merge or a failed queue.
+   * Each is saved before it is sent, and each part is cleared once it lands, so a failed
+   * send is retried on a later poll, even after the PR closed and is no longer listed.
    */
-  notice?: { comment?: string; dm?: string };
+  outbox?: Outgoing[];
+}
+
+export interface Outgoing {
+  id: string;
+  comment?: string;
+  dm?: string;
+  buttons?: { customId: string; label: string; style: 'primary' | 'secondary' | 'danger' }[];
 }
 
 export class DeskStore {

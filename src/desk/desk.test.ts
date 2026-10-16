@@ -133,6 +133,7 @@ let gh: FakeGitHub;
 let dms: { content: string; buttons?: Button[] }[];
 let queued: string[];
 let queueOk: boolean;
+let dmFailures: number;
 
 function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memory:')) {
   const codex = new CodexQueue({
@@ -147,7 +148,15 @@ function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memo
     github: gh as unknown as GitHubApp,
     codex,
     store,
-    notifier: { dm: async (content, buttons) => void dms.push({ content, buttons }) },
+    notifier: {
+      dm: async (content, buttons) => {
+        if (dmFailures > 0) {
+          dmFailures--;
+          throw new Error('Discord is down');
+        }
+        dms.push({ content, buttons });
+      },
+    },
     log: { info: () => {}, warn: () => {}, error: () => {} },
     runPython,
   });
@@ -163,6 +172,7 @@ beforeEach(() => {
   queued = [];
   queueOk = true;
   rulesGuardDesk = true;
+  dmFailures = 0;
 });
 
 describe('tiers 0 and 1', () => {
@@ -374,5 +384,61 @@ describe('review fixes (Codex round 1)', () => {
     await desk.poll();
     expect(gh.comments).toHaveLength(1);
     expect(gh.merges).toEqual([HEAD]);
+  });
+});
+
+describe('review fixes (Codex round 2)', () => {
+  it("leaves a newer head's queue alone when an older head's job finishes", async () => {
+    gh.reviews = [];
+    const store = new DeskStore(':memory:');
+    const desk = makeDesk({}, store);
+    await desk.poll();
+    // A push queued the next head while the first job still ran.
+    store.update(REPO, 5, { queuedSha: NEXT, queueRunning: true });
+    await settle(desk);
+    expect(store.get(REPO, 5)).toMatchObject({ queuedSha: NEXT, queueRunning: true });
+    expect(gh.comments).toEqual([]);
+    // So a restart now reports the newer head's job instead of waiting on it forever.
+    await makeDesk({}, store).recoverOrphans();
+    expect(gh.comments[0]).toContain('`ccccccc` failed (pete-bot restarted while it ran)');
+  });
+
+  it('calls a re-review that posts nothing a failure, even with an old verdict on the head', async () => {
+    gh.reviews = [
+      codexReview('Changes requested', 'b'.repeat(40), '2026-01-01T01:00:00Z'),
+      codexReview('Changes requested', HEAD, '2026-01-01T02:00:00Z'),
+    ];
+    const desk = makeDesk();
+    await desk.poll();
+    expect(await desk.tap(dms[0]!.buttons![0]!.customId)).toBe('Queued one more Codex round.');
+    await settle(desk);
+    expect(gh.comments.at(-1)).toContain('no Codex review of aaaaaaa appeared');
+  });
+
+  it('keeps a failed queue report, button and all, until the DM lands', async () => {
+    gh.reviews = [];
+    queueOk = false;
+    dmFailures = 1;
+    const desk = makeDesk();
+    await desk.poll();
+    await settle(desk);
+    expect(gh.comments).toHaveLength(1);
+    expect(dms).toEqual([]);
+    await desk.poll();
+    expect(dms).toHaveLength(1);
+    expect(parseButtonId(dms[0]!.buttons![0]!.customId)?.action).toBe('again');
+    await desk.poll();
+    expect(dms).toHaveLength(1);
+    expect(gh.comments).toHaveLength(1);
+  });
+
+  it('retries a failed-merge comment on the next poll', async () => {
+    gh.mergeResult = { ok: false, status: 405, message: 'Required status check is expected' };
+    gh.commentFailures = 1;
+    const desk = makeDesk();
+    await desk.poll();
+    expect(gh.comments).toEqual([]);
+    await desk.poll();
+    expect(gh.comments.filter((c) => c.includes('failed: HTTP 405'))).toHaveLength(1);
   });
 });

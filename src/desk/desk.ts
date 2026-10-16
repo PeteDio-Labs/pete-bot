@@ -8,8 +8,8 @@
  * from facts (src/desk/decide.ts).
  *
  * WHAT IT SAYS. A merge, a failed merge, a failed Codex queue and the two-round stop each
- * post one comment on the PR and one DM. A merge's comment and DM are saved before they are
- * sent and retried until they land. A PR that is waiting on CI, Codex or a thread is
+ * post one comment on the PR and one DM. Each is saved before it is sent and retried until
+ * it lands. A PR that is waiting on CI, Codex or a thread is
  * logged and nothing else: those states are visible on the PR already.
  *
  * ⚠ A FAILURE IS NEVER SILENT, AND NEVER A MERGE. Any error reading a PR stops that PR's
@@ -25,7 +25,7 @@ import { classify } from './classify.js';
 import { decide, blockingRounds, MAX_ROUNDS, type Decision, type Facts } from './decide.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp } from './github.js';
-import type { DeskStore } from './store.js';
+import type { DeskStore, Outgoing } from './store.js';
 
 export interface Button {
   customId: string;
@@ -203,24 +203,37 @@ export class MergeDesk {
     }
   }
 
-  /** Sends what a merge still owes. Each part is cleared once it lands. */
+  /** Saves a report, then tries to send it. A part that fails stays saved for the next poll. */
+  private async report(repo: string, n: number, out: Omit<Outgoing, 'id'>): Promise<void> {
+    const { store, log } = this.deps;
+    const item: Outgoing = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...out };
+    store.update(repo, n, { outbox: [...(store.get(repo, n).outbox ?? []), item] });
+    await this.deliver(repo, n).catch((err) => log.warn(`merge desk: a report on ${repo}#${n} failed; the next poll retries it: ${String(err)}`));
+  }
+
+  /** Sends what the desk still owes one PR, oldest first. Each part is cleared once it lands. */
   private async deliver(repo: string, n: number): Promise<void> {
     const { store, github, notifier } = this.deps;
-    const notice = store.get(repo, n).notice;
-    if (notice?.comment) {
-      await github.comment(repo, n, notice.comment);
-      store.update(repo, n, { notice: { ...store.get(repo, n).notice, comment: undefined } });
-    }
-    if (notice?.dm) {
-      await notifier.dm(notice.dm);
-      store.update(repo, n, { notice: undefined });
+    const clear = (id: string, part: Partial<Outgoing> | null) => {
+      const outbox = (store.get(repo, n).outbox ?? []).flatMap((o) =>
+        o.id !== id ? [o] : part === null ? [] : [{ ...o, ...part }],
+      );
+      store.update(repo, n, { outbox: outbox.length ? outbox : undefined });
+    };
+    for (const item of store.get(repo, n).outbox ?? []) {
+      if (item.comment) {
+        await github.comment(repo, n, item.comment);
+        clear(item.id, { comment: undefined });
+      }
+      if (item.dm) await notifier.dm(item.dm, item.buttons);
+      clear(item.id, null);
     }
   }
 
   private async deliverPending(errors: string[]): Promise<void> {
     for (const { repo, n, memory } of this.deps.store.entries()) {
-      if (!memory.notice?.comment && !memory.notice?.dm) continue;
-      await this.deliver(repo, n).catch((err) => errors.push(`${repo}#${n}: delivering the merge report: ${String(err)}`));
+      if (!memory.outbox?.length) continue;
+      await this.deliver(repo, n).catch((err) => errors.push(`${repo}#${n}: delivering a report: ${String(err)}`));
     }
   }
 
@@ -326,6 +339,8 @@ export class MergeDesk {
           .catch(async (err) => {
             // Whatever broke, the head must not wait forever on a review nobody is running.
             log.error(`merge desk: after the Codex queue for ${repo}#${n}: ${String(err)}`);
+            // A newer head may have been queued since. Its state is not this job's to touch.
+            if (store.get(repo, n).queuedSha !== d.sha) return;
             store.update(repo, n, { queueRunning: false });
             await this.reportQueueFailure(repo, n, d.sha, 'the desk failed while it checked the result', String(err)).catch((e) =>
               log.error(`merge desk: reporting the queue failure for ${repo}#${n}: ${String(e)}`),
@@ -392,10 +407,20 @@ export class MergeDesk {
 
   private async afterQueue(repo: string, n: number, sha: string, r: QueueResult): Promise<void> {
     const { store, github, log } = this.deps;
+    const mem = store.get(repo, n);
+    // A push queued a newer head while this job ran. That job owns the queue state now.
+    if (mem.queuedSha !== sha) {
+      log.info(`merge desk: the Codex queue for ${repo}#${n} at ${short(sha)} finished after a newer head was queued`);
+      return;
+    }
     store.update(repo, n, { queueRunning: false });
     if (r.ok) {
-      // Codex reviews whatever the head is when it starts. Check it reviewed this one.
-      const reviewed = codexReviews(await github.listReviews(repo, n)).some((x) => x.commitId === sha);
+      // Codex reviews whatever the head is when it starts. Check it reviewed this one, after
+      // any Review again tap, so an old verdict on the same head doesn't count.
+      const since = mem.requeueSha === sha ? Date.parse(mem.requeuedAt ?? '') || 0 : 0;
+      const reviewed = codexReviews(await github.listReviews(repo, n)).some(
+        (x) => x.commitId === sha && Date.parse(x.submittedAt) > since,
+      );
       const pull = await github.getPull(repo, n);
       if (reviewed || pull.headSha !== sha) {
         await this.evaluate(repo, n);
@@ -409,17 +434,17 @@ export class MergeDesk {
 
   /** Marks the head's queue failed, then one comment and one DM with a button to queue again. */
   private async reportQueueFailure(repo: string, n: number, sha: string, why: string, tail: string): Promise<void> {
-    const { store, github, notifier } = this.deps;
-    store.update(repo, n, { queueFailedSha: sha });
+    this.deps.store.update(repo, n, { queueFailedSha: sha });
     const detail = tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : '';
-    await github.comment(repo, n, `Merge desk: queueing a Codex review of \`${short(sha)}\` failed (${why}). Nothing merges until a review of the head exists.${detail}`);
-    await notifier.dm(`**Merge desk** · Codex queue failed for [${repo}#${n}](https://github.com/${this.deps.settings.org}/${repo}/pull/${n}) at \`${short(sha)}\` (${why}).`, [
-      { customId: buttonId('again', repo, n, sha), label: 'Review again', style: 'secondary' },
-    ]);
+    await this.report(repo, n, {
+      comment: `Merge desk: queueing a Codex review of \`${short(sha)}\` failed (${why}). Nothing merges until a review of the head exists.${detail}`,
+      dm: `**Merge desk** · Codex queue failed for [${repo}#${n}](https://github.com/${this.deps.settings.org}/${repo}/pull/${n}) at \`${short(sha)}\` (${why}).`,
+      buttons: [{ customId: buttonId('again', repo, n, sha), label: 'Review again', style: 'secondary' }],
+    });
   }
 
   private async merge(repo: string, f: Facts, sha: string, how: string): Promise<{ ok: boolean; message: string }> {
-    const { github, notifier, store } = this.deps;
+    const { github, store } = this.deps;
     const n = f.pull.number;
     const evidence = `tier ${f.classification.tier}; Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed; 0 open threads`;
     // The approval satisfies a required review where one exists, and records the evidence
@@ -427,8 +452,7 @@ export class MergeDesk {
     const fail = async (why: string) => {
       const msg = `Merge desk: merging \`${short(sha)}\` failed: ${why}`;
       store.update(repo, n, { mergeFailedSha: sha });
-      await github.comment(repo, n, msg).catch(() => undefined);
-      await notifier.dm(`**Merge desk** · ${this.link(repo, f)}: merge failed: ${why.slice(0, 200)}`).catch(() => undefined);
+      await this.report(repo, n, { comment: msg, dm: `**Merge desk** · ${this.link(repo, f)}: merge failed: ${why.slice(0, 200)}` });
       return { ok: false, message: msg };
     };
     try {
@@ -455,17 +479,12 @@ export class MergeDesk {
       landed = await github.onBranch(repo, result.sha, f.defaultBranch).catch(() => false);
     }
     const where = landed ? `on \`${f.defaultBranch}\`` : `but I could not confirm it is on \`${f.defaultBranch}\``;
-    store.update(repo, n, {
-      mergedSha: result.sha,
-      notice: {
-        comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,
-        dm: `**Merge desk** · merged ${this.link(repo, f)} as \`${short(result.sha)}\` ${where}. ${how}.`,
-      },
-    });
+    store.update(repo, n, { mergedSha: result.sha });
     this.state.merged++;
-    await this.deliver(repo, n).catch((err) =>
-      this.deps.log.warn(`merge desk: ${repo}#${n} merged, but the report failed; the next poll retries it: ${String(err)}`),
-    );
+    await this.report(repo, n, {
+      comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,
+      dm: `**Merge desk** · merged ${this.link(repo, f)} as \`${short(result.sha)}\` ${where}. ${how}.`,
+    });
     return { ok: true, message: `Merged as ${short(result.sha)} ${where}.` };
   }
 

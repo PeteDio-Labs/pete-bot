@@ -25,11 +25,20 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
     return;
   }
   const s = deskState.settings;
+  let store: DeskStore;
+  try {
+    store = new DeskStore(s.statePath);
+  } catch (err) {
+    // Without its memory the desk would queue and DM twice, so it stays off and says why.
+    deskState = { state: 'misconfigured', reason: `DESK_STATE_PATH ${s.statePath} cannot be opened: ${String(err)}` };
+    logger.error(`[Desk] The merge desk is off because it is misconfigured: ${deskState.reason}`);
+    return;
+  }
   desk = new MergeDesk({
     settings: s,
     github: new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org }),
     codex: new CodexQueue(s.codex),
-    store: new DeskStore(s.statePath),
+    store,
     notifier: discordNotifier(client, ownerUserId),
     log: logger,
   });
