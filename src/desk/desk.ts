@@ -103,6 +103,8 @@ export class MergeDesk {
   private polling = false;
   private readonly state: DeskStatus;
   private readonly cache = new Map<string, Promise<unknown>>();
+  /** The delivery running for each PR, so the next one waits for it. */
+  private readonly delivering = new Map<string, Promise<void>>();
   /** Queue calls in flight, so tests and shutdown can wait for them. */
   readonly inflight = new Set<Promise<unknown>>();
 
@@ -211,8 +213,24 @@ export class MergeDesk {
     await this.deliver(repo, n).catch((err) => log.warn(`merge desk: a report on ${repo}#${n} failed; the next poll retries it: ${String(err)}`));
   }
 
-  /** Sends what the desk still owes one PR, oldest first. Each part is cleared once it lands. */
-  private async deliver(repo: string, n: number): Promise<void> {
+  /**
+   * Sends what the desk still owes one PR. Calls for one PR run one after another, so a
+   * queue result and a poll can't both send the same saved report before either clears it.
+   */
+  private deliver(repo: string, n: number): Promise<void> {
+    const key = `${repo}#${n}`;
+    const next = (this.delivering.get(key) ?? Promise.resolve()).catch(() => undefined).then(() => this.drain(repo, n));
+    this.delivering.set(key, next);
+    next
+      .finally(() => {
+        if (this.delivering.get(key) === next) this.delivering.delete(key);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
+  /** Sends the saved reports, oldest first. Each part is cleared once it lands. */
+  private async drain(repo: string, n: number): Promise<void> {
     const { store, github, notifier } = this.deps;
     const clear = (id: string, part: Partial<Outgoing> | null) => {
       const outbox = (store.get(repo, n).outbox ?? []).flatMap((o) =>
@@ -321,7 +339,7 @@ export class MergeDesk {
   }
 
   private async act(repo: string, f: Facts, d: Decision): Promise<void> {
-    const { store, notifier, github, log, settings } = this.deps;
+    const { store, notifier, log, settings } = this.deps;
     const n = f.pull.number;
     const mem = store.get(repo, n);
     switch (d.kind) {
@@ -354,12 +372,13 @@ export class MergeDesk {
       case 'stop': {
         if (mem.stopReportedSha === d.sha) return;
         const links = d.rounds.map((r, i) => `[round ${i + 1}](${r.url}) at \`${short(r.commitId)}\``).join(', ');
-        const text = `Merge desk: stopped after ${d.rounds.length} blocking Codex rounds (${links}). A person decides what happens next.`;
-        await github.comment(repo, n, text);
-        await notifier.dm(`**Merge desk** · ${this.link(repo, f)} stopped after ${d.rounds.length} blocking Codex rounds: ${links}`, [
-          { customId: buttonId('again', repo, n, d.sha), label: 'Review again', style: 'secondary' },
-        ]);
+        // Recorded first: the outbox owns the comment and the DM from here, and retries each.
         store.update(repo, n, { stopReportedSha: d.sha });
+        await this.report(repo, n, {
+          comment: `Merge desk: stopped after ${d.rounds.length} blocking Codex rounds (${links}). A person decides what happens next.`,
+          dm: `**Merge desk** · ${this.link(repo, f)} stopped after ${d.rounds.length} blocking Codex rounds: ${links}`,
+          buttons: [{ customId: buttonId('again', repo, n, d.sha), label: 'Review again', style: 'secondary' }],
+        });
         return;
       }
 
