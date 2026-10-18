@@ -18,6 +18,7 @@ import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
 import { logger } from './utils/index.js';
+import { startDesk } from './desk/index.js';
 import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
@@ -39,6 +40,9 @@ client.once('clientReady', async () => {
   }, 30_000);
 
   await registerCommands();
+
+  // The desk DMs through this client, so it starts once the client is logged in.
+  startDesk(client, config.discord.ownerUserId);
 
   logger.info(`Pete Bot v${VERSION} ready — /status, /update, and /v1/alert`);
 });
