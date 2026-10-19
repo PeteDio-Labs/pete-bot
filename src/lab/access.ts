@@ -60,7 +60,15 @@ export class AccessVerifier {
     if (stale || !this.keys.has(kid)) {
       // Refetch on an unknown kid too, so a key rotation needs no restart. At most once a
       // minute, so a stream of forged kids can't turn into a stream of fetches.
-      if (stale || this.now() - this.fetchedAt > 60_000) await this.refresh();
+      if (stale || this.now() - this.fetchedAt > 60_000) {
+        try {
+          await this.refresh();
+        } catch (err) {
+          // A failed refetch keeps the keys already held, so one bad answer from Cloudflare
+          // can't lock everyone out. With no key for this kid, the failure is the answer.
+          if (!this.keys.has(kid)) throw err;
+        }
+      }
     }
     return this.keys.get(kid);
   }
@@ -70,7 +78,10 @@ export class AccessVerifier {
     const res = await this.fetchImpl(`${this.issuer}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) throw new Error(`Access certs answered HTTP ${res.status}`);
     const body = (await res.json()) as { keys?: Jwk[] };
-    this.keys = new Map((body.keys ?? []).filter((k) => k.kid && k.kty === 'RSA').map((k) => [k.kid!, k]));
+    const keys = new Map((body?.keys ?? []).filter((k) => k.kid && k.kty === 'RSA').map((k) => [k.kid!, k]));
+    // An answer with no keys keeps the old ones, so one bad fetch can't lock everyone out.
+    if (keys.size === 0) throw new Error('Access certs answered with no RSA keys');
+    this.keys = keys;
   }
 
   async verify(token: string | null): Promise<AccessResult> {
@@ -86,6 +97,9 @@ export class AccessVerifier {
     } catch {
       return { ok: false, reason: 'malformed JWT' };
     }
+    // JSON.parse accepts `null`, a number or an array; only an object is a JWT part.
+    const isObject = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
+    if (!isObject(header) || !isObject(payload)) return { ok: false, reason: 'malformed JWT' };
     // Pin the algorithm: never let the token choose it.
     if (header.alg !== 'RS256' || typeof header.kid !== 'string') return { ok: false, reason: 'JWT is not RS256 with a kid' };
 

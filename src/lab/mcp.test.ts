@@ -79,9 +79,22 @@ describe('AccessVerifier', () => {
       [sign({ aud: [AUD] }, { alg: 'none', kid: 'k1' }), 'JWT is not RS256 with a kid'],
       [sign({ aud: [AUD] }, { alg: 'HS256', kid: 'k1' }), 'JWT is not RS256 with a kid'],
       [sign({ aud: [AUD] }, { alg: 'RS256', kid: 'k9' }), 'JWT signed by an unknown key'],
+      ['bnVsbA.bnVsbA.x', 'malformed JWT'],
       [sign({ aud: [AUD], iss: `https://${TEAM}`, email: 'pedelgadillo@gmail.com', exp: NOW / 1000 + 300 }, undefined, other), 'bad JWT signature'],
     ];
     for (const [token, reason] of cases) expect(await v.verify(token)).toEqual({ ok: false, reason });
+  });
+
+  it('keeps its keys when a refetch answers with none', async () => {
+    let now = NOW;
+    let answer: unknown = jwks;
+    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: ['pedelgadillo@gmail.com'], now: () => now, fetch: (async () => json(answer)) as unknown as typeof fetch });
+    expect((await v.verify(good())).ok).toBe(true);
+    answer = { keys: [] };
+    now += 11 * 60_000;
+    const later = sign({ aud: [AUD], iss: `https://${TEAM}`, email: 'pedelgadillo@gmail.com', exp: now / 1000 + 300 });
+    expect((await v.verify(later)).ok).toBe(true);
+    expect(await v.verify(sign({ aud: [AUD] }, { alg: 'RS256', kid: 'k9' }))).toEqual({ ok: false, reason: 'JWT signed by an unknown key' });
   });
 
   it('refuses everything when the certs cannot be read', async () => {
@@ -164,6 +177,18 @@ describe('the MCP door', () => {
     expect((await call({ jsonrpc: '2.0', id: 1, method: 'ping' }, { path: '/mcp/plane' })).status).toBe(404);
   });
 
+  it('refuses a protocol version it never offered', async () => {
+    const res = await handler(
+      new Request(`http://192.168.50.237:3017${MCP_PATH}`, {
+        method: 'POST',
+        headers: { 'cf-access-jwt-assertion': 'good', 'mcp-protocol-version': '1999-01-01' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+      }),
+      '192.168.50.112',
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('accepts a notification with 202 and no body', async () => {
     const res = await call({ jsonrpc: '2.0', method: 'notifications/initialized' });
     expect(res.status).toBe(202);
@@ -228,6 +253,8 @@ describe('vault_presence', () => {
     (async (url: string, init?: RequestInit) => {
       seen.push({ url, init });
       const key = `${init?.method} ${url.replace('https://192.168.50.223:8200', '')}`;
+      // Bun's fetch would send a custom LIST method as GET; the client must never try it.
+      expect(init?.method).toBe('GET');
       const r = map[key];
       return r ? (typeof r === 'function' ? r() : r.clone()) : json({ errors: [] }, 404);
     }) as unknown as typeof fetch;
@@ -235,7 +262,7 @@ describe('vault_presence', () => {
 
   it('lists names from metadata only, with the token and the CA', async () => {
     const seen: Array<{ url: string; init?: RequestInit }> = [];
-    const tool = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'LIST /v1/kv/metadata/services/': json({ data: { keys: ['lab-agent', 'pete-bot'] } }) }, seen) }));
+    const tool = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/?list=true': json({ data: { keys: ['lab-agent', 'pete-bot'] } }) }, seen) }));
     const out = data(await callTool(tool, {}));
     expect(out).toEqual({ source: '2 entries listed under kv/metadata/services/', data: { secrets: ['lab-agent', 'pete-bot'] } });
     expect((seen[0]!.init!.headers as Record<string, string>)['X-Vault-Token']).toBe('hvs.token');
@@ -251,14 +278,16 @@ describe('vault_presence', () => {
     expect((out.data.recentVersions as Array<{ version: number }>).map((v) => v.version)).toEqual([4, 3]);
     const missing = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({}) }));
     expect(data(await callTool(missing, { name: 'nope' })).data).toEqual({ name: 'nope', exists: false });
+    const hollow = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/odd': json({}) }) }));
+    expect(error(await callTool(hollow, { name: 'odd' }))).toContain('answered 200 with no data');
   });
 
   it('says sealed, refused or empty, never "0 secrets"', async () => {
-    const sealed = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'LIST /v1/kv/metadata/services/': json({}, 503) }) }));
+    const sealed = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/?list=true': json({}, 503) }) }));
     expect(error(await callTool(sealed, {}))).toContain('Vault is sealed');
-    const refused = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'LIST /v1/kv/metadata/services/': json({}, 403) }) }));
+    const refused = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/?list=true': json({}, 403) }) }));
     expect(error(await callTool(refused, {}))).toContain('HTTP 403');
-    const empty = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'LIST /v1/kv/metadata/services/': json({ data: { keys: [] } }) }) }));
+    const empty = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/?list=true': json({ data: { keys: [] } }) }) }));
     expect(error(await callTool(empty, {}))).toContain('listed 0 secrets');
   });
 

@@ -72,6 +72,10 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
     }
 
     if (req.method !== 'POST') return json({ error: 'use POST; this server keeps no stream' }, 405);
+    // After initialize, the client names the version it negotiated. One we never offer is a
+    // client this server does not speak to, so it gets 400 rather than a guess.
+    const version = req.headers.get('mcp-protocol-version');
+    if (version && !SUPPORTED_VERSIONS.includes(version)) return json({ error: `unsupported MCP-Protocol-Version ${version}` }, 400);
 
     let msg: { jsonrpc?: unknown; id?: Id; method?: unknown; params?: Record<string, unknown> };
     try {

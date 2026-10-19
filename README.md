@@ -155,6 +155,8 @@ Phase 1 adds three tools to the library for both doors:
 
 `vault_presence` uses a periodic token with read and list on that metadata path only.
 `lab-agent` renews it twice a day. While Vault is sealed, the tool says so.
+`LAB_VAULT_TOKEN` and `LAB_VAULT_CA_FILE` are required even while the MCP door is off, so
+`lab-agent` starts only after `PET-670`'s seed script has minted that token.
 
 ## Quick start
 

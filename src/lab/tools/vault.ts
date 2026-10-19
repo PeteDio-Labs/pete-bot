@@ -44,11 +44,15 @@ export class VaultMetadataClient {
     this.prefix = cfg.prefix ?? 'services';
   }
 
+  /**
+   * ⚠ LIST GOES AS `GET ?list=true`. Bun's fetch sends a custom `LIST` method as GET, and a
+   * plain GET on a metadata folder answers 404, so a LIST call would always read "nothing".
+   */
   private async call(method: 'GET' | 'LIST', path: string): Promise<unknown> {
     const res = await fetchWithTimeout(
       this.cfg.fetch ?? fetch,
-      `${this.cfg.addr.replace(/\/$/, '')}/v1/${this.mount}/metadata/${path}`,
-      { method, headers: { 'X-Vault-Token': this.cfg.token }, tls: { ca: this.cfg.caPem } },
+      `${this.cfg.addr.replace(/\/$/, '')}/v1/${this.mount}/metadata/${path}${method === 'LIST' ? '?list=true' : ''}`,
+      { method: 'GET', headers: { 'X-Vault-Token': this.cfg.token }, tls: { ca: this.cfg.caPem } },
       this.cfg.timeoutMs ?? 8_000,
       `Vault ${method} ${this.mount}/metadata/${path}`,
     );
@@ -56,11 +60,15 @@ export class VaultMetadataClient {
     if (res.status === 403) throw new LabToolError(`Vault refused the lab-agent token for ${this.mount}/metadata/${path} (HTTP 403)`);
     if (res.status === 404) return null;
     if (!res.ok) throw new LabToolError(`Vault ${method} ${this.mount}/metadata/${path} answered HTTP ${res.status}`);
+    let body: { data?: unknown };
     try {
-      return ((await res.json()) as { data?: unknown }).data ?? null;
+      body = (await res.json()) as { data?: unknown };
     } catch {
       throw new LabToolError(`Vault ${method} ${this.mount}/metadata/${path} answered with a body that is not JSON`);
     }
+    // A 200 with no data is a malformed answer, not "no such secret" (that is the 404 above).
+    if (!body?.data || typeof body.data !== 'object') throw new LabToolError(`Vault ${method} ${this.mount}/metadata/${path} answered 200 with no data`);
+    return body.data;
   }
 
   async list(): Promise<string[]> {
