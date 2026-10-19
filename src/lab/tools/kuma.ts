@@ -67,6 +67,10 @@ export async function readKuma(cfg: KumaConfig): Promise<MonitorState[]> {
     (g.monitorList ?? []).map((m) => ({ id: m.id, name: m.name, group: g.name ?? '' })),
   );
   if (monitors.length === 0) throw new LabToolError(`Uptime Kuma status page "${cfg.slug}" lists 0 monitors`);
+  // Without this, a changed or empty heartbeat answer reads as every monitor "no beats".
+  if (!beats?.heartbeatList || typeof beats.heartbeatList !== 'object') {
+    throw new LabToolError(`Uptime Kuma heartbeat answer for "${cfg.slug}" has no heartbeatList`);
+  }
 
   return monitors.map((m) => {
     const list = [...(beats.heartbeatList?.[String(m.id)] ?? [])].sort((a, b) => a.time.localeCompare(b.time));

@@ -99,8 +99,9 @@ export class GitClone {
   }
 
   async listFiles(dirPath: string): Promise<string[]> {
-    const out = await this.git(this.dir, ['ls-tree', '--name-only', `${this.ref}:${dirPath}`]);
-    return out.split('\n').filter(Boolean);
+    // -z: without it git quotes a non-ASCII name, and the quoted name can't be read back.
+    const out = await this.git(this.dir, ['ls-tree', '-z', '--name-only', `${this.ref}:${dirPath}`]);
+    return out.split('\0').filter(Boolean);
   }
 
   async readFile(path: string): Promise<string> {

@@ -169,6 +169,7 @@ describe('pve_guests and pve_guest', () => {
     expect(config).not.toHaveProperty('password');
     expect(config).not.toHaveProperty('ssh-public-keys');
     expect(config).not.toHaveProperty('digest');
+    expect(config).not.toHaveProperty('description');
     expect(out.source).toContain('/nodes/pve03/lxc/235/config');
   });
 
@@ -177,8 +178,9 @@ describe('pve_guests and pve_guest', () => {
     expect(error(await callTool(tool, { vmid: 999 }))).toBe('pve_guest: no guest 999 among 3 guests in cluster/resources');
   });
 
-  it('refuses to start without a CA, so TLS is never unverified', () => {
+  it('refuses to start without a CA or over plain http, so TLS is never unverified', () => {
     expect(() => new ProxmoxClient({ ...cfg, caPem: '' })).toThrow('CA PEM');
+    expect(() => new ProxmoxClient({ ...cfg, baseUrl: 'http://192.168.50.10:8006' })).toThrow('https://');
   });
 });
 
@@ -211,6 +213,11 @@ describe('kuma_status', () => {
   it('reports a status page with no monitors as an error, not as all up', async () => {
     const empty = stubFetch({ ...ok, '/api/status-page/fault-study': json('{"publicGroupList":[]}') });
     expect(error(await callTool(kumaStatusTool({ ...cfg, fetch: empty }), {}))).toContain('lists 0 monitors');
+  });
+
+  it('reports a heartbeat answer with no heartbeatList as an error, not as "no beats"', async () => {
+    const odd = stubFetch({ ...ok, '/api/status-page/heartbeat/fault-study': json('{}') });
+    expect(error(await callTool(kumaStatusTool({ ...cfg, fetch: odd }), {}))).toContain('has no heartbeatList');
   });
 
   it('reports a missing status page as an error', async () => {
@@ -318,10 +325,15 @@ describe('vault notes', () => {
       expect(out.source).toContain('STALE: last fetch failed (git fetch exited 128: could not read from remote)');
     });
 
+    it('reads a note whose name is not ASCII', async () => {
+      await repo.commit({ 'Hosts/239-café.md': PLANE_NOTE.replace(/235/g, '239').replace('plane-239', 'cafe-239') }, 'Add café');
+      expect((data(await callTool(findHostTool(index), { query: '239' })).data.notes as unknown[]).length).toBe(1);
+    });
+
     it('picks up a new commit on origin', async () => {
       await repo.commit({ 'Hosts/238-usaa.md': PLANE_NOTE.replace(/235/g, '238').replace('plane-238', 'usaa-238') }, 'Add usaa');
       const out = data(await callTool(findHostTool(index), { query: 'usaa' }));
-      expect(out.source).toMatch(/^3 host notes/);
+      expect(out.source).toMatch(/^4 host notes/);
     });
   });
 

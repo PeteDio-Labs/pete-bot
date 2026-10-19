@@ -114,7 +114,12 @@ export class HostIndex {
     let inventory: InventoryRow[] = [];
     for (const name of files) {
       const file = `${HOSTS_DIR}/${name}`;
-      const text = await this.clone.readFile(file);
+      let text: string;
+      try {
+        text = await this.clone.readFile(file);
+      } catch (err) {
+        throw new LabToolError(`cannot read ${file} in ${this.clone.name}: ${(err as Error).message}`);
+      }
       if (file === INVENTORY) {
         inventory = parseInventory(text);
         continue;

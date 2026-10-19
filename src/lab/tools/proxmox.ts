@@ -40,7 +40,11 @@ export interface Guest {
   tags: string[];
 }
 
-/** Config keys that can carry a credential or a key. Proxmox masks some; drop them all here. */
+/**
+ * Config keys that can carry a credential or a key. Proxmox masks some; drop them all here.
+ * `description` (the guest's Notes) is free text a person may have pasted anything into, so
+ * SUMMARY_KEY leaves it out too.
+ */
 const SECRET_KEY = /pass|secret|token|sshkeys|^cipassword$|^cicustom$/i;
 /** The config keys a "where and how does it run" answer needs. */
 const SUMMARY_KEY = /^(hostname|name|cores|sockets|memory|swap|ostype|arch|onboot|startup|tags|features|unprivileged|protection|rootfs|scsi\d+|virtio\d+|sata\d+|mp\d+|net\d+|template|lock)$/;
@@ -52,6 +56,8 @@ export class ProxmoxClient {
   private readonly timeoutMs: number;
 
   constructor(private readonly cfg: ProxmoxConfig) {
+    // A plain-http URL would ignore the CA and send the token secret in cleartext.
+    if (!/^https:\/\//.test(cfg.baseUrl)) throw new Error('Proxmox base URL must be https://');
     if (!cfg.tokenId.includes('!')) throw new Error('Proxmox token id must look like user@realm!name');
     if (!cfg.caPem.includes('BEGIN CERTIFICATE')) throw new Error('Proxmox CA PEM is missing or malformed');
     this.fetchImpl = cfg.fetch ?? fetch;
@@ -115,7 +121,6 @@ export function summarizeConfig(config: Record<string, unknown>): Record<string,
     if (SECRET_KEY.test(key) || !SUMMARY_KEY.test(key)) continue;
     out[key] = value;
   }
-  if (typeof config.description === 'string') out.description = config.description.slice(0, 500);
   return out;
 }
 
