@@ -21,16 +21,21 @@ interface OptionShape {
 describe('command definitions', () => {
   // PET-518. Registration replaces the whole global set, so a name missing here is a
   // command Discord stops offering on the next start.
-  it('registers /status and /update, and no longer /ask', () => {
-    expect(allCommands.map((c) => c.name).sort()).toEqual(['status', 'update']);
+  it('registers /lab, /status and /update, and no longer /ask', () => {
+    expect(allCommands.map((c) => c.name).sort()).toEqual(['lab', 'status', 'update']);
   });
 
-  it.each(['status', 'update'])('declares %s as user-installed', (name) => {
+  it('makes /lab require its question', () => {
+    const lab = allCommands.find((c) => c.name === 'lab')!;
+    expect((lab.options ?? []) as unknown as OptionShape[]).toEqual([expect.objectContaining({ name: 'question', required: true })]);
+  });
+
+  it.each(['status', 'update', 'lab'])('declares %s as user-installed', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.integration_types).toEqual([USER_INSTALL]);
   });
 
-  it.each(['status', 'update'])('lets %s run in a private channel', (name) => {
+  it.each(['status', 'update', 'lab'])('lets %s run in a private channel', (name) => {
     const command = allCommands.find((c) => c.name === name)!;
     expect(command.contexts).toContain(CONTEXT_PRIVATE_CHANNEL);
   });

@@ -12,7 +12,8 @@
     "lint": "eslint src/",
     "clean": "rm -rf dist",
     "test": "bun test",
-    "build:binary": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/pete-bot"
+    "build:binary": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/pete-bot",
+    "build:lab-binary": "bun build src/lab/main.ts --compile --target=bun-linux-x64 --outfile dist/lab-agent"
   },
   "dependencies": {
     "discord.js": "^14.16.0",

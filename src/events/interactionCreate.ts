@@ -1,6 +1,7 @@
 /**
  * Slash-command handling. /status reports what pete-bot is holding; /update starts a media
- * update through GitHub Actions and reports what it did (PET-395). /ask went in PET-518.
+ * update through GitHub Actions and reports what it did (PET-395); /lab relays a question to
+ * lab-agent (PET-669). /ask went in PET-518.
  *
  * ⚠ DEFER FIRST, ALWAYS. Discord kills an interaction that is not acknowledged within
  * three seconds, and an update run takes minutes. deferReply buys fifteen minutes;
@@ -18,6 +19,7 @@ import {
   type UpdateOutcome,
   type UpdateTarget,
 } from '../clients/githubActions.js';
+import { askLab, type LabOutcome } from '../clients/labAgent.js';
 import { size as openIncidents } from '../server/alertStore.js';
 import { askTotal, askDuration } from '../metrics/index.js';
 import { getDesk } from '../desk/index.js';
@@ -197,6 +199,42 @@ async function handleUpdate(interaction: ChatInputCommandInteraction, run: typeo
   }
 }
 
+/** The footer says what the answer cost and which tools it read, so a guess is visible. */
+export function labEmbed(question: string, outcome: LabOutcome): EmbedBuilder {
+  const title = `/lab ${question}`.slice(0, 256);
+  if (outcome.kind === 'not-configured') {
+    return new EmbedBuilder()
+      .setColor(COLOR_WARN)
+      .setTitle(title)
+      .setDescription('Not configured: `LAB_ASK_TOKEN` is empty, so lab-agent is not deployed on this host yet.');
+  }
+  if (outcome.kind === 'failed') {
+    return new EmbedBuilder().setColor(COLOR_ERR).setTitle(title).setDescription(`No answer: ${outcome.reason.slice(0, 500)}`);
+  }
+  const r = outcome.result;
+  const failed = r.toolCalls.filter((t) => !t.ok).length;
+  const tools = [...new Set(r.toolCalls.map((t) => t.name))].join(', ') || 'none';
+  return new EmbedBuilder()
+    .setColor(r.incomplete || failed > 0 ? COLOR_WARN : COLOR_OK)
+    .setTitle(title)
+    .setDescription(r.answer.slice(0, 4000))
+    .setFooter({
+      text: `${r.turns} turns · tools: ${tools}${failed ? ` (${failed} failed)` : ''} · ${r.usage.input} in / ${r.usage.output} out tokens`.slice(0, 2048),
+    });
+}
+
+async function handleLab(interaction: ChatInputCommandInteraction, ask: typeof askLab): Promise<void> {
+  const question = interaction.options.getString('question', true);
+  logger.info('/lab');
+  await interaction.deferReply();
+  const startedAt = Date.now();
+  const outcome = await ask(question, config.lab);
+  askTotal.inc({ surface: 'lab', status: outcome.kind === 'answer' ? 'success' : 'failure' });
+  askDuration.observe({ surface: 'lab' }, (Date.now() - startedAt) / 1000);
+  if (outcome.kind === 'failed') logger.error(`/lab failed: ${outcome.reason}`);
+  await interaction.editReply({ embeds: [labEmbed(question, outcome)] });
+}
+
 /**
  * A merge desk button (PET-645). The owner check comes first, then the desk reads every
  * fact again before it merges anything. The answer is ephemeral; the desk's own DM and
@@ -229,6 +267,8 @@ async function handleDeskButton(interaction: ButtonInteraction, desk: MergeDesk 
 export interface InteractionDeps {
   /** Tests pass a fake, so /update never reaches GitHub. */
   runUpdate?: typeof runUpdate;
+  /** Tests pass a fake, so /lab never reaches lab-agent. */
+  askLab?: typeof askLab;
   /** Tests pass a fake desk; production reads the one main.ts started. */
   desk?: () => MergeDesk | null;
 }
@@ -236,6 +276,7 @@ export interface InteractionDeps {
 export function createInteractionHandler(deps: InteractionDeps = {}) {
   const run = deps.runUpdate ?? runUpdate;
   const desk = deps.desk ?? getDesk;
+  const lab = deps.askLab ?? askLab;
   return async function onInteraction(interaction: Interaction): Promise<void> {
     if (typeof interaction.isButton === 'function' && interaction.isButton() && interaction.customId.startsWith(`${BUTTON_PREFIX}:`)) {
       await handleDeskButton(interaction, desk());
@@ -257,6 +298,7 @@ export function createInteractionHandler(deps: InteractionDeps = {}) {
 
     if (interaction.commandName === 'status') await handleStatus(interaction);
     else if (interaction.commandName === 'update') await handleUpdate(interaction, run);
+    else if (interaction.commandName === 'lab') await handleLab(interaction, lab);
   };
 }
 

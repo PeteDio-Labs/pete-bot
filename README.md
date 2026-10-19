@@ -87,7 +87,7 @@ write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
 `src/lab/tools/` holds the read-only tools that the lab-map agent's `/lab` loop (PET-669)
 and the lab MCP at `pdlab.dev/mcp/lab` (PET-667) both call. Nothing in the pete-bot process
-imports it, and it will run in its own `lab-agent` process, never beside the desk key.
+imports it: it runs in its own `lab-agent` process, never beside the desk key.
 
 | Tool | Reads |
 |---|---|
@@ -99,6 +99,29 @@ imports it, and it will run in its own `lab-agent` process, never beside the des
 Each tool takes a zod-checked input, returns its data with a `source` line saying what it
 read, and caps its output at 16 KB. A read that fails, or that finds nothing where
 something must exist, returns an error, never an empty success.
+
+## lab-agent and /lab (PET-669)
+
+`lab-agent` is a second binary from this repo (`bun run build:lab-binary`, entry
+`src/lab/main.ts`). It runs as its own Unix user and systemd unit on 237 and listens on
+`127.0.0.1:3016`.
+
+| Route | What it does |
+|---|---|
+| `POST /v1/ask` | Takes `{"question": "..."}` with the ask bearer, runs the agent loop, and answers with the text, the tools it called, and the tokens it used |
+| `GET /health` | One flag per dependency: gateway (an empty probe that proves the bearer and spends nothing), proxmox, vault clone, kuma. HTTP 503 unless all are up |
+
+The loop calls Haiku through the gateway as the `lab-map` caller, with at most 8 model turns,
+1,024 output tokens per turn, and an 80-second deadline per answer, inside pete-bot's 120-second
+wait. The last turn offers no tools, so the model answers from what it read. A tool error
+reaches the model marked as an error. An answer that hit a limit, was cut or came back empty
+is marked incomplete, and `/lab` shows it in yellow. One question runs at a time; a second
+gets 429.
+
+`/lab <question>` in Discord posts to that route and relays the answer, with a footer naming
+the tools, any failed reads and the tokens. pete-bot runs no model for it and gives
+`lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
+configured". `lab-agent` refuses to start on a missing or malformed setting.
 
 ## Quick start
 
@@ -126,6 +149,7 @@ Bun 1.4.2 or later is required.
 | Command | What it does |
 |---------|--------------|
 | `/status` | Reports how many incidents are open, whether `/update` is configured, and uptime |
+| `/lab <question>` | Asks lab-agent where something runs, whether it is up, or what changed (PET-669) |
 | `/update check [target]` | Shows current and available versions through GitHub Actions; changes nothing |
 | `/update apply <target> [force]` | Applies available updates through the same workflow. Plex skips itself while anyone is watching, unless `force` |
 
@@ -253,8 +277,9 @@ been deleted, so a working command and a broken one scraped identically.
 src/
 ├── clients/      # githubActions — starts and follows the /update run
 ├── gateway/      # the Anthropic API gateway: settings, pricing, ledger and route
-├── lab/tools/    # the read-only lab tool library (PET-668), not yet used by any process
-├── commands/     # /status and /update definitions, and registration
+├── lab/          # lab-agent (PET-669): settings, the agent loop and its HTTP surface
+│   └── tools/    # the read-only lab tool library (PET-668)
+├── commands/     # /status, /update and /lab definitions, and registration
 ├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server
 ├── server/       # HTTP app, /v1/alert, /v1/notify, and the incident store
