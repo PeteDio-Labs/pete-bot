@@ -154,13 +154,14 @@ jobs:
             kv/data/services/pete-bot desk_installation_id | PB_DESK_INSTALLATION_ID ;
             kv/data/services/pete-bot desk_app_pem | PB_DESK_APP_PEM
 
-      # lab-agent's two paths (PET-670), optional in the same way and placed after the strict
-      # step for the same reason. Until petedio-iac's scripts/seed-lab-agent.sh and
-      # mint-pve-audit-token.yml run, these steps fail quietly and the play leaves lab-agent
-      # off. The play refuses some lab-agent values without the rest, so a half-seeded pair
-      # fails the deploy with the step to run, rather than shipping half a service.
-      - name: Vault — the optional lab-agent secrets, absent is allowed
-        continue-on-error: true
+      # lab-agent's two paths (PET-670). ⚠ NO continue-on-error, UNLIKE THE TWO STEPS ABOVE.
+      # The seed and the mint play write every field of a path at once, so the only "absent"
+      # case is a missing PATH, which ignoreNotFound covers. continue-on-error would also
+      # swallow a 403 or an outage on these paths, which the strict step does not rule out:
+      # it reads kv/services/pete-bot only. Before the first seed both paths are absent, the
+      # play leaves lab-agent off, and the deploy passes. A half-seeded pair fails at the
+      # play's assertion, which names the step to run.
+      - name: Vault — the lab-agent secrets, an absent path is allowed
         uses: hashicorp/vault-action@v4
         with:
           url: https://192.168.50.223:8200
@@ -176,8 +177,7 @@ jobs:
             kv/data/services/lab-agent vault_token | LAB_VAULT_TOKEN ;
             kv/data/services/lab-agent vault_deploy_key | LAB_DEPLOY_KEY
 
-      - name: Vault — the optional lab-agent Proxmox token, absent is allowed
-        continue-on-error: true
+      - name: Vault — the lab-agent Proxmox token, an absent path is allowed
         uses: hashicorp/vault-action@v4
         with:
           url: https://192.168.50.223:8200
