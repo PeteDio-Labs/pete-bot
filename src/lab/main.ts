@@ -16,6 +16,8 @@ import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
 import { buildLabTools, GitClone, LAB_UNITS, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
+import { HostIndex } from './tools/hosts.js';
+import { msUntil, notifier, runDriftCheck } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -93,13 +95,42 @@ const checks: Record<string, Check> = {
   },
 };
 
+const callModel = gatewayCaller(cfg.gateway.url, cfg.gateway.token);
+
+// The nightly drift check (PET-671). Its own HostIndex over the same clone, so a run reads
+// the vault at the commit the fetch just brought in.
+const hostIndex = new HostIndex(vault);
+const notify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken);
+const runDrift = () =>
+  runDriftCheck({
+    async read() {
+      const [guests, index] = await Promise.all([pve.guests(), hostIndex.load()]);
+      return { guests, inventory: index.inventory, notes: index.notes, vaultSource: index.source };
+    },
+    callModel,
+    model: cfg.gateway.model,
+    notify,
+    log,
+  });
+// setTimeout, re-armed after each run, so a run that overlaps midnight or a clock change
+// still lands once a day at LAB_DRIFT_AT.
+function scheduleDrift(): void {
+  const wait = msUntil(cfg.drift.at, new Date());
+  log('drift check scheduled', { at: `${cfg.drift.at}Z`, inMinutes: Math.round(wait / 60_000) });
+  setTimeout(() => {
+    void runDrift().finally(scheduleDrift);
+  }, wait);
+}
+scheduleDrift();
+
 const handler = createLabHandler({
   askToken: cfg.askToken,
   tools,
-  callModel: gatewayCaller(cfg.gateway.url, cfg.gateway.token),
+  callModel,
   model: cfg.gateway.model,
   checks,
   log,
+  runDrift,
 });
 
 const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, fetch: handler });

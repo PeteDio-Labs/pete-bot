@@ -1,0 +1,165 @@
+/**
+ * The nightly drift check (PET-671): the comparison, the DM it drafts, and a run's outcomes.
+ */
+import { describe, expect, it } from 'bun:test';
+import { compareLab, draftDriftMessage, msUntil, runDriftCheck, type DriftReads } from './drift.js';
+import { createLabHandler } from './server.js';
+import type { CallModel, ModelResponse } from './agent.js';
+import type { Guest } from './tools/proxmox.js';
+import type { HostNote, InventoryRow } from './tools/hosts.js';
+
+const guest = (vmid: number, name: string, node = 'pve03', status = 'running'): Guest => ({
+  vmid, name, node, status, type: 'lxc', uptimeSec: 1, cpus: 1, memMiB: 1, maxMemMiB: 1, tags: [],
+});
+const row = (vmid: number, name: string, node = 'pve03', state = 'running'): InventoryRow => ({ vmid, name, node, state, block: 'Apps' });
+const note = (vmid: number, fm: Record<string, string> = {}): HostNote => ({
+  file: `Hosts/${vmid}-x.md`,
+  frontmatter: { type: 'host', kind: 'lxc', vmid: String(vmid), status: 'live', node: 'pve03', ...fm },
+  body: '',
+});
+
+const clean: DriftReads = {
+  guests: [guest(235, 'plane'), guest(237, 'media-dash')],
+  inventory: [row(235, 'plane'), row(237, 'media-dash')],
+  notes: [note(235), note(237), { file: 'Hosts/pve03.md', frontmatter: { type: 'host', kind: 'node', node: 'pve03' }, body: '' }],
+  vaultSource: 'petedio-vault @ abc1234',
+};
+
+const reply = (text: string, stop = 'end_turn'): ModelResponse => ({ content: [{ type: 'text', text }], stop_reason: stop });
+
+describe('compareLab', () => {
+  it('finds nothing when the three reads agree, and says what it read', () => {
+    const r = compareLab(clean);
+    expect(r.findings).toEqual([]);
+    expect(r.read).toBe('2 guests from Proxmox, 2 inventory rows, 2 guest notes (petedio-vault @ abc1234)');
+  });
+
+  it('reports each kind of drift, keyed by VMID', () => {
+    const r = compareLab({
+      ...clean,
+      guests: [guest(235, 'plane', 'pve02', 'stopped'), guest(240, 'newbox'), guest(237, 'media-dash')],
+      inventory: [row(235, 'plane-old'), row(237, 'media-dash'), row(299, 'ghost')],
+      notes: [note(235), note(237, { status: 'destroyed', node: 'none' }), note(299), note(106, { status: 'destroyed', node: 'none' })],
+    });
+    const lines = r.findings.map((f) => `${f.vmid} ${f.what}`);
+    expect(lines).toEqual([
+      '235 Hosts/235-x.md says node pve03; Proxmox has it on pve02',
+      '235 the inventory lists plane-old on pve03; Proxmox has it on pve02',
+      '235 the inventory names it plane-old; Proxmox names it plane',
+      '235 the inventory says running; Proxmox says stopped',
+      '237 Hosts/237-x.md says status destroyed, node none; Proxmox runs it on pve03',
+      '240 newbox has no host note in Hosts/',
+      '240 newbox is on pve03 (running), but the inventory has no row for it',
+      '299 Hosts/299-x.md says status live, node pve03, but Proxmox has no guest 299',
+      '299 the inventory lists ghost on pve03, but Proxmox has no guest 299',
+    ]);
+    // 106's note is destroyed with node none, and Proxmox has no 106: that is consistent.
+    expect(lines.some((l) => l.startsWith('106'))).toBe(false);
+  });
+});
+
+describe('draftDriftMessage', () => {
+  const result = compareLab({ ...clean, guests: [...clean.guests, guest(240, 'newbox')] });
+
+  it('leads with the counts and uses the model text', async () => {
+    let sent: Record<string, unknown> = {};
+    const call: CallModel = async (body) => {
+      sent = body;
+      return reply('240 newbox: add a row and a note.');
+    };
+    const d = await draftDriftMessage(result, call, 'claude-haiku-4-5');
+    expect(d.worded).toBe(true);
+    expect(d.text.split('\n')[0]).toBe('Drift: 2 findings. Read 3 guests from Proxmox, 2 inventory rows, 2 guest notes (petedio-vault @ abc1234).');
+    expect(d.text).toContain('240 newbox: add a row and a note.');
+    expect(sent.max_tokens).toBe(400);
+    expect(String((sent.messages as Array<{ content: string }>)[0]!.content)).toContain('240: newbox has no host note');
+  });
+
+  it('falls back to the plain findings when the gateway fails', async () => {
+    const d = await draftDriftMessage(result, async () => {
+      throw new Error('gateway answered HTTP 429: cap reached');
+    }, 'm');
+    expect(d.worded).toBe(false);
+    expect(d.text).toContain('- 240: newbox has no host note in Hosts/');
+    expect(d.text).toContain('the model was unavailable: gateway answered HTTP 429');
+  });
+
+  it('caps the message under notify\'s limit', async () => {
+    const d = await draftDriftMessage(result, async () => reply('x'.repeat(5000)), 'm');
+    expect(d.text.length).toBeLessThanOrEqual(1700);
+    expect(d.text).toContain('cut; run /lab');
+  });
+});
+
+describe('runDriftCheck', () => {
+  const deps = (read: () => Promise<DriftReads>, sent: string[], logs: Array<Record<string, unknown>>) => ({
+    read,
+    callModel: (async () => reply('worded')) as CallModel,
+    model: 'm',
+    notify: async (m: string) => {
+      sent.push(m);
+    },
+    log: (msg: string, f: Record<string, unknown> = {}) => logs.push({ msg, ...f }),
+  });
+
+  it('logs the counts and sends nothing when clean', async () => {
+    const sent: string[] = [];
+    const logs: Array<Record<string, unknown>> = [];
+    const out = await runDriftCheck(deps(async () => clean, sent, logs));
+    expect(out.kind).toBe('clean');
+    expect(sent).toEqual([]);
+    expect(logs[0]).toMatchObject({ msg: 'drift check', kind: 'clean', read: expect.stringContaining('2 guests') });
+  });
+
+  it('DMs a failed read and never reports no drift', async () => {
+    const sent: string[] = [];
+    const out = await runDriftCheck(deps(async () => {
+      throw new Error('Proxmox refused the token lab-agent@pve!audit (HTTP 401)');
+    }, sent, []));
+    expect(out).toEqual({ kind: 'read-failed', error: 'Proxmox refused the token lab-agent@pve!audit (HTTP 401)' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Drift check FAILED');
+    expect(sent[0]).toContain('HTTP 401');
+  });
+
+  it('logs a DM it could not deliver, and still returns the outcome', async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    const d = deps(async () => ({ ...clean, guests: [...clean.guests, guest(240, 'newbox')] }), [], logs);
+    d.notify = async () => {
+      throw new Error('/v1/notify answered HTTP 502');
+    };
+    const out = await runDriftCheck(d);
+    expect(out).toMatchObject({ kind: 'drift', findings: 2, worded: true });
+    expect(logs[1]).toMatchObject({ msg: 'drift check could not DM', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
+  });
+});
+
+describe('msUntil', () => {
+  it('finds the next 11:15Z, today or tomorrow', () => {
+    expect(msUntil('11:15', new Date('2026-10-19T08:15:00Z'))).toBe(3 * 3600_000);
+    expect(msUntil('11:15', new Date('2026-10-19T11:15:00Z'))).toBe(24 * 3600_000);
+    expect(msUntil('11:15', new Date('2026-10-19T12:00:00Z'))).toBe(23.25 * 3600_000);
+  });
+});
+
+describe('POST /v1/drift/run', () => {
+  const ASK = 'a'.repeat(40);
+  const handler = createLabHandler({
+    askToken: ASK,
+    tools: new Map(),
+    callModel: async () => reply('x'),
+    model: 'm',
+    checks: {},
+    runDrift: async () => ({ kind: 'clean', read: '2 guests' }),
+  });
+  const post = (auth?: string) =>
+    handler(new Request('http://x/v1/drift/run', { method: 'POST', headers: auth ? { authorization: auth } : {} }));
+
+  it('needs the ask bearer, and answers with the outcome', async () => {
+    expect((await post()).status).toBe(401);
+    expect((await post('Bearer wrong')).status).toBe(401);
+    const res = await post(`Bearer ${ASK}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ kind: 'clean', read: '2 guests' });
+  });
+});

@@ -123,6 +123,24 @@ the tools, any failed reads and the tokens. pete-bot runs no model for it and gi
 `lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
 configured". `lab-agent` refuses to start on a missing or malformed setting.
 
+## The nightly drift check (PET-671)
+
+`lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the
+host notes' frontmatter, once a day at `LAB_DRIFT_AT` (11:15 UTC by default). Code finds the
+drift: a guest with no row or no note, a row or a note naming a guest Proxmox lacks, and a
+node, state or name that disagrees. Haiku only words the findings into a DM, through the
+gateway as the `lab-map` caller. When the gateway fails, the DM carries the findings as plain
+lines.
+
+- Every DM leads with what the run read, such as `21 guests from Proxmox, 21 inventory rows,
+  27 guest notes (petedio-vault @ 1a2b3c4)`.
+- A clean run logs those counts and sends nothing.
+- A failed read sends a failure DM. It never reports "no drift".
+
+The DM goes through pete-bot's `/v1/notify` with `LAB_NOTIFY_TOKEN`. To run the check
+without waiting for the schedule, `POST /v1/drift/run` with the ask bearer; it DMs exactly
+as the nightly run does.
+
 ## The lab MCP (PET-667)
 
 `lab-agent` also serves the lab tools to claude.ai project threads as an MCP server, at
