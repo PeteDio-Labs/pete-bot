@@ -1,0 +1,4 @@
+{"heartbeatList":{
+ "1":[{"status":1,"time":"2026-10-19 07:00:00","msg":"200 - OK","ping":12},{"status":0,"time":"2026-10-19 07:00:20","msg":"sealed","ping":null},{"status":0,"time":"2026-10-19 07:00:40","msg":"503 - sealed","ping":null}],
+ "2":[{"status":1,"time":"2026-10-19 07:00:00","msg":"200 - OK","ping":30},{"status":1,"time":"2026-10-19 07:00:20","msg":"200 - OK","ping":31}]
+},"uptimeList":{"1_24":0.9512,"2_24":1}}
