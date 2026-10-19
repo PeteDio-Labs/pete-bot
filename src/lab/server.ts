@@ -2,7 +2,7 @@
  * lab-agent's HTTP surface (PET-669). It listens on 127.0.0.1 only.
  *
  *   POST /v1/ask   {"question": "..."} with the ask bearer. pete-bot's /lab command is the
- *                  one caller. Answers {answer, turns, toolCalls, stoppedAtLimit, usage}.
+ *                  one caller. Answers {answer, turns, toolCalls, incomplete, usage}.
  *   GET  /health   one flag per dependency: gateway, proxmox, vault clone, kuma. HTTP 503
  *                  unless every flag is up, so the deploy's assertion can fail on it.
  *
@@ -11,7 +11,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { ask, GatewayError, type AskResult, type CallModel } from './agent.js';
+import { ask, ASK_DEADLINE_MS, GatewayError, type AskResult, type CallModel } from './agent.js';
 import type { LabTool } from './tools/index.js';
 
 export type Check = () => Promise<string>;
@@ -24,6 +24,8 @@ export interface LabServerDeps {
   /** Each check resolves with a short detail, or throws with the reason it is down. */
   checks: Record<string, Check>;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
+  /** Tests shorten it; production uses ASK_DEADLINE_MS. */
+  deadlineMs?: number;
 }
 
 const AskBody = z.object({ question: z.string().trim().min(3).max(500) }).strict();
@@ -83,8 +85,9 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       busy = true;
       const started = Date.now();
       try {
-        const result: AskResult = await ask(body.question, deps.tools, deps.callModel, deps.model);
-        log('ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, limit: result.stoppedAtLimit });
+        const signal = AbortSignal.any([req.signal, AbortSignal.timeout(deps.deadlineMs ?? ASK_DEADLINE_MS)]);
+        const result: AskResult = await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
+        log('ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
         return json(result);
       } catch (err) {
         const message = err instanceof GatewayError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;

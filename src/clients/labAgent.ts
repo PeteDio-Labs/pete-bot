@@ -9,7 +9,8 @@ export interface LabAnswer {
   answer: string;
   turns: number;
   toolCalls: Array<{ name: string; ok: boolean }>;
-  stoppedAtLimit: boolean;
+  /** The answer hit a limit, was cut, or came back empty. */
+  incomplete: boolean;
   usage: { input: number; output: number; cacheRead: number };
 }
 
@@ -54,8 +55,10 @@ export async function askLab(question: string, cfg: LabClientConfig, fetchImpl: 
       answer: answer.answer,
       turns: Number(answer.turns ?? 0),
       toolCalls: Array.isArray(answer.toolCalls) ? answer.toolCalls : [],
-      stoppedAtLimit: Boolean(answer.stoppedAtLimit),
-      usage: answer.usage ?? { input: 0, output: 0, cacheRead: 0 },
+      incomplete: Boolean(answer.incomplete),
+      usage: { input: num(answer.usage?.input), output: num(answer.usage?.output), cacheRead: num(answer.usage?.cacheRead) },
     },
   };
 }
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);

@@ -215,7 +215,7 @@ export function labEmbed(question: string, outcome: LabOutcome): EmbedBuilder {
   const failed = r.toolCalls.filter((t) => !t.ok).length;
   const tools = [...new Set(r.toolCalls.map((t) => t.name))].join(', ') || 'none';
   return new EmbedBuilder()
-    .setColor(r.stoppedAtLimit || failed > 0 ? COLOR_WARN : COLOR_OK)
+    .setColor(r.incomplete || failed > 0 ? COLOR_WARN : COLOR_OK)
     .setTitle(title)
     .setDescription(r.answer.slice(0, 4000))
     .setFooter({

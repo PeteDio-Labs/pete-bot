@@ -5,9 +5,16 @@
  * callTool, and returns the model's final text. The model is Haiku on the `lab-map` caller,
  * which has its own monthly cap in the gateway's ledger.
  *
- * ⚠ HARD LIMITS, NOT SUGGESTIONS. At most MAX_TURNS model calls and MAX_TOKENS output
- * tokens per call. A loop that hits the turn limit returns what it has with a note saying
- * so, never a silent cut-off that reads as a complete answer.
+ * ⚠ HARD LIMITS, NOT SUGGESTIONS. At most MAX_TURNS model calls, MAX_TOKENS output tokens
+ * per call, and one deadline for the whole answer. The last turn offers no tools
+ * (`tool_choice: none`), so the model answers from what it has read. An answer that hit a
+ * limit, was cut at max_tokens, or came back empty is marked `incomplete`, never passed off
+ * as a complete answer.
+ *
+ * ⚠ THE DEADLINE MUST BEAT THE CALLER'S. pete-bot gives up on /lab after LAB_TIMEOUT_MS
+ * (120 s). A loop still running after that spends the lab-map cap for an answer nobody reads
+ * and holds the one-question slot, so the server passes ASK_DEADLINE_MS (100 s) and the
+ * request's own abort signal, and each model call gets only the time left.
  *
  * ⚠ A TOOL ERROR REACHES THE MODEL AS AN ERROR. callTool's `{ ok: false }` becomes a
  * tool_result with `is_error: true`, and the prompt tells the model to say what failed.
@@ -23,6 +30,7 @@ import { toolDefinitions } from './tools/index.js';
 
 export const MAX_TURNS = 8;
 export const MAX_TOKENS = 1024;
+export const ASK_DEADLINE_MS = 100_000;
 const GATEWAY_TIMEOUT_MS = 60_000;
 
 export const SYSTEM_PROMPT = `You answer questions about Pedro's homelab: where a service runs, whether it is up, what changed, and which PET work item touched it.
@@ -48,13 +56,14 @@ export interface ModelResponse {
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
 }
 
-export type CallModel = (body: Record<string, unknown>) => Promise<ModelResponse>;
+export type CallModel = (body: Record<string, unknown>, signal?: AbortSignal) => Promise<ModelResponse>;
 
 export interface AskResult {
   answer: string;
   turns: number;
   toolCalls: Array<{ name: string; ok: boolean }>;
-  stoppedAtLimit: boolean;
+  /** Set when the answer hit a limit, was cut, or came back empty: it is not a full answer. */
+  incomplete: boolean;
   usage: { input: number; output: number; cacheRead: number };
 }
 
@@ -64,16 +73,18 @@ export class GatewayError extends Error {
 
 /** POST one Messages request to the gateway as the `lab-map` caller. */
 export function gatewayCaller(url: string, token: string, fetchImpl: typeof fetch = fetch): CallModel {
-  return async (body) => {
+  return async (body, signal) => {
     let res: Response;
+    const timeout = AbortSignal.timeout(GATEWAY_TIMEOUT_MS);
     try {
       res = await fetchImpl(`${url}/v1/messages`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
     } catch (err) {
+      if (signal?.aborted) throw new GatewayError('stopped: the answer ran past its deadline or the asker went away');
       throw new GatewayError(`gateway unreachable: ${(err as Error).message}`);
     }
     const text = await res.text();
@@ -100,6 +111,7 @@ export async function ask(
   tools: Map<string, LabTool>,
   callModel: CallModel,
   model: string,
+  signal?: AbortSignal,
 ): Promise<AskResult> {
   const definitions = toolDefinitions(tools);
   // Cache the stable prefix: the system prompt and the tool list. Below the model's minimum
@@ -112,17 +124,44 @@ export async function ask(
   const toolCalls: AskResult['toolCalls'] = [];
   const usage = { input: 0, output: 0, cacheRead: 0 };
 
+  const stopped = (turns: number, why: string): AskResult => ({
+    answer: `${why} Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ') || 'none'}.`,
+    turns,
+    toolCalls,
+    incomplete: true,
+    usage,
+  });
+
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
-    const res = await callModel({ model, max_tokens: MAX_TOKENS, system, tools: toolsParam, messages });
-    usage.input += res.usage?.input_tokens ?? 0;
-    usage.output += res.usage?.output_tokens ?? 0;
-    usage.cacheRead += res.usage?.cache_read_input_tokens ?? 0;
+    if (signal?.aborted) return stopped(turn - 1, 'I stopped before a final answer: the deadline passed.');
+    const last = turn === MAX_TURNS;
+    let res: ModelResponse;
+    try {
+      res = await callModel(
+        { model, max_tokens: MAX_TOKENS, system, tools: toolsParam, messages, ...(last ? { tool_choice: { type: 'none' } } : {}) },
+        signal,
+      );
+    } catch (err) {
+      if (signal?.aborted) return stopped(turn - 1, 'I stopped before a final answer: the deadline passed.');
+      throw err;
+    }
+    usage.input += num(res.usage?.input_tokens);
+    usage.output += num(res.usage?.output_tokens);
+    usage.cacheRead += num(res.usage?.cache_read_input_tokens);
     const text = res.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
     const uses = res.content.filter((b) => b.type === 'tool_use');
 
     if (res.stop_reason !== 'tool_use' || uses.length === 0) {
-      const cut = res.stop_reason === 'max_tokens' ? '\n\n(Answer cut at the output limit.)' : '';
-      return { answer: (text || '(The model returned no text.)') + cut, turns: turn, toolCalls, stoppedAtLimit: false, usage };
+      const note =
+        res.stop_reason === 'max_tokens' ? '\n\n(Answer cut at the output limit.)'
+        : res.stop_reason === 'refusal' ? '\n\n(The model refused to answer.)'
+        : '';
+      const incomplete = Boolean(note) || !text;
+      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, incomplete, usage };
+    }
+    if (last) {
+      // tool_choice none should prevent this; if the model still asks, it gets no more reads.
+      return stopped(turn, `I stopped after ${MAX_TURNS} model turns without a final answer.${text ? ` Last note: ${text}` : ''}`);
     }
 
     messages.push({ role: 'assistant', content: res.content });
@@ -143,11 +182,7 @@ export async function ask(
     messages.push({ role: 'user', content: results });
   }
 
-  return {
-    answer: `I stopped after ${MAX_TURNS} model turns without a final answer. Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ')}.`,
-    turns: MAX_TURNS,
-    toolCalls,
-    stoppedAtLimit: true,
-    usage,
-  };
+  return stopped(MAX_TURNS, `I stopped after ${MAX_TURNS} model turns without a final answer.`);
 }
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);

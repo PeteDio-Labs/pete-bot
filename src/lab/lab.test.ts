@@ -98,7 +98,7 @@ describe('ask', () => {
   it('runs the tools the model asks for and returns its answer, with usage', async () => {
     const seen: Array<Record<string, unknown>> = [];
     const result = await ask('where does plane run', tools, scripted([toolUse('t1', 'find_host', { query: '235' }), final('Plane runs on 235.')], seen), 'claude-haiku-4-5');
-    expect(result).toMatchObject({ answer: 'Plane runs on 235.', turns: 2, stoppedAtLimit: false, toolCalls: [{ name: 'find_host', ok: true }] });
+    expect(result).toMatchObject({ answer: 'Plane runs on 235.', turns: 2, incomplete: false, toolCalls: [{ name: 'find_host', ok: true }] });
     expect(result.usage).toEqual({ input: 300, output: 40, cacheRead: 50 });
     expect(seen[0]).toMatchObject({ model: 'claude-haiku-4-5', max_tokens: MAX_TOKENS });
     const tr = ((seen[1]!.messages as Array<{ content: unknown }>)[2]!.content as Array<Record<string, unknown>>)[0]!;
@@ -123,18 +123,48 @@ describe('ask', () => {
     expect(tr).toMatchObject({ is_error: true, content: 'no tool named shell' });
   });
 
-  it('stops at the turn limit and says so', async () => {
+  it('offers no tools on the last turn, so the model answers from what it read', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const loop = [...Array.from({ length: MAX_TURNS - 1 }, (_, i) => toolUse(`t${i}`, 'find_host', { query: '1' })), final('From what I read: 235.')];
+    const result = await ask('q', tools, scripted(loop, seen), 'm');
+    expect(seen).toHaveLength(MAX_TURNS);
+    expect(seen[MAX_TURNS - 2]!.tool_choice).toBeUndefined();
+    expect(seen[MAX_TURNS - 1]!.tool_choice).toEqual({ type: 'none' });
+    expect(result).toMatchObject({ answer: 'From what I read: 235.', turns: MAX_TURNS, incomplete: false });
+  });
+
+  it('stops at the turn limit and says so if the model still asks for a tool', async () => {
     const loop = Array.from({ length: MAX_TURNS + 2 }, (_, i) => toolUse(`t${i}`, 'find_host', { query: '1' }));
     const result = await ask('q', tools, scripted(loop), 'm');
-    expect(result.stoppedAtLimit).toBe(true);
+    expect(result.incomplete).toBe(true);
     expect(result.turns).toBe(MAX_TURNS);
-    expect(result.toolCalls).toHaveLength(MAX_TURNS);
+    expect(result.toolCalls).toHaveLength(MAX_TURNS - 1);
     expect(result.answer).toContain(`stopped after ${MAX_TURNS} model turns`);
   });
 
-  it('marks an answer cut at the output limit', async () => {
-    const result = await ask('q', tools, scripted([{ content: [{ type: 'text', text: 'Plane runs' }], stop_reason: 'max_tokens' }]), 'm');
-    expect(result.answer).toBe('Plane runs\n\n(Answer cut at the output limit.)');
+  it('marks an answer cut at the output limit, refused or empty as incomplete', async () => {
+    const cut = await ask('q', tools, scripted([{ content: [{ type: 'text', text: 'Plane runs' }], stop_reason: 'max_tokens' }]), 'm');
+    expect(cut).toMatchObject({ answer: 'Plane runs\n\n(Answer cut at the output limit.)', incomplete: true });
+    const empty = await ask('q', tools, scripted([{ content: [], stop_reason: 'end_turn' }]), 'm');
+    expect(empty).toMatchObject({ answer: '(The model returned no text.)', incomplete: true });
+    const refused = await ask('q', tools, scripted([{ content: [], stop_reason: 'refusal' }]), 'm');
+    expect(refused.incomplete).toBe(true);
+  });
+
+  it('stops at the deadline instead of spending more turns', async () => {
+    const controller = new AbortController();
+    const call: CallModel = async () => {
+      controller.abort();
+      return toolUse('t1', 'find_host', { query: '1' });
+    };
+    const result = await ask('q', tools, call, 'm', controller.signal);
+    expect(result).toMatchObject({ turns: 1, incomplete: true });
+    expect(result.answer).toContain('the deadline passed');
+  });
+
+  it('counts missing usage fields as zero', async () => {
+    const result = await ask('q', tools, scripted([{ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }]), 'm');
+    expect(result.usage).toEqual({ input: 0, output: 0, cacheRead: 0 });
   });
 
   it('caches the system prompt and the tool list', async () => {
@@ -199,6 +229,21 @@ describe('lab-agent HTTP surface', () => {
     expect((await first).status).toBe(200);
   });
 
+  it('frees the question slot when the deadline passes', async () => {
+    let calls = 0;
+    const hangOnce: CallModel = (_b, signal) =>
+      ++calls === 1
+        ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new GatewayError('stopped'))))
+        : Promise.resolve(final('second answer'));
+    const h = handler({ callModel: hangOnce, deadlineMs: 20 });
+    const res = await h(post({ question: 'where does plane run' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ incomplete: true });
+    const second = await h(post({ question: 'second question' }));
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ answer: 'second answer' });
+  });
+
   it('turns a gateway refusal into a 502 with its reason', async () => {
     const h = handler({ callModel: async () => { throw new GatewayError('gateway answered HTTP 403: cap reached'); } });
     const res = await h(post({ question: 'where does plane run' }));
@@ -236,10 +281,12 @@ describe('/lab in pete-bot', () => {
     let headers: Record<string, string> = {};
     const out = await askLab('where does plane run', cfg, (async (_u: string, init?: RequestInit) => {
       headers = init!.headers as Record<string, string>;
-      return new Response(JSON.stringify({ answer: 'Plane runs on 235.', turns: 2, toolCalls: [{ name: 'find_host', ok: true }], stoppedAtLimit: false, usage: { input: 1, output: 2, cacheRead: 0 } }));
+      return new Response(JSON.stringify({ answer: 'Plane runs on 235.', turns: 2, toolCalls: [{ name: 'find_host', ok: true }], incomplete: false, usage: { input: 1, output: 2, cacheRead: 0 } }));
     }) as unknown as typeof fetch);
     expect(out.kind).toBe('answer');
     expect(headers.authorization).toBe(`Bearer ${ASK}`);
+    const partial = await askLab('q', cfg, (async () => new Response(JSON.stringify({ answer: 'x', usage: { input: 3 } }))) as unknown as typeof fetch);
+    expect(partial.kind === 'answer' && partial.result.usage).toEqual({ input: 3, output: 0, cacheRead: 0 });
   });
 
   it('turns an unreachable lab-agent or an error status into a failure with its reason', async () => {
@@ -252,7 +299,7 @@ describe('/lab in pete-bot', () => {
   it('colours an answer with a failed read yellow and names the tools', () => {
     const outcome: LabOutcome = {
       kind: 'answer',
-      result: { answer: 'Proxmox read failed.', turns: 2, toolCalls: [{ name: 'pve_guests', ok: false }, { name: 'find_host', ok: true }], stoppedAtLimit: false, usage: { input: 10, output: 5, cacheRead: 0 } },
+      result: { answer: 'Proxmox read failed.', turns: 2, toolCalls: [{ name: 'pve_guests', ok: false }, { name: 'find_host', ok: true }], incomplete: false, usage: { input: 10, output: 5, cacheRead: 0 } },
     };
     const embed = labEmbed('is anything down', outcome).toJSON();
     expect(embed.color).toBe(0xfee75c);

@@ -109,11 +109,14 @@ something must exist, returns an error, never an empty success.
 | Route | What it does |
 |---|---|
 | `POST /v1/ask` | Takes `{"question": "..."}` with the ask bearer, runs the agent loop, and answers with the text, the tools it called, and the tokens it used |
-| `GET /health` | One flag per dependency: gateway, proxmox, vault clone, kuma. HTTP 503 unless all are up |
+| `GET /health` | One flag per dependency: gateway (an empty probe that proves the bearer and spends nothing), proxmox, vault clone, kuma. HTTP 503 unless all are up |
 
-The loop calls Haiku through the gateway as the `lab-map` caller, with at most 8 model turns
-and 1,024 output tokens per turn. A tool error reaches the model marked as an error, and a
-loop that hits the turn limit says so. One question runs at a time; a second gets 429.
+The loop calls Haiku through the gateway as the `lab-map` caller, with at most 8 model turns,
+1,024 output tokens per turn, and a 100-second deadline per answer, inside pete-bot's 120-second
+wait. The last turn offers no tools, so the model answers from what it read. A tool error
+reaches the model marked as an error. An answer that hit a limit, was cut or came back empty
+is marked incomplete, and `/lab` shows it in yellow. One question runs at a time; a second
+gets 429.
 
 `/lab <question>` in Discord posts to that route and relays the answer, with a footer naming
 the tools, any failed reads and the tokens. pete-bot runs no model for it and gives

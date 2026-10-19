@@ -36,11 +36,17 @@ const pve = new ProxmoxClient(cfg.proxmox);
 
 const checks: Record<string, Check> = {
   async gateway() {
-    // The gateway is pete-bot's route, so its own /health says whether it forwards.
-    const res = await fetch(`${new URL(cfg.gateway.url).origin}/health`, { signal: AbortSignal.timeout(5_000) });
-    const body = (await res.json()) as { llm?: string };
-    if (body.llm !== 'on') throw new Error(`gateway reports llm: ${body.llm ?? 'missing'}`);
-    return 'llm on';
+    // An empty body proves the bearer and spends nothing: the gateway checks the bearer
+    // first (401), then refuses the body (400) before it forwards anything.
+    const res = await fetch(`${cfg.gateway.url}/v1/messages`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${cfg.gateway.token}`, 'content-type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.status === 400) return 'bearer accepted';
+    if (res.status === 401) throw new Error('gateway refused the lab-map bearer (HTTP 401)');
+    throw new Error(`gateway answered HTTP ${res.status} to an empty probe; expected 400`);
   },
   async proxmox() {
     return `${(await pve.guests()).length} guests`;
