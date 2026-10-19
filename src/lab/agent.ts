@@ -30,7 +30,9 @@ import { toolDefinitions } from './tools/index.js';
 
 export const MAX_TURNS = 8;
 export const MAX_TOKENS = 1024;
-export const ASK_DEADLINE_MS = 100_000;
+// The deadline is checked between turns, and one turn's reads can take about 30 s more
+// (each tool has its own timeout), so it sits well inside pete-bot's 120 s wait.
+export const ASK_DEADLINE_MS = 80_000;
 const GATEWAY_TIMEOUT_MS = 60_000;
 
 export const SYSTEM_PROMPT = `You answer questions about Pedro's homelab: where a service runs, whether it is up, what changed, and which PET work item touched it.
