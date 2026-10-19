@@ -83,6 +83,23 @@ ssh key that codex-248 forces to `codex-review-gate`, a pinned `known_hosts` for
 `python3` with PyYAML for the classifier. The App needs **Contents** and **Pull requests**
 write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
+## The lab tool library (PET-668)
+
+`src/lab/tools/` holds the read-only tools that the lab-map agent's `/lab` loop (PET-669)
+and the lab MCP at `pdlab.dev/mcp/lab` (PET-667) both call. Nothing in the pete-bot process
+imports it, and it will run in its own `lab-agent` process, never beside the desk key.
+
+| Tool | Reads |
+|---|---|
+| `find_host`, `host_note` | host notes and the live inventory table from a read-only `petedio-vault` clone |
+| `pve_guests`, `pve_guest` | the Proxmox API, GET only, with a `PVEAuditor` token and the cluster CA |
+| `kuma_status` | Uptime Kuma's status-page JSON on Pete-Pi |
+| `git_history` | commits in the iac repos by path or message text, with their PET keys |
+
+Each tool takes a zod-checked input, returns its data with a `source` line saying what it
+read, and caps its output at 16 KB. A read that fails, or that finds nothing where
+something must exist, returns an error, never an empty success.
+
 ## Quick start
 
 ```bash
@@ -236,6 +253,7 @@ been deleted, so a working command and a broken one scraped identically.
 src/
 ├── clients/      # githubActions — starts and follows the /update run
 ├── gateway/      # the Anthropic API gateway: settings, pricing, ledger and route
+├── lab/tools/    # the read-only lab tool library (PET-668), not yet used by any process
 ├── commands/     # /status and /update definitions, and registration
 ├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server

@@ -1,0 +1,6 @@
+{"data":[
+ {"id":"lxc/235","vmid":235,"name":"plane-235","type":"lxc","node":"pve03","status":"running","uptime":86400,"maxcpu":4,"mem":4294967296,"maxmem":8589934592,"tags":"core;plane","template":0},
+ {"id":"lxc/110","vmid":110,"name":"qbittorrent-vpn","type":"lxc","node":"pve02","status":"running","uptime":3600,"maxcpu":2,"mem":1073741824,"maxmem":2147483648,"template":0},
+ {"id":"qemu/236","vmid":236,"name":"plex-gpu","type":"qemu","node":"pve02","status":"stopped","uptime":0,"maxcpu":8,"mem":0,"maxmem":17179869184,"template":0},
+ {"id":"lxc/9000","vmid":9000,"name":"debian-template","type":"lxc","node":"pve03","status":"stopped","template":1}
+]}

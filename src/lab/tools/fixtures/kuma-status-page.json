@@ -1,0 +1,4 @@
+{"config":{"slug":"fault-study","title":"Fault study"},"incident":null,"publicGroupList":[
+ {"name":"Core","monitorList":[{"id":1,"name":"vault-223"},{"id":2,"name":"plane-235"}]},
+ {"name":"Media","monitorList":[{"id":3,"name":"plex-gpu"}]}
+]}
