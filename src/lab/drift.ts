@@ -50,6 +50,17 @@ export function compareLab(reads: DriftReads): DriftResult {
   const notes = new Map(guestNotes.map((n) => [Number(n.frontmatter.vmid), n]));
   const findings: DriftFinding[] = [];
 
+  // A map keeps one entry per VMID, so a duplicate would vanish from every check below.
+  const dupes = (vmids: number[], where: string) => {
+    const seen = new Set<number>();
+    for (const v of vmids) {
+      if (seen.has(v)) findings.push({ vmid: v, what: `${where} lists VMID ${v} more than once` });
+      seen.add(v);
+    }
+  };
+  dupes(reads.inventory.map((r) => r.vmid), 'the inventory');
+  dupes(guestNotes.map((n) => Number(n.frontmatter.vmid)), 'Hosts/');
+
   for (const g of reads.guests) {
     const row = rows.get(g.vmid);
     if (!row) {
@@ -70,6 +81,9 @@ export function compareLab(reads: DriftReads): DriftResult {
     } else if (fm.node && fm.node !== g.node) {
       findings.push({ vmid: g.vmid, what: `${note.file} says node ${fm.node}; Proxmox has it on ${g.node}` });
     }
+    if (fm.status === 'live' && g.status !== 'running') findings.push({ vmid: g.vmid, what: `${note.file} says status live; Proxmox says ${g.status}` });
+    if (fm.status === 'down' && g.status === 'running') findings.push({ vmid: g.vmid, what: `${note.file} says status down; Proxmox says running` });
+    if (fm.host && fm.host !== g.name) findings.push({ vmid: g.vmid, what: `${note.file} names the host ${fm.host}; Proxmox names it ${g.name}` });
   }
 
   for (const row of reads.inventory) {
@@ -138,6 +152,46 @@ function cap(text: string): string {
   return text.length <= MESSAGE_CAP ? text : `${text.slice(0, MESSAGE_CAP - 40)}\n… cut; run /lab for the rest.`;
 }
 
+/** A read that failed, with what each of the reads did. */
+export class DriftReadError extends Error {
+  override name = 'DriftReadError';
+}
+
+export interface LabReaders {
+  guests: () => Promise<Guest[]>;
+  vault: () => Promise<{ inventory: InventoryRow[]; notes: HostNote[]; source: string; fetchError: string | null }>;
+}
+
+/**
+ * Both reads, each to its own end. Any failure throws a DriftReadError that names what every
+ * read did, so the failure DM still says what the run read.
+ *
+ * ⚠ A STALE VAULT IS A FAILED READ. The clone never throws on a failed fetch: it answers from
+ * the last commit it has. Comparing live Proxmox with a vault that stopped updating would
+ * report "clean" every night after the deploy key broke, so a fetch error fails the run.
+ */
+export async function readLab(readers: LabReaders): Promise<DriftReads> {
+  const [g, v] = await Promise.allSettled([readers.guests(), readers.vault()]);
+  const parts: string[] = [];
+  let failed = false;
+  if (g.status === 'fulfilled') parts.push(`Proxmox: ${g.value.length} guests`);
+  else {
+    failed = true;
+    parts.push(`Proxmox: FAILED, ${(g.reason as Error)?.message ?? String(g.reason)}`);
+  }
+  if (v.status === 'rejected') {
+    failed = true;
+    parts.push(`vault: FAILED, ${(v.reason as Error)?.message ?? String(v.reason)}`);
+  } else if (v.value.fetchError) {
+    failed = true;
+    parts.push(`vault: STALE, the fetch failed (${v.value.fetchError}), so it holds ${v.value.source}`);
+  } else {
+    parts.push(`vault: ${v.value.inventory.length} inventory rows and ${v.value.notes.length} notes`);
+  }
+  if (failed || g.status !== 'fulfilled' || v.status !== 'fulfilled') throw new DriftReadError(parts.join('; '));
+  return { guests: g.value, inventory: v.value.inventory, notes: v.value.notes, vaultSource: v.value.source };
+}
+
 export type Notify = (message: string) => Promise<void>;
 
 /** POST one message to pete-bot's /v1/notify, as "lab-agent drift". Throws on anything but 2xx. */
@@ -153,10 +207,12 @@ export function notifier(url: string, token: string, fetchImpl: typeof fetch = f
   };
 }
 
-export type DriftOutcome =
+type DriftKind =
   | { kind: 'clean'; read: string }
   | { kind: 'drift'; read: string; findings: number; worded: boolean }
   | { kind: 'read-failed'; error: string };
+/** `delivered` is null when the run had nothing to send. */
+export type DriftOutcome = DriftKind & { at: string; delivered: boolean | null };
 
 export interface DriftDeps {
   read: () => Promise<DriftReads>;
@@ -171,7 +227,7 @@ export interface DriftDeps {
  * DMed. A failed DM is logged as an error with the outcome it could not deliver.
  */
 export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
-  let outcome: DriftOutcome;
+  let outcome: DriftKind;
   let message: string | null = null;
   try {
     const result = compareLab(await deps.read());
@@ -188,15 +244,34 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
     message = cap(`Drift check FAILED: it could not read the lab, so it checked nothing tonight.\n${error}`);
   }
 
-  deps.log('drift check', { ...outcome });
+  // null when there was nothing to send, so a clean run never reads as a failed delivery.
+  let delivered: boolean | null = null;
   if (message) {
     try {
       await deps.notify(message);
+      delivered = true;
     } catch (err) {
-      deps.log('drift check could not DM', { outcome: outcome.kind, error: (err as Error).message });
+      delivered = false;
+      deps.log('drift check could not DM', { level: 'error', outcome: outcome.kind, error: (err as Error).message });
     }
   }
-  return outcome;
+  const done: DriftOutcome = { ...outcome, at: new Date().toISOString(), delivered };
+  deps.log('drift check', { ...done });
+  return done;
+}
+
+/**
+ * One run at a time, shared by the schedule and POST /v1/drift/run: a second caller gets the
+ * run already under way, so a manual run near LAB_DRIFT_AT sends one DM, not two.
+ */
+export function singleFlight<T>(fn: () => Promise<T>): () => Promise<T> {
+  let running: Promise<T> | null = null;
+  return () => {
+    running ??= fn().finally(() => {
+      running = null;
+    });
+    return running;
+  };
 }
 
 /** Milliseconds from `now` to the next HH:MM UTC. */

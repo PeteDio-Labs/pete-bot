@@ -17,7 +17,7 @@ import { createLabHandler, type Check } from './server.js';
 import { buildLabTools, GitClone, LAB_UNITS, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
-import { msUntil, notifier, runDriftCheck } from './drift.js';
+import { msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -89,6 +89,15 @@ const checks: Record<string, Check> = {
   async kuma() {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
+  // Down only when the last run had something to say and could not DM it: a drift or a
+  // failed read that nobody heard about. A failed read that was DMed is the lab's fault, not
+  // lab-agent's, and before the first run there is nothing to report.
+  async drift() {
+    if (!lastDrift) return `no run yet; next at ${cfg.drift.at}Z`;
+    const summary = `last run ${lastDrift.at}: ${lastDrift.kind}`;
+    if (lastDrift.delivered === false) throw new Error(`${summary}, and its DM to /v1/notify failed`);
+    return summary;
+  },
   async secrets() {
     const keys = await secrets.list();
     return `${keys.length} entries under ${secrets.scope}${lastRenewError ? `; last renewal failed: ${lastRenewError}` : ''}`;
@@ -101,17 +110,25 @@ const callModel = gatewayCaller(cfg.gateway.url, cfg.gateway.token);
 // the vault at the commit the fetch just brought in.
 const hostIndex = new HostIndex(vault);
 const notify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken);
-const runDrift = () =>
-  runDriftCheck({
-    async read() {
-      const [guests, index] = await Promise.all([pve.guests(), hostIndex.load()]);
-      return { guests, inventory: index.inventory, notes: index.notes, vaultSource: index.source };
-    },
+let lastDrift: DriftOutcome | null = null;
+const runDrift = singleFlight(async () => {
+  lastDrift = await runDriftCheck({
+    read: () =>
+      readLab({
+        guests: () => pve.guests(),
+        async vault() {
+          const index = await hostIndex.load();
+          const { fetchError } = await vault.state();
+          return { inventory: index.inventory, notes: index.notes, source: index.source, fetchError: fetchError ?? null };
+        },
+      }),
     callModel,
     model: cfg.gateway.model,
     notify,
     log,
   });
+  return lastDrift;
+});
 // setTimeout, re-armed after each run, so a run that overlaps midnight or a clock change
 // still lands once a day at LAB_DRIFT_AT.
 function scheduleDrift(): void {
@@ -133,7 +150,9 @@ const handler = createLabHandler({
   runDrift,
 });
 
-const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, fetch: handler });
+// Bun closes an idle connection after 10 s by default. An answer or a drift run can take
+// 80 s, so the caller would lose the reply to a run that still spends the cap and sends a DM.
+const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 120, fetch: handler });
 log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], model: cfg.gateway.model });
 
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.

@@ -29,7 +29,7 @@ export interface LabServerDeps {
   log?: (msg: string, fields?: Record<string, unknown>) => void;
   /** Tests shorten it; production uses ASK_DEADLINE_MS. */
   deadlineMs?: number;
-  /** One drift run (PET-671). Absent, POST /v1/drift/run answers 404. */
+  /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
 }
 
@@ -63,7 +63,6 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
   const log = deps.log ?? (() => {});
   const want = digest(deps.askToken);
   let busy = false;
-  let drifting = false;
   const authorized = (req: Request) => {
     const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? '';
     return Boolean(bearer) && timingSafeEqual(digest(bearer), want);
@@ -75,13 +74,8 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
     if (url.pathname === '/v1/drift/run' && deps.runDrift) {
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
-      if (drifting) return json({ error: 'a drift check is already running' }, 429);
-      drifting = true;
-      try {
-        return json(await deps.runDrift());
-      } finally {
-        drifting = false;
-      }
+      // runDrift is single-flight: a call during a run waits for that run's outcome.
+      return json(await deps.runDrift());
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {

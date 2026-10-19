@@ -2,7 +2,7 @@
  * The nightly drift check (PET-671): the comparison, the DM it drafts, and a run's outcomes.
  */
 import { describe, expect, it } from 'bun:test';
-import { compareLab, draftDriftMessage, msUntil, runDriftCheck, type DriftReads } from './drift.js';
+import { compareLab, draftDriftMessage, msUntil, readLab, runDriftCheck, singleFlight, type DriftReads } from './drift.js';
 import { createLabHandler } from './server.js';
 import type { CallModel, ModelResponse } from './agent.js';
 import type { Guest } from './tools/proxmox.js';
@@ -44,6 +44,7 @@ describe('compareLab', () => {
     const lines = r.findings.map((f) => `${f.vmid} ${f.what}`);
     expect(lines).toEqual([
       '235 Hosts/235-x.md says node pve03; Proxmox has it on pve02',
+      '235 Hosts/235-x.md says status live; Proxmox says stopped',
       '235 the inventory lists plane-old on pve03; Proxmox has it on pve02',
       '235 the inventory names it plane-old; Proxmox names it plane',
       '235 the inventory says running; Proxmox says stopped',
@@ -55,6 +56,68 @@ describe('compareLab', () => {
     ]);
     // 106's note is destroyed with node none, and Proxmox has no 106: that is consistent.
     expect(lines.some((l) => l.startsWith('106'))).toBe(false);
+  });
+
+  it('reports a note whose status or host name disagrees, and a duplicated VMID', () => {
+    const r = compareLab({
+      ...clean,
+      guests: [guest(235, 'plane', 'pve03', 'stopped'), guest(237, 'media-dash')],
+      inventory: [row(235, 'plane', 'pve03', 'stopped'), row(237, 'media-dash'), row(237, 'media-dash')],
+      notes: [note(235), note(237, { status: 'down', host: 'mediadash' })],
+    });
+    expect(r.findings.map((f) => `${f.vmid} ${f.what}`)).toEqual([
+      '235 Hosts/235-x.md says status live; Proxmox says stopped',
+      '237 Hosts/237-x.md names the host mediadash; Proxmox names it media-dash',
+      '237 Hosts/237-x.md says status down; Proxmox says running',
+      '237 the inventory lists VMID 237 more than once',
+    ]);
+  });
+});
+
+describe('readLab', () => {
+  const vaultOk = async () => ({ inventory: clean.inventory, notes: clean.notes, source: 'petedio-vault @ abc1234', fetchError: null });
+
+  it('returns the three reads when both succeed', async () => {
+    const r = await readLab({ guests: async () => clean.guests, vault: vaultOk });
+    expect(r.guests).toHaveLength(2);
+    expect(r.vaultSource).toBe('petedio-vault @ abc1234');
+  });
+
+  it('fails on a stale vault, and names what each read did', async () => {
+    const err = await readLab({
+      guests: async () => clean.guests,
+      vault: async () => ({ ...(await vaultOk()), source: 'petedio-vault @ abc1234 (STALE)', fetchError: 'Permission denied (publickey)' }),
+    }).catch((e: Error) => e.message);
+    expect(err).toBe('Proxmox: 2 guests; vault: STALE, the fetch failed (Permission denied (publickey)), so it holds petedio-vault @ abc1234 (STALE)');
+  });
+
+  it('keeps the vault count when Proxmox fails', async () => {
+    const err = await readLab({
+      guests: async () => {
+        throw new Error('Proxmox refused the token lab-agent@pve!audit (HTTP 401)');
+      },
+      vault: vaultOk,
+    }).catch((e: Error) => e.message);
+    expect(err).toBe('Proxmox: FAILED, Proxmox refused the token lab-agent@pve!audit (HTTP 401); vault: 2 inventory rows and 3 notes');
+  });
+});
+
+describe('singleFlight', () => {
+  it('gives a second caller the run under way, then allows a new one', async () => {
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const once = singleFlight(async () => {
+      runs++;
+      await gate;
+      return runs;
+    });
+    const a = once();
+    const b = once();
+    release();
+    expect(await a).toBe(1);
+    expect(await b).toBe(1);
+    expect(await once()).toBe(2);
   });
 });
 
@@ -106,7 +169,7 @@ describe('runDriftCheck', () => {
     const sent: string[] = [];
     const logs: Array<Record<string, unknown>> = [];
     const out = await runDriftCheck(deps(async () => clean, sent, logs));
-    expect(out.kind).toBe('clean');
+    expect(out).toMatchObject({ kind: 'clean', delivered: null });
     expect(sent).toEqual([]);
     expect(logs[0]).toMatchObject({ msg: 'drift check', kind: 'clean', read: expect.stringContaining('2 guests') });
   });
@@ -116,7 +179,7 @@ describe('runDriftCheck', () => {
     const out = await runDriftCheck(deps(async () => {
       throw new Error('Proxmox refused the token lab-agent@pve!audit (HTTP 401)');
     }, sent, []));
-    expect(out).toEqual({ kind: 'read-failed', error: 'Proxmox refused the token lab-agent@pve!audit (HTTP 401)' });
+    expect(out).toMatchObject({ kind: 'read-failed', error: 'Proxmox refused the token lab-agent@pve!audit (HTTP 401)', delivered: true });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('Drift check FAILED');
     expect(sent[0]).toContain('HTTP 401');
@@ -129,8 +192,9 @@ describe('runDriftCheck', () => {
       throw new Error('/v1/notify answered HTTP 502');
     };
     const out = await runDriftCheck(d);
-    expect(out).toMatchObject({ kind: 'drift', findings: 2, worded: true });
-    expect(logs[1]).toMatchObject({ msg: 'drift check could not DM', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
+    expect(out).toMatchObject({ kind: 'drift', findings: 2, worded: true, delivered: false });
+    expect(logs[0]).toMatchObject({ msg: 'drift check could not DM', level: 'error', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
+    expect(logs[1]).toMatchObject({ msg: 'drift check', delivered: false });
   });
 });
 
@@ -150,7 +214,7 @@ describe('POST /v1/drift/run', () => {
     callModel: async () => reply('x'),
     model: 'm',
     checks: {},
-    runDrift: async () => ({ kind: 'clean', read: '2 guests' }),
+    runDrift: async () => ({ kind: 'clean', read: '2 guests', at: '2026-10-19T11:15:00Z', delivered: null }),
   });
   const post = (auth?: string) =>
     handler(new Request('http://x/v1/drift/run', { method: 'POST', headers: auth ? { authorization: auth } : {} }));
@@ -160,6 +224,6 @@ describe('POST /v1/drift/run', () => {
     expect((await post('Bearer wrong')).status).toBe(401);
     const res = await post(`Bearer ${ASK}`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ kind: 'clean', read: '2 guests' });
+    expect(await res.json()).toEqual({ kind: 'clean', read: '2 guests', at: '2026-10-19T11:15:00Z', delivered: null });
   });
 });
