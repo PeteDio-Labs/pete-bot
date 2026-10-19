@@ -76,7 +76,9 @@ jobs:
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
             kv/data/services/pete-bot owner_user_id | PB_OWNER ;
             kv/data/services/pete-bot alert_bearer_token | PB_BEARER ;
-            kv/data/services/pete-bot notify_bearer_token | PB_NOTIFY_BEARER
+            kv/data/services/pete-bot notify_bearer_token | PB_NOTIFY_BEARER ;
+            kv/data/services/pete-bot anthropic_api_key | PB_ANTHROPIC_KEY ;
+            kv/data/services/pete-bot gateway_token_lab_map | PB_GATEWAY_LAB_MAP
 
       # ⚠ A SECOND STEP EXISTS ONLY TO SCOPE `ignoreNotFound` TO ONE SECRET (PET-395).
       #
@@ -170,6 +172,12 @@ jobs:
               "pete_bot_desk_app_id":          os.environ.get("PB_DESK_APP_ID", ""),
               "pete_bot_desk_installation_id": os.environ.get("PB_DESK_INSTALLATION_ID", ""),
               "pete_bot_desk_app_pem":         os.environ.get("PB_DESK_APP_PEM", ""),
+              # Required, in the strict step above (PET-617): the Claude API gateway's
+              # key and lab-map's bearer. petedio-iac's scripts/seed-llm-gateway.sh
+              # writes both. This change merged only after that seed, because the
+              # strict step fails on a missing field.
+              "pete_bot_anthropic_api_key":      os.environ["PB_ANTHROPIC_KEY"],
+              "pete_bot_gateway_token_lab_map":  os.environ["PB_GATEWAY_LAB_MAP"],
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY
