@@ -85,8 +85,8 @@ export class VaultMetadataClient {
 
   /**
    * Renew the token. The seed script mints a periodic token, which expires unless renewed
-   * within its period; main.ts calls this twice a day. `renew-self` is in Vault's default
-   * policy, so the token needs no extra grant for it.
+   * within its period; main.ts calls this twice a day. The seed mints it without Vault's
+   * default policy, so the lab-agent-presence policy grants `renew-self` (PET-670).
    */
   async renewSelf(): Promise<void> {
     const res = await fetchWithTimeout(
