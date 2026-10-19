@@ -53,6 +53,11 @@ jobs:
           bun run build:binary
           test -x dist/pete-bot
           file dist/pete-bot | grep -qi 'x86-64\|x86_64'
+          # lab-agent, the second entrypoint (PET-669). Always built, so a seed never waits
+          # on a build; the play installs it only when both of its Vault paths are seeded.
+          bun run build:lab-binary
+          test -x dist/lab-agent
+          file dist/lab-agent | grep -qi 'x86-64\|x86_64'
 
       # vault-action's caCertificate wants BASE64-encoded PEM and cannot read a file.
       - name: Encode Vault CA
@@ -149,6 +154,46 @@ jobs:
             kv/data/services/pete-bot desk_installation_id | PB_DESK_INSTALLATION_ID ;
             kv/data/services/pete-bot desk_app_pem | PB_DESK_APP_PEM
 
+      # lab-agent's two paths (PET-670), optional in the same way and placed after the strict
+      # step for the same reason. Until petedio-iac's scripts/seed-lab-agent.sh and
+      # mint-pve-audit-token.yml run, these steps fail quietly and the play leaves lab-agent
+      # off. The play refuses some lab-agent values without the rest, so a half-seeded pair
+      # fails the deploy with the step to run, rather than shipping half a service.
+      - name: Vault — the optional lab-agent secrets, absent is allowed
+        continue-on-error: true
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/lab-agent ask_token | LAB_ASK ;
+            kv/data/services/lab-agent vault_token | LAB_VAULT_TOKEN ;
+            kv/data/services/lab-agent vault_deploy_key | LAB_DEPLOY_KEY
+
+      - name: Vault — the optional lab-agent Proxmox token, absent is allowed
+        continue-on-error: true
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/lab-agent-pve token_id | LAB_PVE_ID ;
+            kv/data/services/lab-agent-pve secret | LAB_PVE_SECRET ;
+            kv/data/services/lab-agent-pve endpoint | LAB_PVE_ENDPOINT ;
+            kv/data/services/lab-agent-pve ca_pem | LAB_PVE_CA
+
       - name: Stage the secrets as files, never as arguments
         run: |
           umask 077
@@ -178,6 +223,16 @@ jobs:
               # strict step fails on a missing field.
               "pete_bot_anthropic_api_key":      os.environ["PB_ANTHROPIC_KEY"],
               "pete_bot_gateway_token_lab_map":  os.environ["PB_GATEWAY_LAB_MAP"],
+              # .get for the same reason as the desk's fields. All seven or the play keeps
+              # lab-agent off (PET-670).
+              "lab_agent_binary_src":       "/src/dist/lab-agent",
+              "lab_agent_ask_token":        os.environ.get("LAB_ASK", ""),
+              "lab_agent_vault_token":      os.environ.get("LAB_VAULT_TOKEN", ""),
+              "lab_agent_vault_deploy_key": os.environ.get("LAB_DEPLOY_KEY", ""),
+              "lab_agent_pve_token_id":     os.environ.get("LAB_PVE_ID", ""),
+              "lab_agent_pve_token_secret": os.environ.get("LAB_PVE_SECRET", ""),
+              "lab_agent_pve_endpoint":     os.environ.get("LAB_PVE_ENDPOINT", ""),
+              "lab_agent_pve_ca_pem":       os.environ.get("LAB_PVE_CA", ""),
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY
