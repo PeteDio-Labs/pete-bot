@@ -241,8 +241,8 @@ jobs:
               # strict step fails on a missing field.
               "pete_bot_anthropic_api_key":      os.environ["PB_ANTHROPIC_KEY"],
               "pete_bot_gateway_token_lab_map":  os.environ["PB_GATEWAY_LAB_MAP"],
-              # .get for the same reason as the desk's fields. All nine or the play keeps
-              # lab-agent off (PET-670).
+              # .get for the same reason as the desk's fields. All six of lab-agent's own or
+              # the play keeps it off (PET-670). The mirror App's three arrive either way.
               "lab_agent_binary_src":       "/src/dist/lab-agent",
               "lab_agent_ask_token":        os.environ.get("LAB_ASK", ""),
               "lab_agent_vault_token":      os.environ.get("LAB_VAULT_TOKEN", ""),
