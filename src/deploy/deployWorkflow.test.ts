@@ -53,6 +53,14 @@ for (const step of vaultSteps) {
 
 /** A step may fail without failing the job. */
 const isTolerant = (s: VaultStep) => s['continue-on-error'] === true;
+/**
+ * A step passes when its whole PATH is absent, and fails on a 403 or an outage (PET-670).
+ * It still fails on a missing KEY in a path that exists, so it fits only a path whose
+ * fields are all written at once, by one seed script.
+ */
+const allowsAbsentPath = (s: VaultStep) => !isTolerant(s) && s.with.ignoreNotFound === true;
+/** The fetch step lets the deploy go on without this secret. */
+const mayBeAbsent = (s: VaultStep) => isTolerant(s) || allowsAbsentPath(s);
 
 const stagingRun =
   steps.find((s) => /stage the secrets/i.test(s.name ?? ''))?.run ?? '';
@@ -104,9 +112,26 @@ describe('deploy.yml secret contract', () => {
   it('fetches every OPTIONAL secret in a step that may fail', () => {
     const offenders = [...readOptional]
       .filter((v) => fetchedBy.has(v))
-      .filter((v) => !isTolerant(fetchedBy.get(v)!))
+      .filter((v) => !mayBeAbsent(fetchedBy.get(v)!))
       .map((v) => `${v} (read with a default but its fetch step is fatal)`);
     expect(offenders).toEqual([]);
+  });
+
+  // An absent-path step exists to keep a 403 fatal, so it must carry only optional
+  // secrets. A required secret behind it would turn an unseeded path into a late KeyError.
+  it('fetches only OPTIONAL secrets in an absent-path step', () => {
+    const offenders = [...readRequired]
+      .filter((v) => fetchedBy.has(v))
+      .filter((v) => allowsAbsentPath(fetchedBy.get(v)!))
+      .map((v) => `${v} (read fatally but fetched by an ignoreNotFound step)`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('lets a refusal on the lab-agent paths fail the deploy', () => {
+    for (const v of ['LAB_ASK', 'LAB_PVE_ID']) {
+      expect(readOptional.has(v)).toBe(true);
+      expect(allowsAbsentPath(fetchedBy.get(v)!)).toBe(true);
+    }
   });
 
   // Regression lock on the specific case, named so a failure says what broke.
