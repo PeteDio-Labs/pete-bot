@@ -2,7 +2,7 @@
  * The GitHub Actions client behind /update (PET-395). GitHub is faked at fetch, so these
  * pin the requests this sends and every way a run can end.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'bun:test';
 import {
   dispatch,
   findRun,
@@ -14,14 +14,15 @@ import {
 } from './githubActions.js';
 
 const fetchMock = vi.fn();
+const realFetch = globalThis.fetch;
 
 beforeEach(() => {
   fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  globalThis.fetch = realFetch;
 });
 
 const json = (body: unknown, status = 200) =>

@@ -11,6 +11,9 @@ something to tell the owner. It adds no incident state.
 
 **`/update`** starts petedio-media-iac's update workflow and reports what the run did.
 
+**The merge desk** merges low-risk PRs after a clean Codex review, and DMs a Merge button
+for the rest (PET-645).
+
 It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
 and plain-DM questions went in PET-518, when Bobbert took over asking mtrace with its own
 token. The bot reads no messages, so it requests no privileged intent.
@@ -42,6 +45,44 @@ Vault outage reached nobody (PET-374). So `/v1/alert` groups:
 Open incidents live in `ALERT_STATE_PATH`, so a restart between the failure and the
 recovery still edits the original message instead of orphaning it.
 
+## The merge desk (PET-645)
+
+The merge desk merges low-risk pull requests without a person, and asks Pedro for one tap
+on the rest. It polls every open PR in `DESK_REPOS` every three minutes and decides each one
+from facts GitHub reports. No model decides a merge.
+
+| Step | What the desk checks |
+|---|---|
+| Is it ours? | Not a draft, not a fork, authored by someone on `DESK_AUTHORS`, aimed at the default branch, and not labelled `merge-desk/hold` |
+| Tier | petedio-iac's `scripts/pr-blast-radius.py`, read from petedio-iac's default branch and run against the base repository's workflows on its default branch. A renamed file counts by both paths. Until the rules on main grade the desk's own guard paths tier 2, every PR is tier 2 |
+| Codex | A review of the head SHA by `petedio-codex-review[bot]`. None yet: the desk queues `codex-review <repo> <n> <effort>` on codex-248, with `low`, `medium` or `high` for tiers 0, 1 and 2 |
+| Gates | No conflict, every check run and status passed, and no unresolved review thread. A skipped or neutral check, or no check at all in a repo not on `DESK_NO_CI_REPOS`, goes to Pedro instead of merging |
+| Who merges | Tiers 0 and 1 with "No blocking findings" merge here. Tier 2, or a Codex "Escalate to Pedro", arrive as a DM with a **Merge** button |
+
+The merge is a squash pinned to the reviewed head, so a push after the review blocks it
+until Codex reviews the new head. The desk approves the PR first, which satisfies a
+required review and records the evidence. After the merge it reads the default branch
+back, then posts one comment on the PR and one DM. Both are saved first and retried on
+later polls until they land.
+
+A tap merges only the SHA on its button, only for the owner, and only after the desk
+reads every fact again. A moved head, a new thread or a red check refuses the tap and
+says why.
+
+After two blocking Codex rounds the desk stops, comments once, and DMs both reviews with a
+**Review again** button that queues one more round, of the same head if nothing was pushed.
+A failed Codex queue, or one cut off by a restart, gets the same button.
+
+`DESK_MODE=dry-run` runs every step except the approval and the merge, and DMs each merge
+it would have made. Use it first on a new repository. `/health` reports the desk as `off`,
+`misconfigured` (with the reason), `starting` or `running`, and a running desk names the
+PRs its last poll read.
+
+What the desk needs on the host is in `.env.example`: pete-bot's own GitHub App key, an
+ssh key that codex-248 forces to `codex-review-gate`, a pinned `known_hosts` for 248, and
+`python3` with PyYAML for the classifier. The App needs **Contents** and **Pull requests**
+write, **Checks** and **Commit statuses** read, and **Metadata** read.
+
 ## Quick start
 
 ```bash
@@ -54,11 +95,14 @@ bun dev
 
 ```bash
 bun dev            # dev server (hot reload)
-bun test           # run tests
+bun test           # run tests (Bun is the only runtime; see bunfig.toml)
 bun run typecheck
 bun run lint
 bun run build:binary   # standalone linux-x64 executable, what the deploy ships
+scripts/smoke-binary.sh   # start that binary and check it loads, as CI does
 ```
+
+Bun 1.4.2 or later is required.
 
 ## Commands
 
@@ -99,9 +143,10 @@ Port 3015, separate from the metrics port so app traffic cannot affect a scrape.
 
 | Route | Auth | What it does |
 |-------|------|--------------|
-| `GET /health` | none | Liveness. Carries uptime and the number of open incidents |
+| `GET /health` | none | Liveness. Carries uptime, the number of open incidents, and the gateway state in `llm` |
 | `POST /v1/alert` | alert bearer | Uptime Kuma webhook → the owner's DM |
 | `POST /v1/notify` | notify bearer | `{from, message}` → one DM to the owner. Records nothing |
+| `POST /v1/llm/v1/messages` | a caller's gateway bearer | The Messages API, proxied with the homelab's key. `/v1/llm/messages` is the same route |
 
 `/v1/alert` takes a **bearer token, not HMAC**, and that is forced rather than chosen:
 Kuma's generic webhook cannot sign a body. Do not "fix" this by adding HMAC and
@@ -116,6 +161,34 @@ whatever the text mentions. A success returns `{ok, action: "sent", channelId, m
 A bad body returns 400, and a Discord failure returns 502. The log holds the sender and the
 message id, never the text.
 
+`/v1/llm/v1/messages` is the Anthropic API gateway (PET-617). The homelab's one Anthropic key
+lives in this process, and no caller holds it. A caller points the official SDK at
+`http://<host>:3015/v1/llm`, with its own gateway token as `apiKey`. Each caller has a
+monthly cap in dollars and a list of models, set in `LLM_GATEWAY_CALLERS`. Every answered
+request goes into a SQLite ledger at `LLM_LEDGER_PATH`, with its tokens and its cost in
+integer nano-dollars, and the cap reads that ledger. The gateway refuses:
+
+- every request with 503 while it is off (no key) or misconfigured, and `/health` says which.
+  A ledger path that cannot be opened makes it misconfigured
+- an unknown token with 401, before the body is read
+- a missing `model` or `max_tokens`, `stream: true`, a body that is not JSON, a code execution
+  tool, or any parameter the gateway cannot price, with 400. `speed`, `inference_geo` and
+  `service_tier` bill above the published rates, so they are refused. Streaming is not
+  written yet
+- a body over 8 MB with 413
+- a model the caller was not given, or a caller at its cap, with 403, which the SDK does not
+  retry
+- a caller's third concurrent request with 429, which the SDK retries
+- every request with 503 after a ledger write fails, until a restart
+
+The cap is checked before a request, so one request can cross it, and at most two can,
+since a caller may have two open. An answer whose `usage` is missing, partial or
+unreadable is charged the rest of the caller's monthly cap, because nothing in a request
+bounds its cost: an image by URL, a web search or a tool's system prompt bills tokens the
+body does not show. The charge is in the ledger, so the caller is refused, across
+restarts, until the month turns over or its cap rises. The log holds the caller, the model, the token counts and the cost, never
+the prompt or the answer.
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
@@ -129,6 +202,9 @@ message id, never the text.
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
+| `ANTHROPIC_API_KEY` | No | — | The key the gateway forwards with. Empty leaves the gateway off |
+| `LLM_GATEWAY_CALLERS` | With a key | — | JSON: caller name to `{token, monthlyCapUsd, models}`. See `.env.example` |
+| `LLM_LEDGER_PATH` | With a key | — | The SQLite spend ledger. It must survive a restart |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
 | `UPDATES_REPO` | No | `PeteDio-Labs/petedio-media-iac` | Repo that holds the update workflow |
 | `UPDATES_WORKFLOW` | No | `media-updates.yml` | The workflow `/update` dispatches |
@@ -159,6 +235,7 @@ been deleted, so a working command and a broken one scraped identically.
 ```
 src/
 ├── clients/      # githubActions — starts and follows the /update run
+├── gateway/      # the Anthropic API gateway: settings, pricing, ledger and route
 ├── commands/     # /status and /update definitions, and registration
 ├── events/       # interactionCreate (slash commands)
 ├── metrics/      # Prometheus registry and the metrics server

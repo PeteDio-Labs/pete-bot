@@ -2,7 +2,7 @@
  * /status and the owner gate. The gate and the deferred reply are characterization; the
  * metrics are PET-384 (UC-4, UC-6). /ask went in PET-518, and /update has its own file.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'bun:test';
 import { MessageFlags } from 'discord.js';
 import { createInteractionHandler } from './interactionCreate.js';
 import { config } from '../config.js';
@@ -28,16 +28,17 @@ function fakeInteraction(over: Record<string, unknown> = {}) {
 
 const handler = () => createInteractionHandler();
 const fetchMock = vi.fn();
+const realFetch = globalThis.fetch;
 const originalToken = config.updates.token;
 
 beforeEach(() => {
   register.resetMetrics();
   fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  globalThis.fetch = realFetch;
   config.updates.token = originalToken;
 });
 
@@ -45,7 +46,7 @@ describe('who it answers', () => {
   it('refuses anyone but the installer', async () => {
     const { interaction, reply, deferReply } = fakeInteraction({ user: { id: '999' } });
     await handler()(interaction);
-    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(1);
     expect(deferReply).not.toHaveBeenCalled();
   });
 
@@ -98,7 +99,7 @@ describe('/status', () => {
   it('refuses /status from anyone but the installer too', async () => {
     const { interaction, reply, deferReply } = fakeInteraction({ user: { id: '999' } });
     await handler()(interaction);
-    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(1);
     expect(deferReply).not.toHaveBeenCalled();
   });
 });
@@ -111,5 +112,46 @@ describe('metrics', () => {
     expect(await register.metrics()).toMatch(
       /pete_bot_ask_total\{[^}]*surface="status"[^}]*status="refused"[^}]*\} 1/,
     );
+  });
+});
+
+// PET-645. A merge desk button is checked against the owner before the desk sees it.
+describe('merge desk buttons', () => {
+  function button(userId: string) {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const deferReply = vi.fn().mockResolvedValue(undefined);
+    const editReply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      isButton: () => true,
+      isChatInputCommand: () => false,
+      customId: `desk:merge:petedio-vault:3:${'a'.repeat(40)}`,
+      user: { id: userId },
+      reply,
+      deferReply,
+      editReply,
+    } as never;
+    return { interaction, reply, editReply };
+  }
+
+  it('refuses anyone but the owner, without asking the desk', async () => {
+    const tap = vi.fn();
+    const { interaction, reply } = button('999');
+    await createInteractionHandler({ desk: () => ({ tap }) as never })(interaction);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(tap).not.toHaveBeenCalled();
+  });
+
+  it("passes the owner's tap to the desk and shows its answer", async () => {
+    const tap = vi.fn().mockResolvedValue('Merged as mmmmmmm on `main`.');
+    const { interaction, editReply } = button(OWNER);
+    await createInteractionHandler({ desk: () => ({ tap }) as never })(interaction);
+    expect(tap).toHaveBeenCalledWith(`desk:merge:petedio-vault:3:${'a'.repeat(40)}`);
+    expect(editReply).toHaveBeenCalledWith({ content: 'Merged as mmmmmmm on `main`.' });
+  });
+
+  it('says the desk is off when it is', async () => {
+    const { interaction, editReply } = button(OWNER);
+    await createInteractionHandler({ desk: () => null })(interaction);
+    expect(editReply.mock.calls[0]![0].content).toContain('merge desk is off');
   });
 });

@@ -210,6 +210,14 @@ export function size(): number {
   return batches.size;
 }
 
+/** What a restart does: forget memory and read the state file again. Tests call it. */
+export function restoreFromDisk(): void {
+  batches = new Map();
+  batchOf = new Map();
+  persistWarned = false;
+  load();
+}
+
 export function reset(): void {
   batches = new Map();
   batchOf = new Map();

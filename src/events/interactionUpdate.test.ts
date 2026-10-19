@@ -3,14 +3,10 @@
  * report, a failure, a run that never appeared, a run that outlived the reply, and a host
  * with no token.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, setSystemTime } from 'bun:test';
 import { MessageFlags } from 'discord.js';
 
-const { runUpdateMock } = vi.hoisted(() => ({ runUpdateMock: vi.fn() }));
-vi.mock('../clients/githubActions.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../clients/githubActions.js')>()),
-  runUpdate: runUpdateMock,
-}));
+const runUpdateMock = vi.fn();
 
 import { createInteractionHandler } from './interactionCreate.js';
 import { config } from '../config.js';
@@ -44,7 +40,7 @@ function fakeUpdate(opts: { sub?: string; target?: string | null; force?: boolea
 }
 
 const lastEmbed = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.at(-1)![0].embeds[0].data;
-const handle = (interaction: never) => createInteractionHandler()(interaction);
+const handle = (interaction: never) => createInteractionHandler({ runUpdate: runUpdateMock })(interaction);
 
 beforeEach(() => {
   runUpdateMock.mockReset();
@@ -56,7 +52,7 @@ describe('/update — who and how', () => {
   it('refuses anyone but the installer, and starts nothing', async () => {
     const { interaction, reply } = fakeUpdate({ user: '999' });
     await handle(interaction);
-    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledTimes(1);
     expect(runUpdateMock).not.toHaveBeenCalled();
   });
 
@@ -151,18 +147,17 @@ describe('/update — how a run ends', () => {
   });
 
   it('DMs the result once the reply can no longer be edited', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
     try {
       runUpdateMock.mockImplementation(async () => {
-        vi.setSystemTime(Date.now() + 20 * 60_000);
+        setSystemTime(new Date(Date.now() + 20 * 60_000));
         return { kind: 'completed', conclusion: 'success', url: 'https://run/1', report: REPORT };
       });
       const { interaction, editReply, send } = fakeUpdate({ sub: 'apply' });
       await handle(interaction);
-      expect(send).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledTimes(1);
       expect(editReply).not.toHaveBeenCalled();
     } finally {
-      vi.useRealTimers();
+      setSystemTime();
     }
   });
 });

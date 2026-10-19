@@ -7,10 +7,12 @@
  * that is a channel you mute. A muted channel is how the nine-hour Vault outage reached
  * nobody, which is the failure this whole route exists to end.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { config } from '../config.js';
+import * as alertStore from './alertStore.js';
 import { recordDown, recordUp, attachMessage, activeBatches, size, reset } from './alertStore.js';
 
 const WINDOW = 60_000;
@@ -125,24 +127,24 @@ describe('recovery', () => {
 describe('persistence', () => {
   let dir: string;
   let statePath: string;
-  const original = process.env.ALERT_STATE_PATH;
+  const original = config.alerts.statePath;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'pete-bot-alerts-'));
     statePath = join(dir, 'alerts.json');
-    process.env.ALERT_STATE_PATH = statePath;
+    config.alerts.statePath = statePath;
   });
 
   afterEach(() => {
-    if (original === undefined) delete process.env.ALERT_STATE_PATH;
-    else process.env.ALERT_STATE_PATH = original;
+    config.alerts.statePath = original;
     rmSync(dir, { recursive: true, force: true });
-    vi.resetModules();
+    reset();
   });
 
+  /** Simulate a restart: the store forgets its memory and reads the state file. */
   async function freshStore() {
-    vi.resetModules();
-    return import('./alertStore.js');
+    alertStore.restoreFromDisk();
+    return alertStore;
   }
 
   it('still edits the DOWN message after a restart', async () => {
@@ -178,13 +180,13 @@ describe('persistence', () => {
   });
 
   it('keeps working when the state path cannot be written', async () => {
-    process.env.ALERT_STATE_PATH = join(dir, 'no-such-dir', 'nested', 'alerts.json');
+    config.alerts.statePath = join(dir, 'no-such-dir', 'nested', 'alerts.json');
     const store = await freshStore();
     expect(() => store.recordDown('vault', { now: T0, windowMs: WINDOW })).not.toThrow();
   });
 
   it('holds nothing on disk when no state path is configured', async () => {
-    delete process.env.ALERT_STATE_PATH;
+    config.alerts.statePath = '';
     const store = await freshStore();
     store.recordDown('vault', { now: T0, windowMs: WINDOW });
     expect(existsSync(statePath)).toBe(false);
