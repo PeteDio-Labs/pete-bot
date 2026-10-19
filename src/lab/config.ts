@@ -29,6 +29,12 @@ const EnvSchema = z.object({
   LAB_VAULT_CLONE: z.string().min(1),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
+  // The vault is private and deploy keys are disabled org-wide, so its fetch carries a
+  // read token from the petedio-workspace-mirror App (PET-670, PET-542).
+  LAB_GITHUB_APP_ID: z.string().regex(/^\d+$/, 'must be a number'),
+  LAB_GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, 'must be a number'),
+  LAB_GITHUB_APP_KEY_FILE: z.string().min(1).default('/etc/lab-agent/github-app.pem'),
+  LAB_VAULT_REPO: z.string().regex(/^[\w.-]+$/, 'must be a bare repository name').default('petedio-vault'),
 });
 
 export interface LabConfig {
@@ -38,6 +44,7 @@ export interface LabConfig {
   proxmox: { baseUrl: string; tokenId: string; tokenSecret: string; caPem: string };
   kuma: { baseUrl: string; slug: string };
   clones: { vault: string; iac: string; mediaIac: string };
+  github: { appId: string; installationId: string; privateKeyPem: string; vaultRepo: string };
 }
 
 export function loadLabConfig(env: Record<string, string | undefined>, readFile = (p: string) => readFileSync(p, 'utf8')): LabConfig {
@@ -57,6 +64,15 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
   } catch (err) {
     throw new Error(`lab-agent cannot read LAB_PVE_CA_FILE ${e.LAB_PVE_CA_FILE}: ${(err as Error).message}`);
   }
+  let privateKeyPem: string;
+  try {
+    privateKeyPem = readFile(e.LAB_GITHUB_APP_KEY_FILE);
+  } catch (err) {
+    throw new Error(`lab-agent cannot read LAB_GITHUB_APP_KEY_FILE ${e.LAB_GITHUB_APP_KEY_FILE}: ${(err as Error).message}`);
+  }
+  if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(privateKeyPem)) {
+    throw new Error(`lab-agent settings are invalid: LAB_GITHUB_APP_KEY_FILE ${e.LAB_GITHUB_APP_KEY_FILE} holds no PEM private key`);
+  }
   return {
     port: e.LAB_PORT,
     askToken: e.LAB_ASK_TOKEN,
@@ -64,5 +80,11 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     proxmox: { baseUrl: e.LAB_PVE_URL, tokenId: e.LAB_PVE_TOKEN_ID, tokenSecret: e.LAB_PVE_TOKEN_SECRET, caPem },
     kuma: { baseUrl: e.LAB_KUMA_URL, slug: e.LAB_KUMA_SLUG },
     clones: { vault: e.LAB_VAULT_CLONE, iac: e.LAB_IAC_CLONE, mediaIac: e.LAB_MEDIA_IAC_CLONE },
+    github: {
+      appId: e.LAB_GITHUB_APP_ID,
+      installationId: e.LAB_GITHUB_APP_INSTALLATION_ID,
+      privateKeyPem,
+      vaultRepo: e.LAB_VAULT_REPO,
+    },
   };
 }

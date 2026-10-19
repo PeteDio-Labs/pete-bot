@@ -15,6 +15,7 @@ import { createLabHandler, type Check } from './server.js';
 import { buildLabTools, GitClone } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { readKuma } from './tools/kuma.js';
+import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ time: new Date().toISOString(), msg, ...fields }));
@@ -29,7 +30,9 @@ try {
   process.exit(1);
 }
 
-const vault = new GitClone('petedio-vault', cfg.clones.vault);
+const vault = new GitClone('petedio-vault', cfg.clones.vault).useAuth(
+  gitAuthFromToken(repoReadToken({ ...cfg.github, repo: cfg.github.vaultRepo })),
+);
 const history = [new GitClone('petedio-iac', cfg.clones.iac), new GitClone('petedio-media-iac', cfg.clones.mediaIac)];
 const tools = buildLabTools({ vault, history, proxmox: cfg.proxmox, kuma: cfg.kuma });
 const pve = new ProxmoxClient(cfg.proxmox);

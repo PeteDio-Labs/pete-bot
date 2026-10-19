@@ -15,6 +15,8 @@ const ASK = 'a'.repeat(40);
 const GW = 'g'.repeat(40);
 const CA = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
 
+const KEY = '-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n';
+const read = (p: string) => (p.endsWith('github-app.pem') ? KEY : CA);
 const baseEnv = {
   LAB_ASK_TOKEN: ASK,
   LAB_GATEWAY_TOKEN: GW,
@@ -24,21 +26,29 @@ const baseEnv = {
   LAB_VAULT_CLONE: '/var/lib/lab-agent/petedio-vault',
   LAB_IAC_CLONE: '/var/lib/lab-agent/petedio-iac',
   LAB_MEDIA_IAC_CLONE: '/var/lib/lab-agent/petedio-media-iac',
+  LAB_GITHUB_APP_ID: '1234567',
+  LAB_GITHUB_APP_INSTALLATION_ID: '89012345',
 };
 
 describe('loadLabConfig', () => {
   it('fills the defaults and reads the CA', () => {
-    const cfg = loadLabConfig(baseEnv, () => CA);
+    const cfg = loadLabConfig(baseEnv, read);
     expect(cfg.port).toBe(3016);
     expect(cfg.gateway).toEqual({ url: 'http://127.0.0.1:3015/v1/llm', token: GW, model: 'claude-haiku-4-5' });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
+    expect(cfg.github).toEqual({ appId: '1234567', installationId: '89012345', privateKeyPem: KEY, vaultRepo: 'petedio-vault' });
+  });
+
+  it('refuses to start without a PEM key for the vault App (PET-670)', () => {
+    expect(() => loadLabConfig(baseEnv, () => CA)).toThrow('holds no PEM private key');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_GITHUB_APP_ID: '' }, read)).toThrow('LAB_GITHUB_APP_ID');
   });
 
   it('refuses to start on a missing or short token, and names the field, not the value', () => {
     const err = (() => {
       try {
-        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short', LAB_GATEWAY_TOKEN: '' }, () => CA);
+        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short', LAB_GATEWAY_TOKEN: '' }, read);
       } catch (e) {
         return (e as Error).message;
       }
@@ -50,8 +60,8 @@ describe('loadLabConfig', () => {
   });
 
   it('refuses plain http to Proxmox, a reused bearer, and an unreadable CA', () => {
-    expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, () => CA)).toThrow('must be https://');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, () => CA)).toThrow('must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, read)).toThrow('must be https://');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, read)).toThrow('must differ');
     expect(() =>
       loadLabConfig(baseEnv, () => {
         throw new Error('ENOENT');

@@ -54,7 +54,7 @@ jobs:
           test -x dist/pete-bot
           file dist/pete-bot | grep -qi 'x86-64\|x86_64'
           # lab-agent, the second entrypoint (PET-669). Always built, so a seed never waits
-          # on a build; the play installs it only when both of its Vault paths are seeded.
+          # on a build; the play installs it only when its three Vault paths are all readable.
           bun run build:lab-binary
           test -x dist/lab-agent
           file dist/lab-agent | grep -qi 'x86-64\|x86_64'
@@ -174,8 +174,7 @@ jobs:
           ignoreNotFound: true
           secrets: |
             kv/data/services/lab-agent ask_token | LAB_ASK ;
-            kv/data/services/lab-agent vault_token | LAB_VAULT_TOKEN ;
-            kv/data/services/lab-agent vault_deploy_key | LAB_DEPLOY_KEY
+            kv/data/services/lab-agent vault_token | LAB_VAULT_TOKEN
 
       - name: Vault — the lab-agent Proxmox token, an absent path is allowed
         uses: hashicorp/vault-action@v4
@@ -193,6 +192,25 @@ jobs:
             kv/data/services/lab-agent-pve secret | LAB_PVE_SECRET ;
             kv/data/services/lab-agent-pve endpoint | LAB_PVE_ENDPOINT ;
             kv/data/services/lab-agent-pve ca_pem | LAB_PVE_CA
+
+      # The vault repo is private and PeteDio-Labs disables deploy keys, so lab-agent reads
+      # it with the read-only petedio-workspace-mirror App, as petedio-search does (PET-542).
+      # lab-agent asks for a token scoped to petedio-vault alone. Same shape as the step above.
+      - name: Vault — the read-only mirror App for lab-agent, an absent path is allowed
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/claude-workspace-mirror app_id | LAB_GH_APP_ID ;
+            kv/data/services/claude-workspace-mirror installation_id | LAB_GH_INSTALL_ID ;
+            kv/data/services/claude-workspace-mirror app_pem | LAB_GH_APP_PEM
 
       - name: Stage the secrets as files, never as arguments
         run: |
@@ -223,12 +241,14 @@ jobs:
               # strict step fails on a missing field.
               "pete_bot_anthropic_api_key":      os.environ["PB_ANTHROPIC_KEY"],
               "pete_bot_gateway_token_lab_map":  os.environ["PB_GATEWAY_LAB_MAP"],
-              # .get for the same reason as the desk's fields. All seven or the play keeps
+              # .get for the same reason as the desk's fields. All nine or the play keeps
               # lab-agent off (PET-670).
               "lab_agent_binary_src":       "/src/dist/lab-agent",
               "lab_agent_ask_token":        os.environ.get("LAB_ASK", ""),
               "lab_agent_vault_token":      os.environ.get("LAB_VAULT_TOKEN", ""),
-              "lab_agent_vault_deploy_key": os.environ.get("LAB_DEPLOY_KEY", ""),
+              "lab_agent_github_app_id":    os.environ.get("LAB_GH_APP_ID", ""),
+              "lab_agent_github_installation_id": os.environ.get("LAB_GH_INSTALL_ID", ""),
+              "lab_agent_github_app_pem":   os.environ.get("LAB_GH_APP_PEM", ""),
               "lab_agent_pve_token_id":     os.environ.get("LAB_PVE_ID", ""),
               "lab_agent_pve_token_secret": os.environ.get("LAB_PVE_SECRET", ""),
               "lab_agent_pve_endpoint":     os.environ.get("LAB_PVE_ENDPOINT", ""),
