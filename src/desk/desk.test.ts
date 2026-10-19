@@ -69,6 +69,7 @@ class FakeGitHub {
   approveError: Error | null = null;
   mergeError: Error | null = null;
   commentFailures = 0;
+  commentDelayMs = 0;
 
   async listOpenPulls() {
     return this.pull.state === 'open' ? [this.pull] : [];
@@ -110,6 +111,7 @@ class FakeGitHub {
     return true;
   }
   async comment(_r: string, _n: number, body: string) {
+    if (this.commentDelayMs) await new Promise((r) => setTimeout(r, this.commentDelayMs));
     if (this.commentFailures > 0) {
       this.commentFailures--;
       throw new Error('HTTP 502');
@@ -440,5 +442,36 @@ describe('review fixes (Codex round 2)', () => {
     expect(gh.comments).toEqual([]);
     await desk.poll();
     expect(gh.comments.filter((c) => c.includes('failed: HTTP 405'))).toHaveLength(1);
+  });
+});
+
+describe('review fixes (Codex round 3)', () => {
+  it('sends a saved report once when two deliveries for one PR overlap', async () => {
+    const store = new DeskStore(':memory:');
+    store.update(REPO, 5, { outbox: [{ id: 'x', comment: 'Merge desk: report', dm: 'report' }] });
+    gh.commentDelayMs = 50;
+    const desk = makeDesk({}, store);
+    // A queue result's report and a poll's retry of the saved outbox, at the same moment.
+    await Promise.all([desk['deliver'](REPO, 5), desk.poll()]);
+    expect(gh.comments.filter((c) => c === 'Merge desk: report')).toHaveLength(1);
+    expect(dms.filter((d) => d.content === 'report')).toHaveLength(1);
+    expect(store.get(REPO, 5).outbox).toBeUndefined();
+  });
+
+  it('posts the stop comment once while its DM keeps failing, then sends the DM', async () => {
+    gh.reviews = [
+      codexReview('Changes requested', 'b'.repeat(40), '2026-01-01T01:00:00Z'),
+      codexReview('Changes requested', 'd'.repeat(40), '2026-01-01T02:00:00Z'),
+    ];
+    dmFailures = 2;
+    const desk = makeDesk();
+    await desk.poll();
+    await desk.poll();
+    expect(gh.comments.filter((c) => c.includes('stopped after 2'))).toHaveLength(1);
+    expect(dms).toEqual([]);
+    await desk.poll();
+    expect(gh.comments.filter((c) => c.includes('stopped after 2'))).toHaveLength(1);
+    expect(dms).toHaveLength(1);
+    expect(parseButtonId(dms[0]!.buttons![0]!.customId)?.action).toBe('again');
   });
 });
