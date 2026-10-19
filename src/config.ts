@@ -49,6 +49,16 @@ interface Config {
     runTimeoutMs: number;
     pollMs: number;
   };
+  /**
+   * /lab (PET-669). pete-bot posts the question to lab-agent on 127.0.0.1 and relays the
+   * answer. lab-agent runs the model loop and holds the read credentials; pete-bot gives it
+   * none of its own. An empty token leaves /lab answering "not configured".
+   */
+  lab: {
+    url: string;
+    token: string;
+    timeoutMs: number;
+  };
   /** PB.6 — HTTP server for inbound alerts and the notify/edit-message pair. */
   httpServer: {
     enabled: boolean;
@@ -113,6 +123,12 @@ export const config: Config = {
     // The workflow itself times out at 30 minutes, so following it longer is pointless.
     runTimeoutMs: parseInt(getEnvVar('UPDATES_RUN_TIMEOUT_MS', '1800000'), 10),
     pollMs: parseInt(getEnvVar('UPDATES_POLL_MS', '10000'), 10),
+  },
+  lab: {
+    url: getEnvVar('LAB_AGENT_URL', 'http://127.0.0.1:3016'),
+    token: getEnvVar('LAB_ASK_TOKEN', ''),
+    // Eight model turns with tool calls between them; past this the answer is not coming.
+    timeoutMs: parseInt(getEnvVar('LAB_TIMEOUT_MS', '120000'), 10),
   },
   httpServer: {
     enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',
