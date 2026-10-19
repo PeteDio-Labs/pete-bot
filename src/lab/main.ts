@@ -37,7 +37,8 @@ const pve = new ProxmoxClient(cfg.proxmox);
 const checks: Record<string, Check> = {
   async gateway() {
     // An empty body proves the bearer and spends nothing: the gateway checks the bearer
-    // first (401), then refuses the body (400) before it forwards anything.
+    // first (401), then refuses the body (400) before it forwards anything. It cannot prove
+    // the model grant or the monthly cap; only a forwarded request can, and that spends.
     const res = await fetch(`${cfg.gateway.url}/v1/messages`, {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.gateway.token}`, 'content-type': 'application/json' },

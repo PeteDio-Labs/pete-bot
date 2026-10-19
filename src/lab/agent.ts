@@ -13,8 +13,9 @@
  *
  * ⚠ THE DEADLINE MUST BEAT THE CALLER'S. pete-bot gives up on /lab after LAB_TIMEOUT_MS
  * (120 s). A loop still running after that spends the lab-map cap for an answer nobody reads
- * and holds the one-question slot, so the server passes ASK_DEADLINE_MS (100 s) and the
- * request's own abort signal, and each model call gets only the time left.
+ * and holds the one-question slot, so the server passes ASK_DEADLINE_MS (80 s) and the
+ * request's own abort signal, and each model call gets only the time left. Tool reads run
+ * to their own timeouts, so the deadline leaves room for one turn of them.
  *
  * ⚠ A TOOL ERROR REACHES THE MODEL AS AN ERROR. callTool's `{ ok: false }` becomes a
  * tool_result with `is_error: true`, and the prompt tells the model to say what failed.

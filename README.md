@@ -112,7 +112,7 @@ something must exist, returns an error, never an empty success.
 | `GET /health` | One flag per dependency: gateway (an empty probe that proves the bearer and spends nothing), proxmox, vault clone, kuma. HTTP 503 unless all are up |
 
 The loop calls Haiku through the gateway as the `lab-map` caller, with at most 8 model turns,
-1,024 output tokens per turn, and a 100-second deadline per answer, inside pete-bot's 120-second
+1,024 output tokens per turn, and an 80-second deadline per answer, inside pete-bot's 120-second
 wait. The last turn offers no tools, so the model answers from what it read. A tool error
 reaches the model marked as an error. An answer that hit a limit, was cut or came back empty
 is marked incomplete, and `/lab` shows it in yellow. One question runs at a time; a second
