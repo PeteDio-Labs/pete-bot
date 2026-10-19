@@ -401,9 +401,14 @@ describe('buildLabTools', () => {
       history: [clone],
       proxmox: { baseUrl: 'https://x:8006', tokenId: 'a@pve!b', tokenSecret: 'c', caPem: CA },
       kuma: { baseUrl: 'http://x:3001', slug: 'fault-study' },
+      secrets: { addr: 'https://x:8200', token: 't', caPem: CA },
+      deskHealthUrl: 'http://127.0.0.1:3015/health',
+      units: ['pete-bot.service', 'lab-agent.service'],
     });
     const defs = toolDefinitions(tools);
-    expect(defs.map((d) => d.name)).toEqual(['find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history']);
+    expect(defs.map((d) => d.name)).toEqual([
+      'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
+    ]);
     for (const d of defs) {
       expect(d.input_schema.type).toBe('object');
       expect(d.description.length).toBeGreaterThan(40);

@@ -123,6 +123,39 @@ the tools, any failed reads and the tokens. pete-bot runs no model for it and gi
 `lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
 configured". `lab-agent` refuses to start on a missing or malformed setting.
 
+## The lab MCP (PET-667)
+
+`lab-agent` also serves the lab tools to claude.ai project threads as an MCP server, at
+`https://pdlab.dev/mcp/lab` through the Cloudflare tunnel. It stays off until
+`LAB_ACCESS_AUD` is set, and then every setting below must be valid.
+
+| Setting | What it is |
+|---|---|
+| `LAB_MCP_HOST`, `LAB_MCP_PORT` | The LAN address and port it listens on, `192.168.50.237:3017` |
+| `LAB_MCP_PEER` | The only source it accepts, the tunnel host `192.168.50.112` |
+| `LAB_ACCESS_TEAM_DOMAIN`, `LAB_ACCESS_AUD` | The Access team and the lab app's AUD tag, for the JWT check |
+| `LAB_ACCESS_EMAILS` | The emails it admits, comma-separated |
+
+- **Transport:** Streamable HTTP, stateless. Each POST carries one JSON-RPC request:
+  `initialize`, `ping`, `tools/list` or `tools/call`. There is no stream, no session and no
+  `ask` tool, because a thread is already a model.
+- **Two checks on every request:** the source address must be the tunnel host, and the
+  `Cf-Access-Jwt-Assertion` JWT must verify against the team's keys, the app's AUD tag, the
+  issuer, its expiry and the email list. Either failure gets 403 and runs nothing.
+- **Audit:** every call logs the caller's email, the tool, its input, its outcome, its size
+  and its duration to the journal.
+
+Phase 1 adds three tools to the library for both doors:
+
+| Tool | Reads |
+|---|---|
+| `desk_status` | pete-bot's `/health`: the merge desk's mode and last poll, and the gateway state |
+| `systemd_status` | `systemctl show` for `pete-bot.service` and `lab-agent.service` only |
+| `vault_presence` | KV v2 metadata under `kv/metadata/services/`: names, versions and times, never a value or a field name |
+
+`vault_presence` uses a periodic token with read and list on that metadata path only.
+`lab-agent` renews it twice a day. While Vault is sealed, the tool says so.
+
 ## Quick start
 
 ```bash
