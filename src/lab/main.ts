@@ -42,6 +42,7 @@ const tools = buildLabTools({
   kuma: cfg.kuma,
   secrets: cfg.vault,
   deskHealthUrl: cfg.deskHealthUrl,
+  plane: cfg.plane ?? undefined,
   units: LAB_UNITS,
 });
 const pve = new ProxmoxClient(cfg.proxmox);

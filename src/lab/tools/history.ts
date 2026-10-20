@@ -2,7 +2,7 @@
  * git_history: commits in the iac repos, by path or by text (PET-668).
  *
  * It answers "what changed on X, and which PET did it". The PET key comes from the commit
- * subject, since every squash-merge here names one, until PET-672 adds a Plane read.
+ * subject, since every squash-merge here names one. plane_item (PET-672) then names those keys.
  */
 import { z } from 'zod';
 import { GitClone } from './git.js';

@@ -37,7 +37,20 @@ describe('loadLabConfig', () => {
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
     expect(cfg.vault.addr).toBe('https://192.168.50.223:8200');
     expect(cfg.mcp).toBeNull();
+    expect(cfg.plane).toBeNull();
     expect(cfg.drift).toEqual({ notifyUrl: 'http://127.0.0.1:3015/v1/notify', notifyToken: 'n'.repeat(40), at: '11:15' });
+  });
+
+  it('turns plane_item on only with a token, and defaults the rest', () => {
+    const cfg = loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'p'.repeat(40) }, () => CA);
+    expect(cfg.plane).toEqual({
+      baseUrl: 'http://192.168.50.235:8080',
+      workspace: 'petedio',
+      projectId: '2b962587-cfc8-404d-bbfc-d57c3a60e07f',
+      token: 'p'.repeat(40),
+    });
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'short' }, () => CA)).toThrow('LAB_PLANE_TOKEN');
+    expect(loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: '' }, () => CA).plane).toBeNull();
   });
 
   it('turns the MCP door on only with every Access setting', () => {
