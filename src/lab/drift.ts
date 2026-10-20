@@ -2,17 +2,15 @@
  * The nightly drift check (PET-671): live Proxmox guests against the vault's inventory and
  * host notes. It runs inside lab-agent at LAB_DRIFT_AT (11:15Z by default).
  *
- * ⚠ CODE FINDS THE DRIFT, THE MODEL ONLY WORDS IT. compareLab() is a pure function over
- * three reads. Haiku turns its findings into a short DM through the gateway, and when the
- * gateway fails the DM carries the findings as plain lines instead. A model can't invent or
- * drop a finding, because it never decides what drifted.
+ * ⚠ NO MODEL IS CALLED. compareLab() is a pure function over three reads, and the DM carries
+ * its findings as plain lines. The check costs no API spend and can't invent or drop a
+ * finding (PET-671, 2026-10-20: Pedro moved to a plan with no API credit).
  *
  * ⚠ EVERY DM SAYS WHAT THE RUN READ. "21 guests from Proxmox, 21 inventory rows, 27 host
  * notes" leads each message, so "no drift" and "read nothing" can never look alike. A run
  * with no drift logs those counts and sends nothing. A failed read sends a failure DM and
  * never reports "no drift" (PET-298, PET-374 and their kin).
  */
-import type { CallModel } from './agent.js';
 import type { Guest } from './tools/proxmox.js';
 import type { HostNote, InventoryRow } from './tools/hosts.js';
 
@@ -105,47 +103,18 @@ export function compareLab(reads: DriftReads): DriftResult {
   };
 }
 
-/** The findings as plain lines: the DM when the model is unavailable, and its input otherwise. */
+/** The findings as plain lines, one per VMID-keyed finding. */
 export function plainLines(findings: DriftFinding[]): string {
   return findings.map((f) => `- ${f.vmid}: ${f.what}`).join('\n');
 }
 
-const DRIFT_PROMPT = `You write one Discord DM to Pedro about drift between his Proxmox cluster and his vault notes.
-
-Rules:
-- Use only the findings given. Never add, drop or guess a finding.
-- Group findings by VMID. At most 10 short lines, for a phone screen. No preamble, no sign-off.
-- Proxmox is the truth; say which note or table row needs an edit.`;
-
 /** notify's message cap is 1,800 characters; the header line takes some of that. */
 const MESSAGE_CAP = 1_700;
 
-/**
- * The DM text for a run with findings. Haiku words it; when the gateway fails, the findings go
- * out as plain lines with the reason, so a model outage never hides drift.
- */
-export async function draftDriftMessage(result: DriftResult, callModel: CallModel, model: string, signal?: AbortSignal): Promise<{ text: string; worded: boolean }> {
+/** The DM text for a run with findings: the counts first, then one line per finding. */
+export function driftMessage(result: DriftResult): string {
   const header = `Drift: ${result.findings.length} finding${result.findings.length === 1 ? '' : 's'}. Read ${result.read}.`;
-  let body: string;
-  let worded = false;
-  try {
-    const res = await callModel(
-      {
-        model,
-        max_tokens: 400,
-        system: DRIFT_PROMPT,
-        messages: [{ role: 'user', content: plainLines(result.findings) }],
-      },
-      signal,
-    );
-    const text = res.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
-    if (!text || res.stop_reason === 'refusal') throw new Error(`the model returned ${text ? 'a refusal' : 'no text'}`);
-    body = text;
-    worded = true;
-  } catch (err) {
-    body = `${plainLines(result.findings)}\n(Plain list: the model was unavailable: ${(err as Error).message.slice(0, 160)})`;
-  }
-  return { text: cap(`${header}\n${body}`), worded };
+  return cap(`${header}\n${plainLines(result.findings)}\nProxmox is the truth: edit the note or table row.`);
 }
 
 function cap(text: string): string {
@@ -209,15 +178,13 @@ export function notifier(url: string, token: string, fetchImpl: typeof fetch = f
 
 type DriftKind =
   | { kind: 'clean'; read: string }
-  | { kind: 'drift'; read: string; findings: number; worded: boolean }
+  | { kind: 'drift'; read: string; findings: number }
   | { kind: 'read-failed'; error: string };
 /** `delivered` is null when the run had nothing to send. */
 export type DriftOutcome = DriftKind & { at: string; delivered: boolean | null };
 
 export interface DriftDeps {
   read: () => Promise<DriftReads>;
-  callModel: CallModel;
-  model: string;
   notify: Notify;
   log: (msg: string, fields?: Record<string, unknown>) => void;
 }
@@ -234,9 +201,8 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
     if (result.findings.length === 0) {
       outcome = { kind: 'clean', read: result.read };
     } else {
-      const draft = await draftDriftMessage(result, deps.callModel, deps.model, AbortSignal.timeout(60_000));
-      outcome = { kind: 'drift', read: result.read, findings: result.findings.length, worded: draft.worded };
-      message = draft.text;
+      outcome = { kind: 'drift', read: result.read, findings: result.findings.length };
+      message = driftMessage(result);
     }
   } catch (err) {
     const error = (err as Error).message;

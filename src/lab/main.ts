@@ -122,8 +122,6 @@ const runDrift = singleFlight(async () => {
           return { inventory: index.inventory, notes: index.notes, source: index.source, fetchError: fetchError ?? null };
         },
       }),
-    callModel,
-    model: cfg.gateway.model,
     notify,
     log,
   });

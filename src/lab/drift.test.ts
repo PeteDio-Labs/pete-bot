@@ -2,9 +2,9 @@
  * The nightly drift check (PET-671): the comparison, the DM it drafts, and a run's outcomes.
  */
 import { describe, expect, it } from 'bun:test';
-import { compareLab, draftDriftMessage, msUntil, readLab, runDriftCheck, singleFlight, type DriftReads } from './drift.js';
+import { compareLab, driftMessage, msUntil, readLab, runDriftCheck, singleFlight, type DriftReads } from './drift.js';
 import { createLabHandler } from './server.js';
-import type { CallModel, ModelResponse } from './agent.js';
+import type { ModelResponse } from './agent.js';
 import type { Guest } from './tools/proxmox.js';
 import type { HostNote, InventoryRow } from './tools/hosts.js';
 
@@ -121,44 +121,26 @@ describe('singleFlight', () => {
   });
 });
 
-describe('draftDriftMessage', () => {
+describe('driftMessage', () => {
   const result = compareLab({ ...clean, guests: [...clean.guests, guest(240, 'newbox')] });
 
-  it('leads with the counts and uses the model text', async () => {
-    let sent: Record<string, unknown> = {};
-    const call: CallModel = async (body) => {
-      sent = body;
-      return reply('240 newbox: add a row and a note.');
-    };
-    const d = await draftDriftMessage(result, call, 'claude-haiku-4-5');
-    expect(d.worded).toBe(true);
-    expect(d.text.split('\n')[0]).toBe('Drift: 2 findings. Read 3 guests from Proxmox, 2 inventory rows, 2 guest notes (petedio-vault @ abc1234).');
-    expect(d.text).toContain('240 newbox: add a row and a note.');
-    expect(sent.max_tokens).toBe(400);
-    expect(String((sent.messages as Array<{ content: string }>)[0]!.content)).toContain('240: newbox has no host note');
+  it('leads with the counts, then one plain line per finding, and calls no model', () => {
+    const text = driftMessage(result);
+    expect(text.split('\n')[0]).toBe('Drift: 2 findings. Read 3 guests from Proxmox, 2 inventory rows, 2 guest notes (petedio-vault @ abc1234).');
+    expect(text).toContain('- 240: newbox has no host note in Hosts/');
   });
 
-  it('falls back to the plain findings when the gateway fails', async () => {
-    const d = await draftDriftMessage(result, async () => {
-      throw new Error('gateway answered HTTP 429: cap reached');
-    }, 'm');
-    expect(d.worded).toBe(false);
-    expect(d.text).toContain('- 240: newbox has no host note in Hosts/');
-    expect(d.text).toContain('the model was unavailable: gateway answered HTTP 429');
-  });
-
-  it('caps the message under notify\'s limit', async () => {
-    const d = await draftDriftMessage(result, async () => reply('x'.repeat(5000)), 'm');
-    expect(d.text.length).toBeLessThanOrEqual(1700);
-    expect(d.text).toContain('cut; run /lab');
+  it('caps the message under notify\'s limit', () => {
+    const many = { read: 'r', findings: Array.from({ length: 200 }, (_, i) => ({ vmid: i, what: 'x'.repeat(40) })) };
+    const text = driftMessage(many);
+    expect(text.length).toBeLessThanOrEqual(1700);
+    expect(text).toContain('cut; run /lab');
   });
 });
 
 describe('runDriftCheck', () => {
   const deps = (read: () => Promise<DriftReads>, sent: string[], logs: Array<Record<string, unknown>>) => ({
     read,
-    callModel: (async () => reply('worded')) as CallModel,
-    model: 'm',
     notify: async (m: string) => {
       sent.push(m);
     },
@@ -192,7 +174,7 @@ describe('runDriftCheck', () => {
       throw new Error('/v1/notify answered HTTP 502');
     };
     const out = await runDriftCheck(d);
-    expect(out).toMatchObject({ kind: 'drift', findings: 2, worded: true, delivered: false });
+    expect(out).toMatchObject({ kind: 'drift', findings: 2, delivered: false });
     expect(logs[0]).toMatchObject({ msg: 'drift check could not DM', level: 'error', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
     expect(logs[1]).toMatchObject({ msg: 'drift check', delivered: false });
   });
