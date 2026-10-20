@@ -7,9 +7,10 @@
  * webhook would save. Each poll reads every open PR in DESK_REPOS and decides each one
  * from facts (src/desk/decide.ts).
  *
- * WHAT IT SAYS. A merge, a failed merge, a failed Codex queue and the two-round stop each
- * post one comment on the PR and one DM. Each is saved before it is sent and retried until
- * it lands. A PR that is waiting on CI, Codex or a thread is
+ * WHAT IT SAYS. A failed merge, a failed Codex queue and the two-round stop each post one
+ * comment on the PR and one DM, because each needs Pedro to act. A merge posts the PR
+ * comment only: a DM that needs no action is noise (PET-704). Each is saved before it is
+ * sent and retried until it lands. A PR that is waiting on CI, Codex or a thread is
  * logged and nothing else: those states are visible on the PR already.
  *
  * ⚠ A FAILURE IS NEVER SILENT, AND NEVER A MERGE. Any error reading a PR stops that PR's
@@ -502,7 +503,6 @@ export class MergeDesk {
     this.state.merged++;
     await this.report(repo, n, {
       comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,
-      dm: `**Merge desk** · merged ${this.link(repo, f)} as \`${short(result.sha)}\` ${where}. ${how}.`,
     });
     return { ok: true, message: `Merged as ${short(result.sha)} ${where}.` };
   }
