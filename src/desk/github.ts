@@ -160,6 +160,11 @@ export class GitHubApp {
     throw new Error(`${what}: more than ${maxPages * 100} items, refusing to judge a partial list`);
   }
 
+  /** One GET, parsed. The reports (PET-701) read through it; it can write nothing. */
+  async get<T>(what: string, path: string): Promise<T> {
+    return this.json<T>(what, path);
+  }
+
   private repoPath(repo: string): string {
     return `/repos/${this.opts.org}/${repo}`;
   }
