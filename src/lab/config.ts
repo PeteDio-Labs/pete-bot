@@ -44,6 +44,12 @@ const EnvSchema = z.object({
   LAB_ACCESS_TEAM_DOMAIN: z.string().regex(/^[a-z0-9-]+\.cloudflareaccess\.com$/, 'must look like <team>.cloudflareaccess.com').optional(),
   LAB_ACCESS_AUD: z.string().regex(/^[0-9a-f]{64}$/, 'must be the 64-hex AUD tag').optional(),
   LAB_ACCESS_EMAILS: z.string().optional(),
+  // plane_item (PET-672). The tool is offered only when the token is set, so a deploy that
+  // runs before the seed still starts.
+  LAB_PLANE_URL: z.string().url().default('http://192.168.50.235:8080'),
+  LAB_PLANE_WORKSPACE: z.string().min(1).default('petedio'),
+  LAB_PLANE_PROJECT_ID: z.string().uuid().default('2b962587-cfc8-404d-bbfc-d57c3a60e07f'),
+  LAB_PLANE_TOKEN: TOKEN.optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
 });
@@ -57,6 +63,8 @@ export interface LabConfig {
   clones: { vault: string; iac: string; mediaIac: string };
   vault: { addr: string; token: string; caPem: string };
   deskHealthUrl: string;
+  /** null while no Plane token is set. */
+  plane: { baseUrl: string; workspace: string; projectId: string; token: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
@@ -107,6 +115,9 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     clones: { vault: e.LAB_VAULT_CLONE, iac: e.LAB_IAC_CLONE, mediaIac: e.LAB_MEDIA_IAC_CLONE },
     vault: { addr: e.LAB_VAULT_ADDR, token: e.LAB_VAULT_TOKEN, caPem: vaultCa },
     deskHealthUrl: e.LAB_DESK_HEALTH_URL,
+    plane: e.LAB_PLANE_TOKEN
+      ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, projectId: e.LAB_PLANE_PROJECT_ID, token: e.LAB_PLANE_TOKEN }
+      : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,
   };
