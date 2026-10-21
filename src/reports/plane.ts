@@ -47,7 +47,7 @@ export interface PlaneCycle {
 
 /** The cycles around today. A Monday-to-Sunday cycle covers `today`; `previous` ended before it. */
 export type CycleRead =
-  | { ok: true; current: PlaneCycle | null; previous: PlaneCycle | null; next: PlaneCycle | null; total: number }
+  | { ok: true; current: PlaneCycle | null; previous: PlaneCycle | null; next: PlaneCycle | null; upcoming: PlaneCycle[]; dated: number; undated: number }
   | { ok: false; error: string };
 
 type Fetch = typeof fetch;
@@ -182,6 +182,11 @@ export class PlaneClient {
   }
 
   /**
+   * Cycle dates are UTC wall-clock dates in the cycle's own timezone (live Plane: start
+   * "2026-11-02T00:00:01Z", end "2026-11-08T23:59:00Z"), so the first ten characters are the
+   * day. A cycle-issues row names its work item in `issue`; a row shaped like a work item
+   * (it has `sequence_id`) is that item, and any other row is an error.
+   *
    * The cycles around `today` (YYYY-MM-DD, Eastern) and the items of the current and previous
    * one. A cycle read that fails returns an error, and the morning queue says so.
    */
@@ -199,12 +204,12 @@ export class PlaneClient {
       const next = after.length ? after.reduce((a, b) => (b.start < a.start ? b : a)) : null;
       for (const c of [current, previous]) {
         if (!c) continue;
-        const rows = await this.all<{ issue?: string | { id: string } | null; id?: string }>('reading cycle items', `cycles/${c.id}/cycle-issues/`);
-        const ids = rows.map((r) => ref(r.issue) ?? r.id ?? null);
-        if (ids.some((i) => i === null)) throw new Error(`cycle "${c.name}" has an item row with no work item id`);
+        const rows = await this.all<{ id?: string; issue?: string | { id: string } | null; sequence_id?: number }>('reading cycle items', `cycles/${c.id}/cycle-issues/`);
+        const ids = rows.map((r) => ref(r.issue) ?? (r.sequence_id !== undefined ? (r.id ?? null) : null));
+        if (ids.some((i) => i === null)) throw new Error(`cycle "${c.name}" has an item row with no work item id (a join row's own id is not the item's)`);
         c.itemIds = ids as string[];
       }
-      return { ok: true, current, previous, next, total: raw.length };
+      return { ok: true, current, previous, next, upcoming: after, dated: dated.length, undated: raw.length - dated.length };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

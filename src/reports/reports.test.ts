@@ -200,7 +200,7 @@ describe('cycle view', () => {
     item(5, { labels: ['lan'], stateName: 'Todo', stateGroup: 'unstarted' }),
   ];
   const cycles: CycleRead = {
-    ok: true, total: 2,
+    ok: true, dated: 2, undated: 0, upcoming: [],
     current: cyc('Week of 2026-10-26', '2026-10-26', '2026-11-01', ['i1', 'i2', 'i3', 'i4', 'gone']),
     previous: cyc('Week of 2026-10-19', '2026-10-19', '2026-10-25', ['i5', 'i2']),
     next: null,
@@ -232,6 +232,36 @@ describe('cycle view', () => {
     const out = buildMorning(withCycles({ ok: false, error: 'HTTP 404' }), new Map());
     expect(out).toContain('INCOMPLETE');
     expect(out).toContain('Cycles not read: HTTP 404');
+  });
+  it('says what the cycle read examined and does not drop a cycle row with only a join id', async () => {
+    const out = buildMorning(withCycles({ ...cycles, previous: cyc('Week of 2026-10-19', '2026-10-19', '2026-10-25', ['i5', 'i2', 'gone2']) } as CycleRead), new Map());
+    expect(out).toContain('2 dated cycles (current 5 items, previous 3 items)');
+    expect(out).toContain('items of that cycle are not on the board read');
+    const fetchImpl = (async (url: string | URL | Request) => String(url).includes('/cycle-issues/')
+      ? Response.json({ results: [{ id: 'join-row' }], next_page_results: false })
+      : Response.json({ results: [{ id: 'cur', name: 'W', start_date: '2026-10-26', end_date: '2026-11-01' }], next_page_results: false })) as typeof fetch;
+    expect((await new PlaneClient(plane, fetchImpl).cycles('2026-10-26')).ok).toBe(false);
+  });
+  it('does not claim the next cycle is missing when one starts on another day, and leaves no dangling dot', () => {
+    const out = buildMorning(withCycles({ ...cycles, next: cyc('Week of 2026-11-03', '2026-11-03', '2026-11-09'), upcoming: [cyc('Week of 2026-11-03', '2026-11-03', '2026-11-09')] } as CycleRead), new Map());
+    expect(out).toContain("Could not match next week's cycle");
+    expect(out).not.toContain('does not exist');
+    expect(out).not.toMatch(/ · \n/);
+  });
+  it('finds next week among all future cycles and shows an item with only a non-routing label without a dangling dot', () => {
+    const later = cyc('Week of 2026-11-09', '2026-11-09', '2026-11-15');
+    const want = cyc('Week of 2026-11-02', '2026-11-02', '2026-11-08');
+    const snapBug: Snapshot = { ...withCycles({ ...cycles, next: want, upcoming: [later, want] } as CycleRead), plane: planeOk([...items, item(6, { labels: ['bug'], stateName: 'Todo', stateGroup: 'unstarted' })]) };
+    const out = buildMorning({ ...snapBug, cycles: { ...cycles, current: { ...cycles.current!, itemIds: ['i1', 'i6'] }, next: want, upcoming: [later, want] } as CycleRead }, new Map());
+    expect(out).toContain("Next week's cycle exists: Week of 2026-11-02");
+    expect(out).toMatch(/Item 6 · Todo\n/);
+  });
+  it('reads the live cycle date strings as the cycle days and accepts work-item-shaped rows', async () => {
+    const fetchImpl = (async (url: string | URL | Request) => String(url).includes('/cycle-issues/')
+      ? Response.json({ results: [{ id: 'i7', sequence_id: 7 }], next_page_results: false })
+      : Response.json({ results: [{ id: 'nxt', name: 'Week of 2026-11-02', start_date: '2026-11-02T00:00:01Z', end_date: '2026-11-08T23:59:00Z' }], next_page_results: false })) as typeof fetch;
+    const r = await new PlaneClient(plane, fetchImpl).cycles('2026-11-03');
+    expect(r.ok && [r.current?.start, r.current?.end, r.current?.itemIds]).toEqual(['2026-11-02', '2026-11-08', ['i7']]);
   });
   it('reads cycles and their items from Plane', async () => {
     const fetchImpl = (async (url: string | URL | Request) => {

@@ -80,7 +80,7 @@ export function cycleBlock(s: Snapshot): string[] {
     const open = rows.filter(isOpenItem);
     const over = limitNote && rows.length > CYCLE_LIMIT ? ` · over the limit of ${CYCLE_LIMIT}` : '';
     out.push(`${title}: ${rows.length} · ${rows.length - open.length} done · ${open.length} open${over}`);
-    out.push(...capped(open.map((i) => `- ${itemLink(i, 50)} · ${i.stateName}${i.labels.length ? ` · ${i.labels.filter((l) => [...PEDRO_LABELS, 'cloud'].includes(l)).join(', ')}` : ''}`), 12));
+    out.push(...capped(open.map((i) => `- ${itemLink(i, 50)} · ${[i.stateName, ...i.labels.filter((l) => [...PEDRO_LABELS, 'cloud'].includes(l))].join(' · ')}`), 12));
   };
   group('Pedro (lan, mac, needs-pedro)', pedro, true);
   group('AI (cloud)', ai, true);
@@ -96,7 +96,7 @@ export function cycleBlock(s: Snapshot): string[] {
 export function rolloverBlock(s: Snapshot): string[] {
   const t = localTime(s.at);
   if (t.weekday !== 1 || !s.cycles || !s.cycles.ok || !s.plane.ok) return [];
-  const { previous, next, current } = s.cycles;
+  const { previous, next, current, upcoming } = s.cycles;
   const out: string[] = ['', '**Cycle rollover (Monday)**'];
   const left = (c: PlaneCycle): PlaneItem[] => {
     const byId = new Map((s.plane as Extract<typeof s.plane, { ok: true }>).items.map((i) => [i.id, i]));
@@ -105,11 +105,16 @@ export function rolloverBlock(s: Snapshot): string[] {
   if (!previous) out.push('- no earlier cycle found, so there is nothing to roll over');
   else {
     const open = left(previous);
+    const missing = (previous.itemIds?.length ?? 0) - (previous.itemIds ?? []).filter((id) => (s.plane as Extract<typeof s.plane, { ok: true }>).items.some((i) => i.id === id)).length;
     out.push(`- ${clip(previous.name, 40)} (${previous.start} to ${previous.end}): ${previous.itemIds?.length ?? 0} items, ${open.length} still open${current ? `. Move them to ${clip(current.name, 40)} or drop them.` : '.'}`);
     out.push(...capped(open.map((i) => `  - ${itemLink(i, 50)} · ${i.stateName}`), 15));
+    if (missing > 0) out.push(`  - ${missing} items of that cycle are not on the board read, so they are not listed`);
   }
   const want = nextMonday(t.date);
-  out.push(next && next.start === want ? `- Next week's cycle exists: ${clip(next.name, 40)}.` : `- Next week's cycle does not exist. Create \`Week of ${want}\`.`);
+  const match = upcoming.find((c) => c.start === want);
+  if (match) out.push(`- Next week's cycle exists: ${clip(match.name, 40)}.`);
+  else if (next) out.push(`- Could not match next week's cycle: Plane has ${clip(next.name, 40)} starting ${next.start}, and the report expected a cycle starting ${want}. Check it by hand.`);
+  else out.push(`- Next week's cycle does not exist. Create \`Week of ${want}\`.`);
   out.push('_This report moves and creates nothing. The transfer is a hand step until a write path exists._');
   return out;
 }
