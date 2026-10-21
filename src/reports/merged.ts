@@ -18,6 +18,7 @@ export const AUTHOR_LABELS: Record<string, string> = {
   petedillo: 'Pedro',
   'petedio-cloud-threads[bot]': 'threads bot',
   'petedio-ops-247[bot]': '247 bot',
+  'meta-muse-ai[bot]': 'Bobberto',
 };
 
 const DAY_MS = 86_400_000;
