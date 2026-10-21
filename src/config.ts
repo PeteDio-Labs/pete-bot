@@ -111,6 +111,14 @@ function getEnvVar(name: string, defaultValue?: string): string {
   return value ?? defaultValue ?? '';
 }
 
+/** A malformed value stops the process at start. NaN here would expire every hold at once. */
+function positiveInt(name: string, defaultValue: string): number {
+  const raw = getEnvVar(name, defaultValue);
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive whole number of milliseconds, got "${raw}"`);
+  return value;
+}
+
 export const config: Config = {
   discord: {
     token: getEnvVar('DISCORD_TOKEN'),
@@ -126,7 +134,7 @@ export const config: Config = {
     statePath: getEnvVar('ALERT_STATE_PATH', ''),
     maintenanceWindows: parseWindows(getEnvVar('ALERT_MAINTENANCE_WINDOWS', '')),
     // The longest nightly recovery on record is 100 s, so 5 minutes suppresses every ordinary night.
-    maintenanceDeadlineMs: parseInt(getEnvVar('ALERT_MAINTENANCE_DEADLINE_MS', '300000'), 10),
+    maintenanceDeadlineMs: positiveInt('ALERT_MAINTENANCE_DEADLINE_MS', '300000'),
     baselinePath: getEnvVar('ALERT_BASELINE_PATH', ''),
   },
   updates: {

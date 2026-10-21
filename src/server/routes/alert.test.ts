@@ -357,3 +357,96 @@ describe('a maintenance window', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── PET-492: a held DOWN must survive Discord being unavailable ──────────────
+describe('a held DOWN when Discord is unavailable', () => {
+  const originalWindows = config.alerts.maintenanceWindows;
+  const originalDeadline = config.alerts.maintenanceDeadlineMs;
+  const inWindow = (status: 0 | 1, name: string) => ({
+    heartbeat: { status, msg: 'timeout', time: '2026-09-23 06:47:00' },
+    monitor: { name },
+  });
+
+  beforeEach(() => {
+    config.alerts.maintenanceWindows = parseWindows('America/New_York 02:45 30');
+    config.alerts.maintenanceDeadlineMs = 300_000;
+    config.alerts.baselinePath = '';
+    resetBaseline();
+    reset();
+  });
+
+  afterEach(() => {
+    config.alerts.maintenanceWindows = originalWindows;
+    config.alerts.maintenanceDeadlineMs = originalDeadline;
+    reset();
+  });
+
+  async function appWith(client: never, retryMs = 20) {
+    const express = (await import('express')).default;
+    const { createAlertHandler } = await import('./alert.js');
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/alert', createAlertHandler(client, undefined, retryMs));
+    return app;
+  }
+  const post = (app: Awaited<ReturnType<typeof appWith>>, body: unknown) =>
+    request(app).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send(body as object);
+
+  it('holds and releases without touching Discord', async () => {
+    const client = { users: { fetch: vi.fn().mockRejectedValue(new Error('discord down')) } } as never;
+    const app = await appWith(client);
+    expect((await post(app, inWindow(0, 'vault')).expect(200)).body.action).toBe('held');
+    expect((await post(app, inWindow(1, 'vault')).expect(200)).body.action).toBe('released');
+    expect(heldCount()).toBe(0);
+  });
+
+  it('keeps the hold and retries when the DM fails at the deadline', async () => {
+    config.alerts.maintenanceDeadlineMs = 10;
+    const d = fakeDiscord();
+    let fail = true;
+    const client = {
+      users: {
+        fetch: vi.fn(async () => {
+          if (fail) throw new Error('discord down');
+          return (await (d.client as { users: { fetch: () => Promise<unknown> } }).users.fetch()) as never;
+        }),
+      },
+    } as never;
+    const app = await appWith(client);
+    await post(app, inWindow(0, 'vault')).expect(200);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(heldCount()).toBe(1);
+    expect(d.send).not.toHaveBeenCalled();
+
+    fail = false;
+    await new Promise((r) => setTimeout(r, 80));
+    expect(heldCount()).toBe(0);
+    expect(d.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for the client to log in before sending a restored hold', async () => {
+    const { addHold } = await import('../alertStore.js');
+    addHold({ monitor: 'plane', since: Date.now() - 600_000, deadlineAt: Date.now() - 1000, window: 'w', detail: 'timeout' });
+    const d = fakeDiscord();
+    let ready = false;
+    const client = Object.assign(d.client as object, { isReady: () => ready }) as never;
+    await appWith(client);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(d.send).not.toHaveBeenCalled();
+    expect(heldCount()).toBe(1);
+
+    ready = true;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(d.send).toHaveBeenCalledTimes(1);
+    expect(heldCount()).toBe(0);
+  });
+
+  it('reports how long the monitor has been down, not zero', async () => {
+    const { addHold } = await import('../alertStore.js');
+    addHold({ monitor: 'plane', since: Date.now() - 600_000, deadlineAt: Date.now() - 1000, window: 'w', detail: 'timeout' });
+    const d = fakeDiscord();
+    await appWith(d.client);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(JSON.stringify(d.send.mock.calls[0])).toContain('down for 10m');
+  });
+});

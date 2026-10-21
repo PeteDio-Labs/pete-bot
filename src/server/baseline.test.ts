@@ -55,3 +55,16 @@ describe('deadlineMs', () => {
     expect(stats('vault')?.n).toBe(1);
   });
 });
+
+describe('config', () => {
+  it('refuses a deadline that is not a positive whole number', async () => {
+    const saved = process.env.ALERT_MAINTENANCE_DEADLINE_MS;
+    process.env.ALERT_MAINTENANCE_DEADLINE_MS = 'abc';
+    try {
+      await expect(import(`../config.js?bad=${Date.now()}`)).rejects.toThrow(/ALERT_MAINTENANCE_DEADLINE_MS/);
+    } finally {
+      if (saved === undefined) delete process.env.ALERT_MAINTENANCE_DEADLINE_MS;
+      else process.env.ALERT_MAINTENANCE_DEADLINE_MS = saved;
+    }
+  });
+});

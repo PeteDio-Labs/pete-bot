@@ -149,8 +149,10 @@ function evictIfNeeded(): void {
 
 // ── the two things the route asks ─────────────────────────────────────────────
 
-export function recordDown(monitor: string, opts: { now?: number; windowMs?: number } = {}): DownOutcome {
+export function recordDown(monitor: string, opts: { now?: number; windowMs?: number; since?: number } = {}): DownOutcome {
   const now = opts.now ?? Date.now();
+  // A held DOWN passes the time it first failed, so the DM says how long it has been down.
+  const since = opts.since ?? now;
   const windowMs = opts.windowMs ?? config.alerts.coalesceMs;
 
   const known = batchOf.get(monitor);
@@ -166,7 +168,7 @@ export function recordDown(monitor: string, opts: { now?: number; windowMs?: num
 
   const candidate = windowMs > 0 ? openBatchWithin(now, windowMs) : undefined;
   if (candidate) {
-    candidate.monitors[monitor] = { since: now, checks: 1 };
+    candidate.monitors[monitor] = { since, checks: 1 };
     candidate.lastAddedAt = now;
     candidate.lastActivityAt = now;
     batchOf.set(monitor, candidate.id);
@@ -178,7 +180,7 @@ export function recordDown(monitor: string, opts: { now?: number; windowMs?: num
     id: newId(now),
     openedAt: now,
     lastAddedAt: now,
-    monitors: { [monitor]: { since: now, checks: 1 } },
+    monitors: { [monitor]: { since, checks: 1 } },
   };
   batches.set(batch.id, batch);
   batchOf.set(monitor, batch.id);
