@@ -107,7 +107,11 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
       case 'tools/call': {
         const name = String(msg.params?.name ?? '');
         const tool = deps.tools.get(name);
-        if (!tool) return rpcError(id, -32602, `unknown tool: ${name}`);
+        if (!tool) {
+          // A refused call is still a call: this journal is the only per-call record.
+          log('mcp call', { email: access.email, tool: name, input: msg.params?.arguments ?? {}, ok: false, rejected: 'unknown tool' });
+          return rpcError(id, -32602, `unknown tool: ${name}`);
+        }
         const started = Date.now();
         const result = await callTool(tool, msg.params?.arguments ?? {});
         log('mcp call', {
