@@ -9,7 +9,7 @@ import { AccessVerifier } from './access.js';
 import { createMcpHandler, MCP_PATH, normalizePeer } from './mcp.js';
 import { deskStatusTool, parseShow, systemdStatusTool } from './tools/local.js';
 import { callTool, LabToolError, type LabTool, type ToolResult } from './tools/types.js';
-import { VaultMetadataClient, vaultPresenceTool } from './tools/vault.js';
+import { secretsHealth, VaultMetadataClient, vaultPresenceTool } from './tools/vault.js';
 
 const CA = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
 const TEAM = 'petedio.cloudflareaccess.com';
@@ -95,6 +95,41 @@ describe('AccessVerifier', () => {
     const later = sign({ aud: [AUD], iss: `https://${TEAM}`, email: 'pedelgadillo@gmail.com', exp: now / 1000 + 300 });
     expect((await v.verify(later)).ok).toBe(true);
     expect(await v.verify(sign({ aud: [AUD] }, { alg: 'RS256', kid: 'k9' }))).toEqual({ ok: false, reason: 'JWT signed by an unknown key' });
+  });
+
+  it('admits a rotated key after an unknown kid triggers a refetch, at most once a minute', async () => {
+    const rotated = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const rotatedJwks = { keys: [{ ...rotated.publicKey.export({ format: 'jwk' }), kid: 'k2', alg: 'RS256' }] };
+    let now = NOW;
+    let answer: unknown = jwks;
+    let fetches = 0;
+    const v = new AccessVerifier({
+      teamDomain: TEAM,
+      aud: AUD,
+      emails: ['pedelgadillo@gmail.com'],
+      now: () => now,
+      fetch: (async () => {
+        fetches++;
+        return json(answer);
+      }) as unknown as typeof fetch,
+    });
+    const claims = () => ({ aud: [AUD], iss: `https://${TEAM}`, email: 'pedelgadillo@gmail.com', exp: now / 1000 + 300, nbf: now / 1000 - 10 });
+    expect((await v.verify(good())).ok).toBe(true);
+    expect(fetches).toBe(1);
+
+    // Cloudflare rotates. The new key is signed before the cache knows it, inside the throttle.
+    answer = rotatedJwks;
+    const fresh = () => sign(claims(), { alg: 'RS256', kid: 'k2' }, rotated.privateKey);
+    now += 30_000;
+    expect(await v.verify(fresh())).toEqual({ ok: false, reason: 'JWT signed by an unknown key' });
+    expect(fetches).toBe(1);
+
+    // Past the throttle the unknown kid refetches, and the rotated key is admitted.
+    now += 31_000;
+    expect((await v.verify(fresh())).ok).toBe(true);
+    expect(fetches).toBe(2);
+    // The old key left with the old answer, so a token signed by it is refused.
+    expect(await v.verify(sign(claims()))).toEqual({ ok: false, reason: 'JWT signed by an unknown key' });
   });
 
   it('refuses everything when the certs cannot be read', async () => {
@@ -294,6 +329,27 @@ describe('vault_presence', () => {
     expect(error(await callTool(refused, {}))).toContain('HTTP 403');
     const empty = vaultPresenceTool(new VaultMetadataClient({ ...cfg, fetch: routes({ 'GET /v1/kv/metadata/services/?list=true': json({ data: { keys: [] } }) }) }));
     expect(error(await callTool(empty, {}))).toContain('listed 0 secrets');
+  });
+
+  it('renews the token with renew-self, and fails on a refusal', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    const ok = new VaultMetadataClient({ ...cfg, fetch: (async (url: string, init?: RequestInit) => (seen.push({ url, init }), json({ auth: {} }))) as unknown as typeof fetch });
+    await ok.renewSelf();
+    expect(seen[0]!.url).toBe('https://192.168.50.223:8200/v1/auth/token/renew-self');
+    expect(seen[0]!.init?.method).toBe('POST');
+    expect((seen[0]!.init!.headers as Record<string, string>)['X-Vault-Token']).toBe('hvs.token');
+    const refused = new VaultMetadataClient({ ...cfg, fetch: (async () => json({}, 403)) as unknown as typeof fetch });
+    await expect(refused.renewSelf()).rejects.toThrow('renew-self answered HTTP 403');
+  });
+
+  it('reports a sealed Vault as unverified, and every other fault as a fault', async () => {
+    const list = (status: number, body: unknown = {}) =>
+      new VaultMetadataClient({ ...cfg, fetch: (async () => json(body, status)) as unknown as typeof fetch });
+    expect(await secretsHealth(list(503), null)).toBe('unverified: Vault is sealed (nightly seal)');
+    expect(await secretsHealth(list(503), 'Vault renew-self answered HTTP 503')).toContain('last renewal failed');
+    expect(await secretsHealth(list(200, { data: { keys: ['a', 'b'] } }), null)).toBe('2 entries under kv/metadata/services/');
+    await expect(secretsHealth(list(403), null)).rejects.toThrow('HTTP 403');
+    await expect(secretsHealth(list(200, { data: { keys: [] } }), null)).rejects.toThrow('listed 0 secrets');
   });
 
   it('refuses a name that could leave services/', async () => {

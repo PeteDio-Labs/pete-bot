@@ -33,6 +33,26 @@ interface Metadata {
   versions?: Record<string, { created_time?: string; deletion_time?: string; destroyed?: boolean }>;
 }
 
+/** A sealed Vault, which is the nightly state from about 02:45 until the watcher unseals it. */
+export class VaultSealedError extends LabToolError {}
+
+/**
+ * The /health line for the Vault token (PET-667). A sealed Vault reports UP with an
+ * unverified detail, because the seal is scheduled and the deploy gate waits on /health:
+ * a merge in the seal window must not fail its deploy. Every other fault still throws,
+ * and a lapsed token (403) or a hollow listing is one of those.
+ */
+export async function secretsHealth(client: VaultMetadataClient, lastRenewError: string | null): Promise<string> {
+  const renewal = lastRenewError ? `; last renewal failed: ${lastRenewError}` : '';
+  try {
+    const keys = await client.list();
+    return `${keys.length} entries under ${client.scope}${renewal}`;
+  } catch (err) {
+    if (err instanceof VaultSealedError) return `unverified: Vault is sealed (nightly seal)${renewal}`;
+    throw err;
+  }
+}
+
 export class VaultMetadataClient {
   private readonly mount: string;
   private readonly prefix: string;
@@ -56,7 +76,7 @@ export class VaultMetadataClient {
       this.cfg.timeoutMs ?? 8_000,
       `Vault ${method} ${this.mount}/metadata/${path}`,
     );
-    if (res.status === 503) throw new LabToolError('Vault is sealed (HTTP 503); it seals nightly at about 02:45 until the watcher unseals it');
+    if (res.status === 503) throw new VaultSealedError('Vault is sealed (HTTP 503); it seals nightly at about 02:45 until the watcher unseals it');
     if (res.status === 403) throw new LabToolError(`Vault refused the lab-agent token for ${this.mount}/metadata/${path} (HTTP 403)`);
     if (res.status === 404) return null;
     if (!res.ok) throw new LabToolError(`Vault ${method} ${this.mount}/metadata/${path} answered HTTP ${res.status}`);
