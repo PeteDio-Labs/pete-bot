@@ -45,6 +45,8 @@ export interface Hold {
   window: string;
   /** The probe message from the DOWN, kept for the DM if the deadline passes. */
   detail: string;
+  /** When the UP arrived after the deadline. The deadline DM is then followed by the recovery. */
+  upAt?: number;
 }
 
 export interface AlertBatch {
@@ -320,6 +322,15 @@ export function takeHold(monitor: string): Hold | undefined {
   holds.delete(monitor);
   persist();
   return hold;
+}
+
+/** Records an UP that arrived after the deadline, while the hold still waits for its DM. */
+export function markHoldUp(monitor: string, at: number): boolean {
+  const hold = holds.get(monitor);
+  if (!hold) return false;
+  hold.upAt = at;
+  persist();
+  return true;
 }
 
 export function activeHolds(): Hold[] {
