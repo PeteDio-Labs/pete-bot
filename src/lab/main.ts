@@ -11,8 +11,10 @@
  */
 import { gatewayCaller } from './agent.js';
 import { loadLabConfig, type LabConfig } from './config.js';
+import { AccessVerifier } from './access.js';
+import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
-import { buildLabTools, GitClone } from './tools/index.js';
+import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { readKuma } from './tools/kuma.js';
 
@@ -31,8 +33,32 @@ try {
 
 const vault = new GitClone('petedio-vault', cfg.clones.vault);
 const history = [new GitClone('petedio-iac', cfg.clones.iac), new GitClone('petedio-media-iac', cfg.clones.mediaIac)];
-const tools = buildLabTools({ vault, history, proxmox: cfg.proxmox, kuma: cfg.kuma });
+const tools = buildLabTools({
+  vault,
+  history,
+  proxmox: cfg.proxmox,
+  kuma: cfg.kuma,
+  secrets: cfg.vault,
+  deskHealthUrl: cfg.deskHealthUrl,
+  units: LAB_UNITS,
+});
 const pve = new ProxmoxClient(cfg.proxmox);
+const secrets = new VaultMetadataClient(cfg.vault);
+
+// Keep the periodic Vault token alive. A failure is logged and shows on /health; it is not
+// fatal, because Vault seals nightly and a sealed Vault refuses renewals until it opens.
+let lastRenewError: string | null = null;
+async function renew(): Promise<void> {
+  try {
+    await secrets.renewSelf();
+    lastRenewError = null;
+  } catch (err) {
+    lastRenewError = (err as Error).message;
+    log('vault token renewal failed', { error: lastRenewError });
+  }
+}
+void renew();
+setInterval(() => void renew(), 12 * 60 * 60_000);
 
 const checks: Record<string, Check> = {
   async gateway() {
@@ -61,6 +87,12 @@ const checks: Record<string, Check> = {
   async kuma() {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
+  async secrets() {
+    return secretsHealth(secrets, lastRenewError, async () => {
+      await renew();
+      return lastRenewError;
+    });
+  },
 };
 
 const handler = createLabHandler({
@@ -74,3 +106,18 @@ const handler = createLabHandler({
 
 const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, fetch: handler });
 log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], model: cfg.gateway.model });
+
+// The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.
+if (cfg.mcp) {
+  const mcpCfg = cfg.mcp;
+  const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails });
+  const mcpHandler = createMcpHandler({ tools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
+  const mcpServer = Bun.serve({
+    hostname: mcpCfg.host,
+    port: mcpCfg.port,
+    fetch: (req, srv) => mcpHandler(req, srv.requestIP(req)?.address),
+  });
+  log('lab MCP listening', { address: `${mcpCfg.host}:${mcpServer.port}`, peer: mcpCfg.peer, tools: [...tools.keys()] });
+} else {
+  log('lab MCP off: LAB_ACCESS_AUD is not set');
+}

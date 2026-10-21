@@ -24,6 +24,7 @@ const baseEnv = {
   LAB_VAULT_CLONE: '/var/lib/lab-agent/petedio-vault',
   LAB_IAC_CLONE: '/var/lib/lab-agent/petedio-iac',
   LAB_MEDIA_IAC_CLONE: '/var/lib/lab-agent/petedio-media-iac',
+  LAB_VAULT_TOKEN: 'hvs.' + 'v'.repeat(24),
 };
 
 describe('loadLabConfig', () => {
@@ -33,6 +34,18 @@ describe('loadLabConfig', () => {
     expect(cfg.gateway).toEqual({ url: 'http://127.0.0.1:3015/v1/llm', token: GW, model: 'claude-haiku-4-5' });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
+    expect(cfg.vault.addr).toBe('https://192.168.50.223:8200');
+    expect(cfg.mcp).toBeNull();
+  });
+
+  it('turns the MCP door on only with every Access setting', () => {
+    const aud = 'a1'.repeat(32);
+    expect(() => loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud }, () => CA)).toThrow('LAB_MCP_HOST, LAB_ACCESS_TEAM_DOMAIN, LAB_ACCESS_EMAILS must be too');
+    const cfg = loadLabConfig(
+      { ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'Pedelgadillo@gmail.com' },
+      () => CA,
+    );
+    expect(cfg.mcp).toEqual({ host: '192.168.50.237', port: 3017, peer: '192.168.50.112', teamDomain: 'petedio.cloudflareaccess.com', aud, emails: ['pedelgadillo@gmail.com'] });
   });
 
   it('refuses to start on a missing or short token, and names the field, not the value', () => {
