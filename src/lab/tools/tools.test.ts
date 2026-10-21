@@ -292,6 +292,28 @@ describe('vault notes', () => {
     ]);
   });
 
+  it('names rows above the first node heading and rows with no leading pipe', () => {
+    const text = `## Live inventory
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+| 301 | orphan | running | Core |
+
+### pve03
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+235 | plane | running | Core
+| 237 | media-dash | running | Media |
+`;
+    const out = parseInventoryChecked(text);
+    expect(out.rows.map((r) => r.vmid)).toEqual([237]);
+    expect(out.skipped).toEqual([
+      'Hosts/hosts-inventory.md above the first ### node heading: cannot read the row "| 301 | orphan | running | Core |"',
+      'Hosts/hosts-inventory.md under pve03: cannot read the row "235 | plane | running | Core"',
+    ]);
+  });
+
   describe('the drift view of a clone', () => {
     it('lists a Hosts/ file with no host frontmatter and a row it cannot read', async () => {
       const repo = await makeTestRepo();

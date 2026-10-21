@@ -78,14 +78,19 @@ export function parseInventoryChecked(text: string): { rows: InventoryRow[]; ski
       node = heading[1];
       continue;
     }
-    if (!node) continue;
     // Split on pipes that are not escaped inside a wikilink alias (`[[a\|b]]`).
     const cells = line.split(/(?<!\\)\|/).map((c) => c.trim());
-    if (cells.length < 5 || !/^\d+$/.test(cells[1] ?? '')) {
-      const isTable = line.trimStart().startsWith('|');
-      const isSeparator = /^\|[\s:|-]*$/.test(line.trim());
-      const isHeader = /^vmid$/i.test(cells[1] ?? '');
-      if (isTable && !isSeparator && !isHeader) skipped.push(`${INVENTORY} under ${node}: cannot read the row "${line.trim().slice(0, 80)}"`);
+    const trimmed = line.trim();
+    // A table line, or a line that begins like a row without its leading pipe.
+    const looksLikeRow = trimmed.startsWith('|') || /^\d+\s*\|/.test(trimmed);
+    const isSeparator = /^\|[\s:|-]*$/.test(trimmed);
+    const isHeader = /^vmid$/i.test(cells[1] ?? '') || /^vmid$/i.test(cells[0] ?? '');
+    const parsed = node !== '' && trimmed.startsWith('|') && cells.length >= 5 && /^\d+$/.test(cells[1] ?? '');
+    if (!parsed) {
+      if (looksLikeRow && !isSeparator && !isHeader) {
+        const where = node ? `under ${node}` : 'above the first ### node heading';
+        skipped.push(`${INVENTORY} ${where}: cannot read the row "${trimmed.slice(0, 80)}"`);
+      }
       continue;
     }
     const nameCell = cells[2] ?? '';
