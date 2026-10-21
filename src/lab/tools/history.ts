@@ -25,7 +25,7 @@ export function parseLog(out: string): Commit[] {
     .filter(Boolean)
     .map((line) => {
       const [sha = '', date = '', author = '', subject = ''] = line.split('\x1f');
-      return { sha: sha.slice(0, 7), date, author, subject, pet: [...new Set(subject.match(/\bPET-\d+\b/g) ?? [])] };
+      return { sha: sha.slice(0, 7), date, author, subject, pet: [...new Set(subject.match(/\b(?:PET|PDL)-\d+\b/g) ?? [])] };
     });
 }
 

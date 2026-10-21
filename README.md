@@ -83,6 +83,32 @@ ssh key that codex-248 forces to `codex-review-gate`, a pinned `known_hosts` for
 `python3` with PyYAML for the classifier. The App needs **Contents** and **Pull requests**
 write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
+## The scheduled reports (PET-701)
+
+Three reports replace the Morning queue, Hanging audit and Stale PR sweep Claude routines.
+Each one reads GitHub and Plane in code and DMs the owner. No model runs, so a report costs
+no Claude quota.
+
+| Report | When (Eastern) | What it lists |
+|---|---|---|
+| `morning` | Weekdays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item |
+| `audit` | Mondays 08:44 | Plane against GitHub: Todo items with an open PR, open items whose PRs all merged, In Review items with no PR, closed-unmerged PRs, passed target dates, PRs naming no item, and stale `verified:` dates when `REPORT_VAULT_PATH` is set |
+| `sweep` | Daily 18:47, or Mondays with `REPORT_SWEEP_WEEKLY=true` | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
+
+The first line of each report says what it read, for example "Read: 7 open and 200 recently
+closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
+that failed to read is listed under "Not read", and the title says INCOMPLETE. A run that
+cannot read GitHub or Plane at all sends a failure DM. An empty section therefore means
+"examined and found none".
+
+A report is due from its time until three hours later, once per local date, so a restart
+neither loses nor repeats one. `/report which:<name>` sends one now. `/health` carries each
+report's last result under `reports`.
+
+What a script does not do: it does not judge whether a Plane comment asks the owner for a
+decision, it does not run the live-infrastructure probes, and it cannot read the project's
+threads. Each report says so.
+
 ## The lab tool library (PET-668)
 
 `src/lab/tools/` holds the read-only tools that the lab-map agent's `/lab` loop (PET-669)

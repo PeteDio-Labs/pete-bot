@@ -16,7 +16,7 @@ import { inputJsonSchema, type LabTool } from './types.js';
 
 export { callTool, capText, inputJsonSchema, LabToolError, type LabTool, type ToolResult } from './types.js';
 export { GitClone, runGit, type GitRunner } from './git.js';
-export { VaultMetadataClient } from './vault.js';
+export { secretsHealth, VaultMetadataClient } from './vault.js';
 
 /** The units systemd_status reads on 237: the two processes this repo builds. */
 export const LAB_UNITS = ['pete-bot.service', 'lab-agent.service'] as const;
