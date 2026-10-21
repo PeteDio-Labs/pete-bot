@@ -5,10 +5,11 @@
  * read-only token for the Claude Plane user. One call resolves a state UUID to its name,
  * then one call per key reads the item. It makes no write call.
  *
- * ⚠ A KEY THAT FAILS TO READ IS REPORTED, NEVER DROPPED. A 404 is `found: false` for that key
- * and means Plane has no such item. Any other answer (401, 5xx, a body that is not a work item)
- * throws, so a dead token never reads as "these items do not exist". `source` says how many
- * keys were asked for and how many were found.
+ * ⚠ A KEY THAT FAILS TO READ IS REPORTED, NEVER DROPPED. A 404 is `found: false` for that key.
+ * A 404 cannot tell a missing item from a Plane with no identifier route, so when EVERY key
+ * answers 404 the call throws instead. Any other answer (401, 5xx, a body that is not a work
+ * item) throws too, so a dead token never reads as "these items do not exist". `source` says
+ * how many keys were asked for and how many were found.
  *
  * COST. Keys are capped at MAX_KEYS and each item is cut to three fields, so a call adds
  * a few hundred tokens to the model's context. The token is never sent anywhere but Plane.
@@ -63,8 +64,8 @@ export class PlaneClient {
     }
   }
 
-  private async stateNames(): Promise<Map<string, string>> {
-    if (this.states) return this.states;
+  private async stateNames(refresh = false): Promise<Map<string, string>> {
+    if (this.states && !refresh) return this.states;
     const body = (await this.get(`/projects/${this.cfg.projectId}/states/?per_page=100`)) as
       | { results?: Array<{ id?: string; name?: string }> }
       | Array<{ id?: string; name?: string }>;
@@ -74,6 +75,11 @@ export class PlaneClient {
     if (map.size === 0) throw new LabToolError('Plane listed 0 states for the PET project');
     this.states = map;
     return map;
+  }
+
+  /** Fill the state names once, before the parallel item reads. */
+  async warm(): Promise<void> {
+    await this.stateNames();
   }
 
   async item(key: string): Promise<PlaneItem> {
@@ -86,11 +92,13 @@ export class PlaneClient {
     const ref = (v: unknown) => (v && typeof v === 'object' ? (v as { id?: string }).id : (v as string | undefined));
     if (ref(w.project) !== this.cfg.projectId) throw new LabToolError(`Plane answered ${key} from a project other than PET`);
     const stateId = ref(w.state);
+    // A state added or renamed since the cache filled reads as a miss; refetch once.
+    const name = stateId ? (states.get(stateId) ?? (await this.stateNames(true)).get(stateId)) : undefined;
     return {
       key,
       found: true,
       title: String(w.name ?? '').slice(0, 200),
-      state: (stateId && states.get(stateId)) || 'unknown state',
+      state: name || 'unknown state',
       updated: w.updated_at,
     };
   }
@@ -111,9 +119,16 @@ export function planeItemTool(plane: PlaneClient): LabTool {
     input,
     async run({ keys }: z.infer<typeof input>) {
       const unique = [...new Set(keys)];
-      const items: PlaneItem[] = [];
-      for (const key of unique) items.push(await plane.item(key));
+      // In parallel, so ten keys cost one timeout, not ten, inside /lab's deadline. The states
+      // call goes first so the keys don't each fetch it.
+      await plane.warm();
+      const items = await Promise.all(unique.map((key) => plane.item(key)));
       const found = items.filter((i) => i.found).length;
+      if (found === 0) {
+        throw new LabToolError(
+          `Plane answered 404 for all ${unique.length} key(s). That means no such item, or Plane has no /work-items/PET-<n>/ route; check one known key before trusting it`,
+        );
+      }
       return {
         source: `${found} of ${unique.length} PET items found in Plane`,
         data: { items },

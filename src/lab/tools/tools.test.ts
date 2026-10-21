@@ -484,6 +484,25 @@ describe('plane_item', () => {
     expect(seen).toHaveLength(3);
     expect(seen.every((s) => s.url.startsWith('http://plane.test:8080/api/v1/workspaces/petedio/'))).toBe(true);
     expect(seen.every((s) => (s.init?.method ?? 'GET') === 'GET')).toBe(true);
+    expect(seen.every((s) => (s.init?.headers as Record<string, string>)['X-API-Key'] === 'plane_api_secret')).toBe(true);
+  });
+
+  it('fails when every key answers 404, since that may be a missing route', async () => {
+    const t = tool({ [`/projects/${PROJECT}/states/?per_page=100`]: states });
+    expect(error(await callTool(t, { keys: ['PET-1', 'PET-2'] }))).toContain('404 for all 2 key(s)');
+  });
+
+  it('refetches the states once when an item names a state it has not seen', async () => {
+    let calls = 0;
+    const growing: Route = () => {
+      calls++;
+      const rows = calls === 1 ? [{ id: 's1', name: 'In Review' }] : [{ id: 's1', name: 'In Review' }, { id: 's3', name: 'Blocked' }];
+      return new Response(JSON.stringify({ results: rows }), { status: 200 });
+    };
+    const t = tool({ '/states/?per_page=100': growing, '/work-items/PET-672/': item('x', 's3') });
+    const out = data(await callTool(t, { keys: ['PET-672'] }));
+    expect((out.data.items as Array<{ state: string }>)[0]!.state).toBe('Blocked');
+    expect(calls).toBe(2);
   });
 
   it('fails the call when the token is refused, never reporting items as missing', async () => {
