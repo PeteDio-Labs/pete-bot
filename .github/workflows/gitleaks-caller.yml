@@ -1,0 +1,29 @@
+# Calls the shared gitleaks scan in petedio-iac (PET-684). The rules live in
+# petedio-iac/.github/gitleaks.toml. Add a one-off exception for a false positive to this
+# repository's own .gitleaksignore (the finding's Fingerprint), never to the shared config.
+#
+# pull_request scans the commits the PR adds. The weekly schedule scans every ref.
+# The `uses` line pins the workflow to a petedio-iac commit. To take a newer scan, bump the SHA.
+name: gitleaks-caller
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 9 * * 1" # Monday 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    if: github.event_name == 'pull_request'
+    uses: PeteDio-Labs/petedio-iac/.github/workflows/gitleaks.yml@acd33544f6454f217aa7907b9fcef498d7c759c3
+    with:
+      mode: pr
+
+  full:
+    if: github.event_name != 'pull_request'
+    uses: PeteDio-Labs/petedio-iac/.github/workflows/gitleaks.yml@acd33544f6454f217aa7907b9fcef498d7c759c3
+    with:
+      mode: full

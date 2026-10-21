@@ -83,8 +83,12 @@ export function systemdStatusTool(units: readonly string[], run: SystemctlRunner
       } catch (err) {
         throw new LabToolError(`systemctl show failed: ${(err as Error).message}`);
       }
+      // Blank output parses to one empty block. That is no data, so it must not read as a unit.
+      if (!out.trim()) throw new LabToolError('systemctl show returned no output');
       const shown = parseShow(out);
       if (shown.length !== wanted.length) throw new LabToolError(`systemctl showed ${shown.length} units for ${wanted.length} asked`);
+      const ids = shown.map((x) => x.Id);
+      if (wanted.some((w, i) => ids[i] !== w)) throw new LabToolError(`systemctl showed ${JSON.stringify(ids)} for ${JSON.stringify(wanted)}`);
       return {
         source: `systemctl show for ${wanted.length} unit${wanted.length === 1 ? '' : 's'} on this host`,
         data: {

@@ -99,7 +99,10 @@ const checks: Record<string, Check> = {
     return summary;
   },
   async secrets() {
-    return secretsHealth(secrets, lastRenewError);
+    return secretsHealth(secrets, lastRenewError, async () => {
+      await renew();
+      return lastRenewError;
+    });
   },
 };
 

@@ -291,6 +291,13 @@ describe('systemd_status', () => {
     expect(error(await callTool(failing, {}))).toContain('Failed to connect to bus');
     const short = systemdStatusTool(['pete-bot.service', 'lab-agent.service'], async () => 'Id=pete-bot.service\nActiveState=active\n');
     expect(error(await callTool(short, {}))).toContain('showed 1 units for 2 asked');
+    // Empty output is no data: it must not become one unit with a blank name.
+    for (const out of ['', '\n', '\n\n']) {
+      const blank = systemdStatusTool(['pete-bot.service'], async () => out);
+      expect(error(await callTool(blank, {}))).toContain('no output');
+    }
+    const wrong = systemdStatusTool(['pete-bot.service'], async () => 'ActiveState=active\n');
+    expect(error(await callTool(wrong, {}))).toContain('systemctl showed');
   });
 
   it('refuses a unit name that is not a plain unit at build time', () => {
@@ -362,6 +369,11 @@ describe('vault_presence', () => {
     // A sealed Vault never reads as green, even with a renewal error to report as well.
     await expect(secretsHealth(list(503), 'Vault renew-self answered HTTP 503')).rejects.toThrow('SEALED');
     await expect(secretsHealth(list(200, keys), 'Vault renew-self answered HTTP 403')).rejects.toThrow('last renewal failed');
+    // A renewal that failed while sealed clears once Vault is open and the retry works.
+    let tries = 0;
+    expect(await secretsHealth(list(200, keys), 'Vault renew-self answered HTTP 503', async () => (tries++, null))).toBe('2 entries under kv/metadata/services/');
+    expect(tries).toBe(1);
+    await expect(secretsHealth(list(200, keys), 'old', async () => 'still failing')).rejects.toThrow('still failing');
     await expect(secretsHealth(list(403), null)).rejects.toThrow('HTTP 403');
     await expect(secretsHealth(list(200, { data: { keys: [] } }), null)).rejects.toThrow('listed 0 secrets');
   });
