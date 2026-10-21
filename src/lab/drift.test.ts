@@ -23,6 +23,7 @@ const clean: DriftReads = {
   inventory: [row(235, 'plane'), row(237, 'media-dash')],
   notes: [note(235), note(237), { file: 'Hosts/pve03.md', frontmatter: { type: 'host', kind: 'node', node: 'pve03' }, body: '' }],
   vaultSource: 'petedio-vault @ abc1234',
+  unparsed: [],
 };
 
 const reply = (text: string, stop = 'end_turn'): ModelResponse => ({ content: [{ type: 'text', text }], stop_reason: stop });
@@ -74,8 +75,40 @@ describe('compareLab', () => {
   });
 });
 
+describe('what the vault index could not read', () => {
+  it('reports an unreadable row or note as a finding, never as a clean lab', () => {
+    const r = compareLab({
+      ...clean,
+      unparsed: ['Hosts/hosts-inventory.md under pve03: cannot read the row "| 24x | plane | running |"', 'Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note'],
+    });
+    expect(r.findings.map((f) => `${f.vmid} ${f.what}`)).toEqual([
+      'null Hosts/hosts-inventory.md under pve03: cannot read the row "| 24x | plane | running |"',
+      'null Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note',
+    ]);
+    expect(driftMessage(r)).toContain('- vault: Hosts/oops.md has no');
+  });
+
+  it('flags a guest note it cannot place, and lets nodes and bare metal through', () => {
+    const r = compareLab({
+      ...clean,
+      notes: [
+        ...clean.notes,
+        { file: 'Hosts/noid.md', frontmatter: { type: 'host', kind: 'lxc', status: 'live' }, body: '' },
+        { file: 'Hosts/odd.md', frontmatter: { type: 'host', kind: 'container', vmid: '9' }, body: '' },
+        { file: 'Hosts/nokind.md', frontmatter: { type: 'host' }, body: '' },
+        { file: 'Hosts/pi.md', frontmatter: { type: 'host', kind: 'bare-metal' }, body: '' },
+      ],
+    });
+    expect(r.findings.map((f) => f.what)).toEqual([
+      'Hosts/noid.md is a lxc note with no numeric vmid, so it is not compared',
+      'Hosts/nokind.md has kind "(none)", not lxc, vm, bare-metal or node, so it is not compared',
+      'Hosts/odd.md has kind "container", not lxc, vm, bare-metal or node, so it is not compared',
+    ]);
+  });
+});
+
 describe('readLab', () => {
-  const vaultOk = async () => ({ inventory: clean.inventory, notes: clean.notes, source: 'petedio-vault @ abc1234', fetchError: null });
+  const vaultOk = async () => ({ inventory: clean.inventory, notes: clean.notes, unparsed: [], source: 'petedio-vault @ abc1234', fetchError: null });
 
   it('returns the three reads when both succeed', async () => {
     const r = await readLab({ guests: async () => clean.guests, vault: vaultOk });
@@ -134,7 +167,11 @@ describe('driftMessage', () => {
     const many = { read: 'r', findings: Array.from({ length: 200 }, (_, i) => ({ vmid: i, what: 'x'.repeat(40) })) };
     const text = driftMessage(many);
     expect(text.length).toBeLessThanOrEqual(1700);
-    expect(text).toContain('cut; run /lab');
+    expect(text).toMatch(/… \d+ more not shown\. All 200 are in `journalctl -u lab-agent`/);
+    // Whole lines only, and the count adds up.
+    const shown = text.split('\n').filter((l) => l.startsWith('- ')).length;
+    expect(text).toContain(`… ${200 - shown} more not shown`);
+    expect(text.endsWith('Proxmox is the truth: edit the note or table row.')).toBe(true);
   });
 });
 
@@ -145,6 +182,7 @@ describe('runDriftCheck', () => {
       sent.push(m);
     },
     log: (msg: string, f: Record<string, unknown> = {}) => logs.push({ msg, ...f }),
+    retryDelaysMs: [0, 0],
   });
 
   it('logs the counts and sends nothing when clean', async () => {
@@ -175,8 +213,37 @@ describe('runDriftCheck', () => {
     };
     const out = await runDriftCheck(d);
     expect(out).toMatchObject({ kind: 'drift', findings: 2, delivered: false });
+    // Three tries, each logged, then the outcome.
+    expect(logs.slice(0, 3).map((l) => l.attempt)).toEqual([1, 2, 3]);
     expect(logs[0]).toMatchObject({ msg: 'drift check could not DM', level: 'error', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
-    expect(logs[1]).toMatchObject({ msg: 'drift check', delivered: false });
+    expect(logs[3]).toMatchObject({ msg: 'drift check', delivered: false });
+  });
+
+  it('delivers on a retry after pete-bot restarts, and sends one DM', async () => {
+    const sent: string[] = [];
+    const logs: Array<Record<string, unknown>> = [];
+    const d = deps(async () => ({ ...clean, guests: [...clean.guests, guest(240, 'newbox')] }), sent, logs);
+    let calls = 0;
+    d.notify = async (m: string) => {
+      if (++calls < 3) throw new Error('ECONNREFUSED');
+      sent.push(m);
+    };
+    const out = await runDriftCheck(d);
+    expect(out).toMatchObject({ kind: 'drift', delivered: true });
+    expect(sent).toHaveLength(1);
+    expect(calls).toBe(3);
+  });
+
+  it('keeps every finding in the outcome and the log, past the DM cap', async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    const guests = Array.from({ length: 80 }, (_, i) => guest(300 + i, `extra-${i}`));
+    const out = await runDriftCheck(deps(async () => ({ ...clean, guests: [...clean.guests, ...guests] }), [], logs));
+    expect(out.kind).toBe('drift');
+    if (out.kind === 'drift') {
+      expect(out.lines).toHaveLength(out.findings);
+      expect(out.findings).toBeGreaterThan(80);
+    }
+    expect(logs.at(-1)).toMatchObject({ msg: 'drift check', kind: 'drift', lines: expect.any(Array) });
   });
 });
 

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { GitClone, runGit } from './git.js';
 import { gitHistoryTool, parseLog } from './history.js';
-import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory } from './hosts.js';
+import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory, parseInventoryChecked } from './hosts.js';
 import { buildLabTools, toolDefinitions } from './index.js';
 import { kumaStatusTool } from './kuma.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool } from './proxmox.js';
@@ -279,6 +279,58 @@ describe('vault notes', () => {
       { vmid: 110, name: 'qbittorrent-vpn', state: 'running', node: 'pve02', block: 'Media' },
       { vmid: 235, name: 'plane-235', state: 'running', node: 'pve03', block: 'Core' },
     ]);
+  });
+
+  it('names every table row it could not read, and skips headers, separators and other sections', () => {
+    expect(parseInventoryChecked(INVENTORY).skipped).toEqual([]);
+    const broken = INVENTORY.replace('| 235 |', '| 23x |').replace('| 110 | [[110-qbittorrent-vpn\\|qbittorrent-vpn]] | running |', '| 110 | qbit');
+    const out = parseInventoryChecked(broken);
+    expect(out.rows).toEqual([]);
+    expect(out.skipped).toEqual([
+      'Hosts/hosts-inventory.md under pve02: cannot read the row "| 110 | qbit Media — beside the disks |"',
+      expect.stringContaining('under pve03: cannot read the row "| 23x |'),
+    ]);
+  });
+
+  it('names rows above the first node heading and rows with no leading pipe', () => {
+    const text = `## Live inventory
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+| 301 | orphan | running | Core |
+
+### pve03
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+235 | plane | running | Core
+| 237 | media-dash | running | Media |
+`;
+    const out = parseInventoryChecked(text);
+    expect(out.rows.map((r) => r.vmid)).toEqual([237]);
+    expect(out.skipped).toEqual([
+      'Hosts/hosts-inventory.md above the first ### node heading: cannot read the row "| 301 | orphan | running | Core |"',
+      'Hosts/hosts-inventory.md under pve03: cannot read the row "235 | plane | running | Core"',
+    ]);
+  });
+
+  describe('the drift view of a clone', () => {
+    it('lists a Hosts/ file with no host frontmatter and a row it cannot read', async () => {
+      const repo = await makeTestRepo();
+      await repo.commit(
+        {
+          'Hosts/235-plane.md': PLANE_NOTE,
+          'Hosts/oops.md': 'no frontmatter at all\n',
+          'Hosts/hosts-inventory.md': INVENTORY.replace('| 235 |', '| 23x |'),
+        },
+        'Add notes',
+      );
+      const loaded = await new HostIndex(new GitClone('petedio-vault', repo.clone, 'main', 0)).load();
+      expect(loaded.unparsed).toEqual([
+        expect.stringContaining('Hosts/hosts-inventory.md under pve03: cannot read the row'),
+        'Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note',
+      ]);
+    });
   });
 
   describe('against a clone', () => {
