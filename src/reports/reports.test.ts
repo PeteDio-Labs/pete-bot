@@ -251,7 +251,7 @@ describe('cycle view', () => {
 });
 
 describe('buildAudit', () => {
-  const merged: ClosedPr = { repo: 'petedio-iac', number: 9, title: 'PET-8: y', url: 'https://x/9', headSha: 'd'.repeat(40), headRef: 'pet-8-y', closedAt: '2026-10-18T00:00:00Z', mergedAt: '2026-10-18T00:00:00Z', petKeys: [8], codex: null };
+  const merged: ClosedPr = { repo: 'petedio-iac', number: 9, title: 'PET-8: y', url: 'https://x/9', headSha: 'd'.repeat(40), headRef: 'pet-8-y', closedAt: '2026-10-18T00:00:00Z', mergedAt: '2026-10-18T00:00:00Z', author: 'petedillo', petKeys: [8], codex: null };
   it('finds an open PR on a Todo item, a merged PR on an open item, and an In Review item with no PR', () => {
     const out = buildAudit(snap([repoOk([pr()], [merged])], planeOk([item(670, { stateName: 'Todo', stateGroup: 'unstarted' }), item(8), item(30)])), null);
     expect(out).toMatch(/move to In Review \(1\)[\s\S]*PET-670/);
@@ -284,7 +284,7 @@ describe('buildSweep', () => {
     expect(out).toContain('Threads: not read');
   });
   it('detects a merge over a Codex "Changes requested", at the head or arriving later', () => {
-    const base: ClosedPr = { repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 'e'.repeat(40), headRef: 'x', closedAt: '', mergedAt: '2026-10-19T12:00:00Z', petKeys: [], codex: [cx('changes-requested', 'e'.repeat(40), '2026-10-19T11:58:00Z')] };
+    const base: ClosedPr = { repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 'e'.repeat(40), headRef: 'x', closedAt: '', mergedAt: '2026-10-19T12:00:00Z', author: 'petedillo', petKeys: [], codex: [cx('changes-requested', 'e'.repeat(40), '2026-10-19T11:58:00Z')] };
     expect(mergedOverCodex(base)).toContain('merged anyway');
     expect(mergedOverCodex({ ...base, codex: [cx('changes-requested', 'f'.repeat(40), '2026-10-19T12:01:00Z')] })).toContain('after the merge');
     expect(mergedOverCodex({ ...base, codex: [cx('no-blocking', 'e'.repeat(40), '2026-10-19T11:58:00Z')] })).toBeNull();

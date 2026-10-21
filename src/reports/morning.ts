@@ -23,6 +23,7 @@ import {
   type Snapshot,
 } from './snapshot.js';
 import { localTime } from './schedule.js';
+import { weeklyMergedBlock } from './merged.js';
 import type { OpenPr } from './collect.js';
 import type { PlaneCycle, PlaneItem } from './plane.js';
 
@@ -161,6 +162,7 @@ export function buildMorning(s: Snapshot, comments: CommentMap): string {
     if (needs.length > COMMENT_ITEM_CAP) lines.push(`- and ${needs.length - COMMENT_ITEM_CAP} more, comments not read`);
   }
 
+  lines.push(...weeklyMergedBlock(s));
   lines.push(...cycleBlock(s));
   lines.push(...rolloverBlock(s));
 

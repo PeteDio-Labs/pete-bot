@@ -43,13 +43,15 @@ export interface ClosedPr {
   headRef: string;
   closedAt: string;
   mergedAt: string | null;
+  /** The login that opened the PR. */
+  author: string;
   petKeys: number[];
   /** Codex reviews, read only for PRs merged inside the window. */
   codex: CodexReview[] | null;
 }
 
 export type RepoRead =
-  | { repo: string; ok: true; open: OpenPr[]; closed: ClosedPr[]; closedRead: number }
+  | { repo: string; ok: true; open: OpenPr[]; closed: ClosedPr[]; closedRead: number; closedReachBack?: string }
   | { repo: string; ok: false; error: string };
 
 interface RawPr {
@@ -75,6 +77,7 @@ export function petKeys(...texts: string[]): number[] {
 }
 
 const DAY_MS = 86_400_000;
+const CLOSED_PAGES = 2;
 
 async function guarded<T>(gaps: string[], what: string, fn: () => Promise<T>): Promise<T | null> {
   try {
@@ -128,7 +131,7 @@ export async function collectRepo(
       });
     }
     // Two pages of the most recently updated closed PRs: up to 200, newest first.
-    const rawClosed = await pagedPrs(gh, repo, org, 'state=closed&sort=updated&direction=desc', 2);
+    const rawClosed = await pagedPrs(gh, repo, org, 'state=closed&sort=updated&direction=desc', CLOSED_PAGES);
     const cutoff = now.getTime() - opts.mergedWindowDays * DAY_MS;
     const closed: ClosedPr[] = [];
     for (const r of rawClosed) {
@@ -146,11 +149,16 @@ export async function collectRepo(
         headRef: r.head.ref,
         closedAt: r.closed_at ?? '',
         mergedAt: r.merged_at ?? null,
+        author: r.user?.login ?? '',
         petKeys: petKeys(r.title, r.head.ref),
         codex,
       });
     }
-    return { repo, ok: true, open, closed, closedRead: rawClosed.length };
+    // The listing is newest-updated first and capped. When it hit the cap, a PR merged before the
+    // oldest `updated_at` read may be missing, so a count that reaches back that far is a floor.
+    const capped = rawClosed.length >= CLOSED_PAGES * 100;
+    const reachBack = capped ? rawClosed[rawClosed.length - 1]?.updated_at : undefined;
+    return { repo, ok: true, open, closed, closedRead: rawClosed.length, ...(reachBack ? { closedReachBack: reachBack } : {}) };
   } catch (err) {
     return { repo, ok: false, error: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
   }
