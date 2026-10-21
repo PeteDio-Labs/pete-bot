@@ -15,7 +15,7 @@ something to tell the owner. It adds no incident state.
 for the rest (PET-645).
 
 It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
-and plain-DM questions went in PET-518, when Bobbert took over asking mtrace with its own
+and plain-DM questions went in PET-518, when Muse took over asking mtrace with its own
 token. The bot reads no messages, so it requests no privileged intent.
 
 ## It is a user-installed app, not a server bot
@@ -384,7 +384,7 @@ src/
 An Ollama tool-calling bot for Mission Control, ArgoCD and Kubernetes. All three are torn
 down, so the tool layer, the SSE event stream, the plan-expiry sweep and the HMAC-gated
 Mission Control routes are gone with them. It then forwarded `/ask` and plain DMs to mtrace
-until PET-518 handed that job to Bobbert.
+until PET-518 handed that job to Muse.
 
 ## Deployment
 
