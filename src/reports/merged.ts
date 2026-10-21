@@ -51,11 +51,11 @@ export function countWeek(repos: RepoRead[], start: string): WeekCount {
   let total = 0;
   for (const r of repos) {
     if (!r.ok) continue;
-    if (r.closedReachBack && localTime(new Date(r.closedReachBack)).date > start) floorRepos.push(r.repo);
+    if (r.closedReachBack && localTime(new Date(r.closedReachBack)).date >= start) floorRepos.push(r.repo);
     for (const p of r.closed.filter(week)) {
       total++;
       byRepo.set(r.repo, (byRepo.get(r.repo) ?? 0) + 1);
-      const who = AUTHOR_LABELS[p.author] ?? (p.author || 'unknown');
+      const who = (Object.hasOwn(AUTHOR_LABELS, p.author) ? AUTHOR_LABELS[p.author] : undefined) ?? (p.author || 'unknown');
       byAuthor.set(who, (byAuthor.get(who) ?? 0) + 1);
     }
   }
@@ -72,7 +72,12 @@ export function weeklyMergedBlock(s: Snapshot): string[] {
   const weeks = [thisWeek, addDays(thisWeek, -7)].map((w) => countWeek(s.repos, w));
   const out: string[] = ['', `**Merged PRs per week** (Monday to Sunday, Eastern; ${read.length} of ${s.repos.length} repos read)`];
   weeks.forEach((w, i) => {
-    const floor = w.floorRepos.length ? ` · at least: the read of ${w.floorRepos.map((r) => r.replace(/^petedio-/, '')).join(', ')} stopped before this week` : '';
+    const unread = s.repos.length - read.length;
+    const floorWhy = [
+      ...(unread ? [`${unread} repos were not read`] : []),
+      ...(w.floorRepos.length ? [`the read of ${w.floorRepos.map((r) => r.replace(/^petedio-/, '')).join(', ')} stopped before this week`] : []),
+    ];
+    const floor = floorWhy.length ? ` · at least: ${floorWhy.join('; ')}` : '';
     out.push(`- ${i === 0 ? 'This week so far' : 'Last week'} (from ${w.start}): **${w.total}**${floor}`);
     if (w.total > 0) {
       out.push(`  - by repo: ${tally(w.byRepo, 'petedio-')}`);
