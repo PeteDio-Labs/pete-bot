@@ -24,6 +24,8 @@ import { size as openIncidents } from '../server/alertStore.js';
 import { askTotal, askDuration } from '../metrics/index.js';
 import { getDesk } from '../desk/index.js';
 import { BUTTON_PREFIX, type MergeDesk } from '../desk/desk.js';
+import { getReports } from '../reports/index.js';
+import { REPORT_NAMES, type ReportName } from '../reports/settings.js';
 
 const COLOR_OK = 0x57f287;
 const COLOR_WARN = 0xfee75c;
@@ -235,6 +237,20 @@ async function handleLab(interaction: ChatInputCommandInteraction, ask: typeof a
   await interaction.editReply({ embeds: [labEmbed(question, outcome)] });
 }
 
+/** /report (PET-701): runs one report now. The report arrives as a DM; this answer only confirms it. */
+async function handleReport(interaction: ChatInputCommandInteraction): Promise<void> {
+  const which = interaction.options.getString('which', true) as ReportName;
+  logger.info(`/report ${which}`);
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const reports = getReports();
+  if (!reports || !(REPORT_NAMES as readonly string[]).includes(which)) {
+    await interaction.editReply({ content: 'The scheduled reports are off on this host (REPORTS_MODE is empty or misconfigured).' });
+    return;
+  }
+  const sent = await reports.run(which, { markRun: false });
+  await interaction.editReply({ content: sent ? `Sent the ${which} report to your DMs.` : `The ${which} report was built but the DM did not send. Check the logs.` });
+}
+
 /**
  * A merge desk button (PET-645). The owner check comes first, then the desk reads every
  * fact again before it merges anything. The answer is ephemeral; the desk's own DM and
@@ -299,6 +315,7 @@ export function createInteractionHandler(deps: InteractionDeps = {}) {
     if (interaction.commandName === 'status') await handleStatus(interaction);
     else if (interaction.commandName === 'update') await handleUpdate(interaction, run);
     else if (interaction.commandName === 'lab') await handleLab(interaction, lab);
+    else if (interaction.commandName === 'report') await handleReport(interaction);
   };
 }
 
