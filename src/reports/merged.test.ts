@@ -30,9 +30,9 @@ describe('countWeek', () => {
     expect(Object.fromEntries(w.byRepo)).toEqual({ 'petedio-iac': 2, 'pete-bot': 1 });
     expect(Object.fromEntries(w.byAuthor)).toEqual({ Pedro: 1, 'threads bot': 1, someone: 1 });
   });
-  it('names meta-muse-ai[bot] Bobberto, and treats an inherited key as an unknown login', () => {
+  it('names meta-muse-ai[bot] Muse, and treats an inherited key as an unknown login', () => {
     const w = countWeek([repo('r', [closed(1, '2026-10-20T12:00:00Z', 'meta-muse-ai[bot]'), closed(2, '2026-10-20T12:00:00Z', 'constructor')])], '2026-10-19');
-    expect(Object.fromEntries(w.byAuthor)).toEqual({ Bobberto: 1, constructor: 1 });
+    expect(Object.fromEntries(w.byAuthor)).toEqual({ Muse: 1, constructor: 1 });
   });
   it('marks a repo whose read was cut off inside the week as a floor', () => {
     const w = countWeek([repo('petedio-iac', [], { closedReachBack: '2026-10-21T00:00:00Z' })], '2026-10-19');

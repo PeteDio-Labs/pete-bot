@@ -2,7 +2,7 @@
 // which starts a media update through GitHub Actions (PET-395), and /lab, which asks the
 // lab-map agent (PET-669). /report sends a scheduled report now (PET-701).
 //
-// /ask went in PET-518: Bobbert asks mtrace with its own token now. /help went with the
+// /ask went in PET-518: Muse asks mtrace with its own token now. /help went with the
 // tool layer it documented — it listed mission_control, web_search and calculate, none of
 // which exist here now.
 import { statusCommand } from './status.js';
