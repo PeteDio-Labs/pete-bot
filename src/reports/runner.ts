@@ -14,7 +14,7 @@ import { collectGithub, type GithubReads } from './collect.js';
 import { buildAudit } from './audit.js';
 import { buildMorning, COMMENT_ITEM_CAP, type CommentMap } from './morning.js';
 import { buildSweep } from './sweep.js';
-import { PlaneClient, type PlaneRead } from './plane.js';
+import { PlaneClient, type CycleRead, type PlaneRead } from './plane.js';
 import { dueReports, localTime } from './schedule.js';
 import { REPORT_NAMES, type ReportName, type ReportSettings } from './settings.js';
 import { isOpenItem, type Snapshot } from './snapshot.js';
@@ -43,7 +43,7 @@ export interface ReportsStatus {
   last: Partial<Record<ReportName, LastRun>>;
 }
 
-type PlaneReader = Pick<PlaneClient, 'read' | 'lastComment'>;
+type PlaneReader = Pick<PlaneClient, 'read' | 'lastComment' | 'cycles'>;
 
 export interface RunnerDeps {
   settings: ReportSettings;
@@ -119,7 +119,7 @@ export class ReportRunner {
     if (this.busy) return;
     this.busy = true;
     try {
-      const due = dueReports(this.now(), this.dates, this.d.settings.enabled, this.d.settings.sweepWeekly);
+      const due = dueReports(this.now(), this.dates, this.d.settings.enabled);
       for (const name of due) await this.run(name, { markRun: true });
     } finally {
       this.busy = false;
@@ -164,8 +164,11 @@ export class ReportRunner {
     const s = this.d.settings;
     const plane: PlaneRead = this.d.plane ? await this.d.plane.read() : { ok: false, error: 'PLANE_API_KEY is empty on this host' };
     const repos = await collectGithub(this.d.github, s.org, s.repos, at);
-    const snap: Snapshot = { at, repos, plane };
     if (!repos.some((r) => r.ok) && !plane.ok) throw new Error('neither GitHub nor Plane could be read');
+    // Only the morning queue shows the cycle. A failed read becomes a gap in that report, not a throw.
+    const cycles: CycleRead | undefined =
+      name === 'morning' && plane.ok && this.d.plane ? await this.d.plane.cycles(localTime(at).date) : undefined;
+    const snap: Snapshot = { at, repos, plane, cycles };
     switch (name) {
       case 'morning': {
         const comments: CommentMap = new Map();
