@@ -362,7 +362,7 @@ been deleted, so a working command and a broken one scraped identically.
 | `pete_bot_ask_duration_seconds` | Histogram | `surface` | Command to rendered result |
 | `pete_bot_alert_dms_total` | Counter | `action`, `status` | Alerts delivered, sent vs edited |
 | `pete_bot_alert_batches_open` | Gauge | — | Incidents currently open |
-| `pete_bot_alert_decisions_total` | Counter | `decision`, `outcome` | Maintenance-window decisions: held, released or deadline |
+| `pete_bot_alert_decisions_total` | Counter | `decision`, `outcome` | Maintenance-window decisions: `decision` held, released or deadline; `outcome` pending, recovered, alerted, recovered_late or error |
 
 ## Project structure
 

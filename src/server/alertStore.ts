@@ -45,6 +45,10 @@ export interface Hold {
   window: string;
   /** The probe message from the DOWN, kept for the DM if the deadline passes. */
   detail: string;
+  /** When the UP arrived after the deadline. The deadline DM is then followed by the recovery. */
+  upAt?: number;
+  /** The deadline DM went out. A retry then only closes the incident; it never sends the DOWN again. */
+  announced?: boolean;
 }
 
 export interface AlertBatch {
@@ -320,6 +324,24 @@ export function takeHold(monitor: string): Hold | undefined {
   holds.delete(monitor);
   persist();
   return hold;
+}
+
+/** Records an UP that arrived after the deadline, while the hold still waits for its DM. */
+export function markHoldUp(monitor: string, at: number | undefined): boolean {
+  const hold = holds.get(monitor);
+  if (!hold) return false;
+  if (at === undefined) delete hold.upAt;
+  else hold.upAt = at;
+  persist();
+  return true;
+}
+
+/** The deadline DM exists. Persisted, so a retry after a failure never sends the DOWN twice. */
+export function markHoldAnnounced(monitor: string): void {
+  const hold = holds.get(monitor);
+  if (!hold) return;
+  hold.announced = true;
+  persist();
 }
 
 export function activeHolds(): Hold[] {
