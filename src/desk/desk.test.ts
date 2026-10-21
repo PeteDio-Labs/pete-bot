@@ -135,6 +135,7 @@ let gh: FakeGitHub;
 let dms: { content: string; buttons?: Button[] }[];
 let queued: string[];
 let queueOk: boolean;
+let queueOutput: string;
 let dmFailures: number;
 
 function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memory:')) {
@@ -142,7 +143,7 @@ function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memo
     ...settings().codex,
     spawn: async (argv) => {
       queued.push(argv.at(-1)!);
-      return queueOk ? { exitCode: 0, output: '' } : { exitCode: 255, output: 'ssh: no route to host' };
+      return queueOk ? { exitCode: 0, output: '' } : { exitCode: 255, output: queueOutput };
     },
   });
   return new MergeDesk({
@@ -173,6 +174,7 @@ beforeEach(() => {
   dms = [];
   queued = [];
   queueOk = true;
+  queueOutput = 'ssh: no route to host';
   rulesGuardDesk = true;
   dmFailures = 0;
 });
@@ -274,6 +276,22 @@ describe('Codex', () => {
     expect(gh.comments).toHaveLength(1);
     expect(gh.comments[0]).toContain('exit 255');
     expect(gh.merges).toEqual([]);
+  });
+
+  it('sends one DM for a quota refusal, and still comments on every head', async () => {
+    gh.reviews = [];
+    queueOk = false;
+    queueOutput = 'OpenAI reports the limit reached: rate_limit_reached';
+    const desk = makeDesk();
+    await desk.poll();
+    await settle(desk);
+    gh.pull.headSha = 'e'.repeat(40);
+    await desk.poll();
+    await settle(desk);
+    expect(queued).toHaveLength(2);
+    expect(gh.comments).toHaveLength(2);
+    expect(dms).toHaveLength(1);
+    expect(dms[0]!.content).toContain('out of quota');
   });
 
   it('treats a run that exits 0 with no review as a failure', async () => {
