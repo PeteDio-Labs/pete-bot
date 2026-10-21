@@ -18,6 +18,10 @@
  *     new outage arrive silently — the precise failure being fixed here.
  *   - A batch closes when every monitor in it has recovered, freeing those names to
  *     open a fresh, notifying message next time.
+ *   - A recovery for a monitor whose DOWN was never seen folds into the open or most
+ *     recent batch inside the window, or opens one batch that later orphans share (PET-436).
+ *   - A DOWN that starts inside a maintenance window is held, not sent (PET-492). A hold
+ *     is persisted beside the batches, and the route owns the deadline timer.
  */
 import { existsSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
 import { config } from '../config.js';
@@ -27,6 +31,20 @@ export interface MonitorState {
   since: number;
   checks: number;
   recoveredAt?: number;
+  /** A recovery whose DOWN this process never saw (PET-436). It has no outage length. */
+  unseenDown?: boolean;
+  /** Extra line under the monitor, set when a held DOWN passed its deadline (PET-492). */
+  note?: string;
+}
+
+/** A DOWN held inside a maintenance window, waiting for its UP or its deadline. */
+export interface Hold {
+  monitor: string;
+  since: number;
+  deadlineAt: number;
+  window: string;
+  /** The probe message from the DOWN, kept for the DM if the deadline passes. */
+  detail: string;
 }
 
 export interface AlertBatch {
@@ -36,6 +54,8 @@ export interface AlertBatch {
   openedAt: number;
   /** When a monitor last JOINED. The coalescing window measures storm growth. */
   lastAddedAt: number;
+  /** When a monitor last joined, recovered or folded in. Orphan recoveries measure the window from here. */
+  lastActivityAt?: number;
   monitors: Record<string, MonitorState>;
 }
 
@@ -55,6 +75,9 @@ const MAX_BATCHES = 5000;
 
 let batches = new Map<string, AlertBatch>();
 let batchOf = new Map<string, string>();
+let holds = new Map<string, Hold>();
+/** Batches that have fully recovered, kept for the window so late orphan recoveries can edit them. Memory only. */
+let recent = new Map<string, AlertBatch>();
 let persistWarned = false;
 
 function statePath(): string {
@@ -74,7 +97,7 @@ function persist(): void {
     // Write-then-rename: a crash mid-write leaves the previous state intact rather
     // than a half-written file that fails to parse on the next boot.
     const tmp = `${path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, batches: [...batches.values()] }), 'utf8');
+    writeFileSync(tmp, JSON.stringify({ version: 1, batches: [...batches.values()], holds: [...holds.values()] }), 'utf8');
     renameSync(tmp, path);
   } catch (err) {
     // Losing the file costs edit-in-place after a restart. It must never cost an alert,
@@ -90,19 +113,21 @@ function load(): void {
   const path = statePath();
   if (!path || !existsSync(path)) return;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { batches?: AlertBatch[] };
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { batches?: AlertBatch[]; holds?: Hold[] };
     for (const batch of parsed.batches ?? []) {
       batches.set(batch.id, batch);
       for (const [monitor, state] of Object.entries(batch.monitors)) {
         if (!state.recoveredAt) batchOf.set(monitor, batch.id);
       }
     }
-    logger.info(`[alertStore] restored ${batches.size} open alert batches from ${path}`);
+    for (const hold of parsed.holds ?? []) holds.set(hold.monitor, hold);
+    logger.info(`[alertStore] restored ${batches.size} open alert batches and ${holds.size} holds from ${path}`);
   } catch (err) {
     // A corrupt file must not stop the process that carries the alerts.
     logger.warn(`[alertStore] ignoring unreadable ${path}: ${err instanceof Error ? err.message : String(err)}`);
     batches = new Map();
     batchOf = new Map();
+    holds = new Map();
   }
 }
 
@@ -124,8 +149,10 @@ function evictIfNeeded(): void {
 
 // ── the two things the route asks ─────────────────────────────────────────────
 
-export function recordDown(monitor: string, opts: { now?: number; windowMs?: number } = {}): DownOutcome {
+export function recordDown(monitor: string, opts: { now?: number; windowMs?: number; since?: number } = {}): DownOutcome {
   const now = opts.now ?? Date.now();
+  // A held DOWN passes the time it first failed, so the DM says how long it has been down.
+  const since = opts.since ?? now;
   const windowMs = opts.windowMs ?? config.alerts.coalesceMs;
 
   const known = batchOf.get(monitor);
@@ -141,8 +168,9 @@ export function recordDown(monitor: string, opts: { now?: number; windowMs?: num
 
   const candidate = windowMs > 0 ? openBatchWithin(now, windowMs) : undefined;
   if (candidate) {
-    candidate.monitors[monitor] = { since: now, checks: 1 };
+    candidate.monitors[monitor] = { since, checks: 1 };
     candidate.lastAddedAt = now;
+    candidate.lastActivityAt = now;
     batchOf.set(monitor, candidate.id);
     persist();
     return { batch: candidate, action: 'edit' };
@@ -152,7 +180,7 @@ export function recordDown(monitor: string, opts: { now?: number; windowMs?: num
     id: newId(now),
     openedAt: now,
     lastAddedAt: now,
-    monitors: { [monitor]: { since: now, checks: 1 } },
+    monitors: { [monitor]: { since, checks: 1 } },
   };
   batches.set(batch.id, batch);
   batchOf.set(monitor, batch.id);
@@ -183,20 +211,130 @@ export function recordUp(monitor: string, opts: { now?: number } = {}): UpOutcom
 
   const state = batch.monitors[monitor]!;
   state.recoveredAt = now;
+  batch.lastActivityAt = now;
   batchOf.delete(monitor);
 
   const closed = Object.values(batch.monitors).every((m) => m.recoveredAt !== undefined);
-  if (closed) batches.delete(batch.id);
+  if (closed) {
+    batches.delete(batch.id);
+    recent.set(batch.id, batch);
+  }
   persist();
 
   return { batch, action: 'edit', closed };
 }
 
+/**
+ * A recovery for a monitor whose DOWN this process never saw (PET-436). On 2026-09-15 four
+ * monitors recovered with no DOWN on record and each posted its own DM beside the incident
+ * message. Fold it into the newest batch, open or fully recovered, that was active inside the
+ * window and has a message to edit. With none, open a batch holding only this recovery, so the
+ * next orphan in the burst folds into it: one message per burst, not one per monitor.
+ */
+export function foldOrphanUp(monitor: string, opts: { now?: number; windowMs?: number } = {}): { batch: AlertBatch; isNew: boolean } {
+  const now = opts.now ?? Date.now();
+  const windowMs = opts.windowMs ?? config.alerts.coalesceMs;
+  prune(now, windowMs);
+
+  let best: AlertBatch | undefined;
+  if (windowMs > 0) {
+    for (const batch of [...batches.values(), ...recent.values()]) {
+      if (!batch.messageId) continue;
+      if (now - (batch.lastActivityAt ?? batch.lastAddedAt) > windowMs) continue;
+      if (!best || (batch.lastActivityAt ?? batch.lastAddedAt) > (best.lastActivityAt ?? best.lastAddedAt)) best = batch;
+    }
+  }
+  if (best) {
+    best.monitors[monitor] = { since: now, checks: 0, recoveredAt: now, unseenDown: true };
+    best.lastActivityAt = now;
+    persist();
+    return { batch: best, isNew: false };
+  }
+
+  const batch: AlertBatch = {
+    id: newId(now),
+    openedAt: now,
+    lastAddedAt: now,
+    lastActivityAt: now,
+    monitors: { [monitor]: { since: now, checks: 0, recoveredAt: now, unseenDown: true } },
+  };
+  recent.set(batch.id, batch);
+  return { batch, isNew: true };
+}
+
+function prune(now: number, windowMs: number): void {
+  for (const [id, batch] of recent) {
+    if (now - (batch.lastActivityAt ?? batch.lastAddedAt) > windowMs) recent.delete(id);
+  }
+  while (recent.size > 100) {
+    const oldest = recent.keys().next().value;
+    if (!oldest) break;
+    recent.delete(oldest);
+  }
+}
+
 export function attachMessage(batchId: string, channelId: string, messageId: string): void {
-  const batch = batches.get(batchId);
+  const batch = batches.get(batchId) ?? recent.get(batchId);
   if (!batch) return;
   batch.channelId = channelId;
   batch.messageId = messageId;
+  persist();
+}
+
+// ── maintenance holds (PET-492) ───────────────────────────────────────────────
+
+/**
+ * Undoes a recordDown whose DM never went out, so the monitor is back to "down, unannounced".
+ * Returns false when the monitor already recovered in the meantime, and the caller must not
+ * restore anything for it.
+ */
+export function discardDown(monitor: string): boolean {
+  const id = batchOf.get(monitor);
+  const batch = id ? batches.get(id) : undefined;
+  if (!id || !batch) return false;
+  delete batch.monitors[monitor];
+  batchOf.delete(monitor);
+  if (Object.keys(batch.monitors).length === 0 && !batch.messageId) batches.delete(id);
+  persist();
+  return true;
+}
+
+/** True when a DOWN for this monitor is already inside an open batch, so it edits as always. */
+export function isInBatch(monitor: string): boolean {
+  return batchOf.has(monitor);
+}
+
+export function getHold(monitor: string): Hold | undefined {
+  return holds.get(monitor);
+}
+
+export function addHold(hold: Hold): void {
+  holds.set(hold.monitor, hold);
+  persist();
+}
+
+/** Removes and returns the hold: for an UP before the deadline, or when the deadline passes. */
+export function takeHold(monitor: string): Hold | undefined {
+  const hold = holds.get(monitor);
+  if (!hold) return undefined;
+  holds.delete(monitor);
+  persist();
+  return hold;
+}
+
+export function activeHolds(): Hold[] {
+  return [...holds.values()];
+}
+
+export function heldCount(): number {
+  return holds.size;
+}
+
+/** Marks a monitor so the DM and every later edit say why the alert was late. */
+export function setNote(batchId: string, monitor: string, note: string): void {
+  const state = batches.get(batchId)?.monitors[monitor];
+  if (!state) return;
+  state.note = note;
   persist();
 }
 
@@ -214,6 +352,8 @@ export function size(): number {
 export function restoreFromDisk(): void {
   batches = new Map();
   batchOf = new Map();
+  holds = new Map();
+  recent = new Map();
   persistWarned = false;
   load();
 }
@@ -221,6 +361,8 @@ export function restoreFromDisk(): void {
 export function reset(): void {
   batches = new Map();
   batchOf = new Map();
+  holds = new Map();
+  recent = new Map();
   persistWarned = false;
   const path = statePath();
   if (path && existsSync(path)) {
