@@ -154,18 +154,26 @@ configured". `lab-agent` refuses to start on a missing or malformed setting.
 `lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the
 host notes' frontmatter, once a day at `LAB_DRIFT_AT` (11:15 UTC by default). Code finds the
 drift: a guest with no row or no note, a row or a note naming a guest Proxmox lacks, and a
-node, state or name that disagrees. Haiku only words the findings into a DM, through the
-gateway as the `lab-map` caller. When the gateway fails, the DM carries the findings as plain
-lines.
+node, state or name that disagrees. The check calls no model: the DM is the header below
+plus one plain line per finding.
 
 - Every DM leads with what the run read, such as `21 guests from Proxmox, 21 inventory rows,
   27 guest notes (petedio-vault @ 1a2b3c4)`.
 - A clean run logs those counts and sends nothing.
 - A failed read sends a failure DM. It never reports "no drift".
+- A vault file or table row the check cannot read is a finding, listed first as `vault:`. A
+  `Hosts/` file with no `type: host`, an inventory row that does not parse (including one above
+  the first `###` node heading or with no leading pipe), and a guest note
+  with no numeric `vmid` or an unknown `kind` are all reported, never skipped.
+- A DM that pete-bot refuses is tried three times, with waits of 15 s and 60 s, so a restart at
+  11:15 UTC does not lose the night. `/health` reports `drift` down if all three fail.
+- The DM holds about 1,700 characters. Past that it drops whole lines and says how many. Every
+  finding is in the run's `drift check` log line (`journalctl -u lab-agent`) and in the
+  `lines` field of the `POST /v1/drift/run` answer.
 
 The DM goes through pete-bot's `/v1/notify` with `LAB_NOTIFY_TOKEN`. To run the check
 without waiting for the schedule, `POST /v1/drift/run` with the ask bearer; it DMs exactly
-as the nightly run does.
+as the nightly run does, and returns the outcome with every finding.
 
 ## The lab MCP (PET-667)
 
