@@ -188,6 +188,21 @@ describe('Ledger', () => {
     expect(monthOf(oct)).toBe('2026-10');
   });
 
+  it('totals one UTC month per caller and model for the metrics', () => {
+    const l = new Ledger(':memory:');
+    const oct = new Date('2026-10-20T12:00:00Z');
+    const nov = new Date('2026-11-01T00:00:00Z');
+    l.record(entry('lab-agent', 100), oct);
+    l.record(entry('lab-agent', 50), oct);
+    l.record(entry('pm-agent', 7), oct);
+    l.record(entry('lab-agent', 999), nov);
+    const totals = l.monthTotals(oct);
+    expect(totals).toHaveLength(2);
+    expect(totals.find((t) => t.caller === 'lab-agent')?.costNanoUsd).toBe(150);
+    expect(totals.find((t) => t.caller === 'pm-agent')?.costNanoUsd).toBe(7);
+    expect(l.monthTotals(new Date('2026-12-01T00:00:00Z'))).toEqual([]);
+  });
+
   it('keeps the spend across a restart', () => {
     dir = mkdtempSync(join(tmpdir(), 'ledger-'));
     const path = join(dir, 'llm-ledger.sqlite');

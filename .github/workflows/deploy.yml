@@ -76,7 +76,8 @@ jobs:
           caCertificate: ${{ steps.vault_ca.outputs.b64 }}
           exportToken: false
           secrets: |
-            kv/data/iac/lxc-ssh private_key | LXC_SSH_KEY ;
+            kv/data/services/pete-bot deploy_ssh_private_key | LXC_SSH_KEY ;
+            kv/data/services/pete-bot deploy_ssh_public_key | PB_CD_PUBLIC_KEY ;
             kv/data/services/pete-bot discord_token | PB_TOKEN ;
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
             kv/data/services/pete-bot owner_user_id | PB_OWNER ;
@@ -275,6 +276,9 @@ jobs:
               "lab_agent_pve_token_secret": os.environ.get("LAB_PVE_SECRET", ""),
               "lab_agent_pve_endpoint":     os.environ.get("LAB_PVE_ENDPOINT", ""),
               "lab_agent_pve_ca_pem":       os.environ.get("LAB_PVE_CA", ""),
+              # The public half of the key above. The play authorizes it for root on 237 and
+              # drops any older pete-bot-cd key (PET-724).
+              "pete_bot_cd_public_key":       os.environ["PB_CD_PUBLIC_KEY"],
               "ansible_ssh_private_key_file": "/key",
           }, open(os.environ["OUT"], "w"))
           PY
