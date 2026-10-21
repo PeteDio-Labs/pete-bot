@@ -112,10 +112,12 @@ function getEnvVar(name: string, defaultValue?: string): string {
 }
 
 /** A malformed value stops the process at start. NaN here would expire every hold at once. */
-function positiveInt(name: string, defaultValue: string): number {
-  const raw = getEnvVar(name, defaultValue);
+function positiveInt(name: string, defaultValue: string, max = 24 * 24 * 3600 * 1000): number {
+  const raw = getEnvVar(name, defaultValue).trim() || defaultValue;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive whole number of milliseconds, got "${raw}"`);
+  if (!Number.isInteger(value) || value <= 0 || value > max) {
+    throw new Error(`${name} must be a whole number of milliseconds from 1 to ${max}, got "${raw}"`);
+  }
   return value;
 }
 

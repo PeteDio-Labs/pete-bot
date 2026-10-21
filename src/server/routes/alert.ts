@@ -33,6 +33,7 @@ import {
   getHold,
   addHold,
   takeHold,
+  discardDown,
   activeHolds,
   setNote,
   type AlertBatch,
@@ -159,34 +160,48 @@ export function createAlertHandler(
 
   /**
    * The deadline passed with no UP: send the DM as an ordinary DOWN, with the extra line.
-   * The hold is taken only after the send succeeds. A failed send, or a Discord client that
-   * has not logged in yet after a restart, leaves the hold in place and tries again, so a
-   * held DOWN is never lost silently.
+   *
+   * Everything that can fail (the Discord client, the user fetch, the DM channel) runs before
+   * any state changes, so a failure leaves the hold untouched and retries. The hold is then
+   * re-read, because an UP may have released it during the awaits, and taken synchronously
+   * with the batch write. If the send itself fails, the batch entry is undone and the hold
+   * restored, so a held DOWN is never lost and a later UP never meets a batch with no message.
    */
   async function expire(monitor: string): Promise<void> {
     timers.delete(monitor);
-    const hold = getHold(monitor);
-    if (!hold) return;
+    if (!getHold(monitor)) return;
     // Restored holds arm at startup, before the client logs in. A client without isReady
     // (a test double) counts as ready.
     if (client.isReady?.() === false) {
       retry(monitor);
       return;
     }
+    let dm: DMChannel;
+    try {
+      const user = await client.users.fetch(config.discord.ownerUserId);
+      dm = (await user.createDM()) as DMChannel;
+    } catch (err) {
+      alertDecisions.inc({ decision: 'deadline', outcome: 'error' });
+      logger.error(`[alert] held DOWN for ${monitor} passed its deadline and Discord is unavailable, retrying in ${retryMs / 1000}s: ${err instanceof Error ? err.message : String(err)}`);
+      retry(monitor);
+      return;
+    }
+    const hold = takeHold(monitor);
+    if (!hold) return; // an UP released it while Discord was being reached: nothing to send
     const s = stats(monitor);
     const usual = s ? `usually back in ${seconds(s.meanMs)} ± ${seconds(s.sdMs)} (${s.n} nights)` : 'no recovery history yet';
     const note = `↳ held in ${hold.window}; ${usual}; the ${seconds(hold.deadlineAt - hold.since)} deadline passed`;
     try {
-      const user = await client.users.fetch(config.discord.ownerUserId);
-      const dm = (await user.createDM()) as DMChannel;
       await sendDown(dm, monitor, hold.detail, note, hold.since);
     } catch (err) {
       alertDecisions.inc({ decision: 'deadline', outcome: 'error' });
       logger.error(`[alert] held DOWN for ${monitor} passed its deadline and the DM failed, retrying in ${retryMs / 1000}s: ${err instanceof Error ? err.message : String(err)}`);
-      retry(monitor);
+      if (discardDown(monitor)) {
+        addHold(hold);
+        retry(monitor);
+      }
       return;
     }
-    takeHold(monitor);
     logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" deadlineMs=${hold.deadlineAt - hold.since} outcome=alerted`);
     alertDecisions.inc({ decision: 'deadline', outcome: 'alerted' });
   }
@@ -267,7 +282,8 @@ export function createAlertHandler(
         timers.delete(monitor);
         const took = Date.now() - hold.since;
         try {
-          addSample(monitor, took);
+          // A recovery that missed its deadline is an incident and does not train it.
+          if (Date.now() <= hold.deadlineAt) addSample(monitor, took);
         } catch (err) {
           logger.error(`[alert] cannot record the recovery of ${monitor}: ${err instanceof Error ? err.message : String(err)}`);
         }

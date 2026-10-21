@@ -41,7 +41,6 @@ Vault outage reached nobody (PET-374). So `/v1/alert` groups:
 | Another monitor fails inside `ALERT_COALESCE_MS` | It joins that message — a node reboot is one DM |
 | A monitor fails after the window | A **new** message, because an edit notifies nobody |
 | A monitor recovers | Its line turns green; the message closes when all recover |
-
 | A recovery arrives for a monitor whose DOWN was never seen | It folds into the open or most recent incident message inside the window (PET-436). With none, it opens one message that the rest of the burst folds into |
 | A DOWN starts inside a maintenance window | It is **held**: no DM, and a deadline timer starts. An UP before the deadline releases it silently. A deadline that passes sends the DM with the window and the usual recovery time (PET-492) |
 
@@ -330,7 +329,7 @@ the prompt or the answer.
 | `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health`, `/v1/alert` and `/v1/notify` |
 | `HTTP_SERVER_PORT` | No | `3015` | Port for the above |
 | `ALERT_MAINTENANCE_WINDOWS` | No | — | Comma-separated `<IANA zone> <HH:MM> <minutes>`, for example `America/New_York 02:45 30`. A DOWN inside one is held. Empty turns the hold off. A malformed value stops the process at start |
-| `ALERT_MAINTENANCE_DEADLINE_MS` | No | `300000` | The deadline for a held DOWN until a monitor has 5 recoveries on record. After that: mean plus one SD, rounded up to a 20 s heartbeat, plus one heartbeat |
+| `ALERT_MAINTENANCE_DEADLINE_MS` | No | `300000` | Whole milliseconds, 1 to 24 days; empty uses the default. The deadline for a held DOWN until a monitor has 5 recoveries on record. After that: mean plus one SD, rounded up to a 20 s heartbeat, plus one heartbeat |
 | `ALERT_BASELINE_PATH` | No | — | Where recovery times persist. Empty keeps them in memory |
 | `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert`, which Uptime Kuma sends. Empty refuses every alert |
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |

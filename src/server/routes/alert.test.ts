@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'bun:test';
 import request from 'supertest';
 import { createApp } from '../index.js';
-import { reset, heldCount } from '../alertStore.js';
+import { reset, heldCount, activeBatches } from '../alertStore.js';
 import { config } from '../../config.js';
 import { parseWindows } from '../decider.js';
 import { resetBaseline } from '../baseline.js';
@@ -439,6 +439,56 @@ describe('a held DOWN when Discord is unavailable', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(d.send).toHaveBeenCalledTimes(1);
     expect(heldCount()).toBe(0);
+  });
+
+  it('sends nothing when an UP arrives while the deadline DM is being prepared', async () => {
+    config.alerts.maintenanceDeadlineMs = 10;
+    const d = fakeDiscord();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const client = {
+      users: {
+        fetch: vi.fn(async () => {
+          await gate;
+          return (await (d.client as { users: { fetch: () => Promise<unknown> } }).users.fetch()) as never;
+        }),
+      },
+    } as never;
+    const app = await appWith(client);
+    await post(app, inWindow(0, 'vault')).expect(200);
+    await new Promise((r) => setTimeout(r, 40)); // the deadline fires and waits on Discord
+    await post(app, inWindow(1, 'vault')).expect(200); // the UP releases the hold
+    release();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(d.send).not.toHaveBeenCalled();
+    expect(activeBatches()).toHaveLength(0);
+  });
+
+  it('undoes the batch entry and restores the hold when the deadline send fails', async () => {
+    config.alerts.maintenanceDeadlineMs = 10;
+    const d = fakeDiscord();
+    d.send.mockRejectedValueOnce(new Error('discord 500'));
+    const app = await appWith(d.client, 150);
+    await post(app, inWindow(0, 'vault')).expect(200);
+    await new Promise((r) => setTimeout(r, 50)); // first attempt fails
+    expect(activeBatches()).toHaveLength(0);
+
+    // The next in-window DOWN is held again, not swallowed by a batch with no message.
+    const again = await post(app, inWindow(0, 'vault')).expect(200);
+    expect(again.body.action).toBe('held');
+    await new Promise((r) => setTimeout(r, 250)); // the retry succeeds
+    expect(d.send).toHaveBeenCalledTimes(2); // the failed attempt, then the retry
+    expect(heldCount()).toBe(0);
+  });
+
+  it('does not train the baseline from a recovery after the deadline', async () => {
+    const { addHold } = await import('../alertStore.js');
+    const { stats } = await import('../baseline.js');
+    addHold({ monitor: 'plane', since: Date.now() - 600_000, deadlineAt: Date.now() - 1000, window: 'w', detail: 'x' });
+    const client = { isReady: () => false } as never; // keeps the hold from expiring first
+    const app = await appWith(client, 60_000);
+    await post(app, inWindow(1, 'plane')).expect(200);
+    expect(stats('plane')).toBeNull();
   });
 
   it('reports how long the monitor has been down, not zero', async () => {

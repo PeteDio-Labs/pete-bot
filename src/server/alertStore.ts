@@ -283,6 +283,22 @@ export function attachMessage(batchId: string, channelId: string, messageId: str
 
 // ── maintenance holds (PET-492) ───────────────────────────────────────────────
 
+/**
+ * Undoes a recordDown whose DM never went out, so the monitor is back to "down, unannounced".
+ * Returns false when the monitor already recovered in the meantime, and the caller must not
+ * restore anything for it.
+ */
+export function discardDown(monitor: string): boolean {
+  const id = batchOf.get(monitor);
+  const batch = id ? batches.get(id) : undefined;
+  if (!id || !batch) return false;
+  delete batch.monitors[monitor];
+  batchOf.delete(monitor);
+  if (Object.keys(batch.monitors).length === 0 && !batch.messageId) batches.delete(id);
+  persist();
+  return true;
+}
+
 /** True when a DOWN for this monitor is already inside an open batch, so it edits as always. */
 export function isInBatch(monitor: string): boolean {
   return batchOf.has(monitor);

@@ -57,14 +57,23 @@ describe('deadlineMs', () => {
 });
 
 describe('config', () => {
-  it('refuses a deadline that is not a positive whole number', async () => {
+  async function loadWith(value: string | undefined) {
     const saved = process.env.ALERT_MAINTENANCE_DEADLINE_MS;
-    process.env.ALERT_MAINTENANCE_DEADLINE_MS = 'abc';
+    if (value === undefined) delete process.env.ALERT_MAINTENANCE_DEADLINE_MS;
+    else process.env.ALERT_MAINTENANCE_DEADLINE_MS = value;
     try {
-      await expect(import(`../config.js?bad=${Date.now()}`)).rejects.toThrow(/ALERT_MAINTENANCE_DEADLINE_MS/);
+      return await import(`../config.js?v=${Math.random()}`);
     } finally {
       if (saved === undefined) delete process.env.ALERT_MAINTENANCE_DEADLINE_MS;
       else process.env.ALERT_MAINTENANCE_DEADLINE_MS = saved;
     }
+  }
+
+  it.each(['abc', '0', '-5', '1.5', '3000000000'])('refuses a deadline of "%s"', async (bad) => {
+    await expect(loadWith(bad)).rejects.toThrow(/ALERT_MAINTENANCE_DEADLINE_MS/);
+  });
+
+  it('reads an empty value as the default', async () => {
+    expect((await loadWith('')).config.alerts.maintenanceDeadlineMs).toBe(300_000);
   });
 });
