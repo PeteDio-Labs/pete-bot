@@ -105,7 +105,7 @@ describe('inputJsonSchema', () => {
   });
 
   it('throws on a shape it does not know, so a wrong schema cannot ship', () => {
-    expect(() => inputJsonSchema(z.object({ a: z.array(z.string()) }))).toThrow('unsupported');
+    expect(() => inputJsonSchema(z.object({ a: z.record(z.string()) }))).toThrow('unsupported');
   });
 });
 
@@ -487,6 +487,16 @@ describe('plane_item', () => {
     expect(seen.every((s) => (s.init?.headers as Record<string, string>)['X-API-Key'] === 'plane_api_secret')).toBe(true);
   });
 
+  it('fails on a 200 with a null body, a state Plane does not list, and a redirect', async () => {
+    const nul = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': json('null') });
+    expect(error(await callTool(nul, { keys: ['PET-672'] }))).toContain('not a work item');
+    const lost = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 'nope') });
+    expect(error(await callTool(lost, { keys: ['PET-672'] }))).toContain('does not list');
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    await callTool(tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 's1') }, seen), { keys: ['PET-672'] });
+    expect(seen.every((s) => s.init?.redirect === 'error')).toBe(true);
+  });
+
   it('fails when every key answers 404, since that may be a missing route', async () => {
     const t = tool({ [`/projects/${PROJECT}/states/?per_page=100`]: states });
     expect(error(await callTool(t, { keys: ['PET-1', 'PET-2'] }))).toContain('404 for all 2 key(s)');
@@ -557,6 +567,14 @@ describe('buildLabTools', () => {
       units: ['pete-bot.service', 'lab-agent.service'],
     });
     expect([...withPlane.keys()].at(-1)).toBe('plane_item');
+    // The schema of every tool, plane_item's array included, must render.
+    const planeDef = toolDefinitions(withPlane).find((d) => d.name === 'plane_item')!;
+    expect(planeDef.input_schema).toEqual({
+      type: 'object',
+      properties: { keys: { type: 'array', items: { type: 'string', pattern: '^PET-\\d{1,5}$' }, minItems: 1, maxItems: 10 } },
+      required: ['keys'],
+      additionalProperties: false,
+    });
     for (const d of defs) {
       expect(d.input_schema.type).toBe('object');
       expect(d.description.length).toBeGreaterThan(40);

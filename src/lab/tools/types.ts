@@ -130,6 +130,12 @@ function toJson(schema: z.ZodTypeAny): Record<string, unknown> {
     }
     return withDescription(out);
   }
+  if (schema instanceof z.ZodArray) {
+    const out: Record<string, unknown> = { type: 'array', items: toJson(schema._def.type) };
+    if (schema._def.minLength) out.minItems = schema._def.minLength.value;
+    if (schema._def.maxLength) out.maxItems = schema._def.maxLength.value;
+    return withDescription(out);
+  }
   if (schema instanceof z.ZodEnum) {
     return withDescription({ type: 'string', enum: [...schema.options] });
   }

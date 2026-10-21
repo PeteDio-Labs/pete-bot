@@ -5,6 +5,11 @@
  * read-only token for the Claude Plane user. One call resolves a state UUID to its name,
  * then one call per key reads the item. It makes no write call.
  *
+ * ⚠ THE KEY IS NOT READ-ONLY. A Plane key carries its user's permissions, so GET-only is
+ * enforced here, in code, and by a test. Keep the Claude Plane user a Member with no admin role.
+ * The default URL is cleartext http on the LAN, as plane-sync uses it. The key travels only
+ * to that host, and `redirect: 'error'` stops a 3xx from forwarding it elsewhere.
+ *
  * ⚠ A KEY THAT FAILS TO READ IS REPORTED, NEVER DROPPED. A 404 is `found: false` for that key.
  * A 404 cannot tell a missing item from a Plane with no identifier route, so when EVERY key
  * answers 404 the call throws instead. Any other answer (401, 5xx, a body that is not a work
@@ -38,6 +43,9 @@ export interface PlaneItem {
   updated?: string;
 }
 
+/** A 404, apart from any JSON body: a 200 with a body of `null` is a fault, not a missing item. */
+const NOT_FOUND = Symbol('not found');
+
 export class PlaneClient {
   private states: Map<string, string> | null = null;
 
@@ -45,16 +53,16 @@ export class PlaneClient {
     if (!/^https?:\/\//.test(cfg.baseUrl)) throw new Error('Plane URL must be http:// or https://');
   }
 
-  private async get(path: string, allow404 = false): Promise<unknown> {
+  private async get(path: string, allow404 = false): Promise<unknown | typeof NOT_FOUND> {
     const base = this.cfg.baseUrl.replace(/\/$/, '');
     const res = await fetchWithTimeout(
       this.cfg.fetch ?? fetch,
       `${base}/api/v1/workspaces/${encodeURIComponent(this.cfg.workspace)}${path}`,
-      { method: 'GET', headers: { 'X-API-Key': this.cfg.token } },
+      { method: 'GET', headers: { 'X-API-Key': this.cfg.token }, redirect: 'error' },
       this.cfg.timeoutMs ?? 8_000,
       `Plane ${path}`,
     );
-    if (res.status === 404 && allow404) return null;
+    if (res.status === 404 && allow404) return NOT_FOUND;
     if (res.status === 401 || res.status === 403) throw new LabToolError(`Plane refused the lab-agent token for ${path} (HTTP ${res.status})`);
     if (!res.ok) throw new LabToolError(`Plane ${path} answered HTTP ${res.status}`);
     try {
@@ -84,21 +92,22 @@ export class PlaneClient {
 
   async item(key: string): Promise<PlaneItem> {
     const states = await this.stateNames();
-    const w = (await this.get(`/work-items/${key}/`, true)) as
-      | { id?: string; name?: string; state?: unknown; project?: unknown; updated_at?: string }
-      | null;
-    if (w === null) return { key, found: false };
+    const got = await this.get(`/work-items/${key}/`, true);
+    if (got === NOT_FOUND) return { key, found: false };
+    const w = got as { id?: string; name?: string; state?: unknown; project?: unknown; updated_at?: string } | null;
     if (!w || typeof w !== 'object' || !w.id) throw new LabToolError(`Plane answered ${key} with a body that is not a work item`);
     const ref = (v: unknown) => (v && typeof v === 'object' ? (v as { id?: string }).id : (v as string | undefined));
     if (ref(w.project) !== this.cfg.projectId) throw new LabToolError(`Plane answered ${key} from a project other than PET`);
     const stateId = ref(w.state);
     // A state added or renamed since the cache filled reads as a miss; refetch once.
     const name = stateId ? (states.get(stateId) ?? (await this.stateNames(true)).get(stateId)) : undefined;
+    // An item whose state Plane does not list is a fault in what was read, not a state.
+    if (!name || !w.name) throw new LabToolError(`Plane answered ${key} with ${!w.name ? 'no title' : `state ${stateId ?? 'none'} that the PET project does not list`}`);
     return {
       key,
       found: true,
-      title: String(w.name ?? '').slice(0, 200),
-      state: name || 'unknown state',
+      title: String(w.name).slice(0, 200),
+      state: name,
       updated: w.updated_at,
     };
   }
