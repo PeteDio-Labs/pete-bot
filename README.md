@@ -91,9 +91,9 @@ no Claude quota.
 
 | Report | When (Eastern) | What it lists |
 |---|---|---|
-| `morning` | Weekdays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item |
+| `morning` | Mondays and Fridays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item; this week's cycle split into Pedro items (`lan`, `mac`, `needs-pedro`) and AI items (`cloud`). On Mondays it also lists what last week's cycle left open and whether next week's cycle exists |
 | `audit` | Mondays 08:44 | Plane against GitHub: Todo items with an open PR, open items whose PRs all merged, In Review items with no PR, closed-unmerged PRs, passed target dates, PRs naming no item, and stale `verified:` dates when `REPORT_VAULT_PATH` is set |
-| `sweep` | Daily 18:47, or Mondays with `REPORT_SWEEP_WEEKLY=true` | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
+| `sweep` | Fridays and Sundays 18:47 | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
 
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
@@ -101,7 +101,7 @@ that failed to read is listed under "Not read", and the title says INCOMPLETE. A
 cannot read GitHub or Plane at all sends a failure DM. An empty section therefore means
 "examined and found none".
 
-A report is due from its time until three hours later, once per local date, so a restart
+No scheduled report sends from Tuesday to Thursday, the school days in workspace#169; `/report` still works on those days. The morning queue reads cycles and writes nothing, so the Monday rollover is listed, not performed. A report is due from its time until three hours later, once per local date, so a restart
 neither loses nor repeats one. `/report which:<name>` sends one now. `/health` carries each
 report's last result under `reports`.
 

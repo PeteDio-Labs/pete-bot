@@ -1,6 +1,6 @@
 /**
- * The Stale PR, Plane and thread sweep (PET-701), daily at 18:47 Eastern, or Mondays only
- * once REPORT_SWEEP_WEEKLY is true. It replaces the Claude routine of the same name.
+ * The Stale PR, Plane and thread sweep (PET-701), Fridays and Sundays at 18:47
+ * Eastern (workspace#169). It replaces the Claude routine of the same name.
  *
  * It comments on nothing. The routine commented on each PR it flagged; a script posts one
  * DM and leaves the PRs alone.
