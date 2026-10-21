@@ -31,6 +31,11 @@ const EnvSchema = z.object({
   LAB_VAULT_TOKEN: z.string().min(20),
   LAB_VAULT_CA_FILE: z.string().min(1).default('/etc/lab-agent/vault-ca.pem'),
   LAB_DESK_HEALTH_URL: z.string().url().default('http://127.0.0.1:3015/health'),
+  // The nightly drift check (PET-671): pete-bot's /v1/notify and its bearer, and the time
+  // of day in UTC. The bearer is pete-bot's notify token, which opens that route alone.
+  LAB_NOTIFY_URL: z.string().url().default('http://127.0.0.1:3015/v1/notify'),
+  LAB_NOTIFY_TOKEN: TOKEN,
+  LAB_DRIFT_AT: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM in UTC').default('11:15'),
   // The MCP door (PET-667). Off until the Access app exists: LAB_ACCESS_AUD turns it on, and
   // then every MCP setting must be valid.
   LAB_MCP_HOST: z.string().ip({ version: 'v4' }).optional(),
@@ -52,6 +57,7 @@ export interface LabConfig {
   clones: { vault: string; iac: string; mediaIac: string };
   vault: { addr: string; token: string; caPem: string };
   deskHealthUrl: string;
+  drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
 }
@@ -67,6 +73,9 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
   }
   const e = parsed.data;
   if (e.LAB_ASK_TOKEN === e.LAB_GATEWAY_TOKEN) throw new Error('lab-agent settings are invalid: LAB_ASK_TOKEN must differ from LAB_GATEWAY_TOKEN');
+  if (e.LAB_NOTIFY_TOKEN === e.LAB_ASK_TOKEN || e.LAB_NOTIFY_TOKEN === e.LAB_GATEWAY_TOKEN) {
+    throw new Error('lab-agent settings are invalid: LAB_NOTIFY_TOKEN must differ from LAB_ASK_TOKEN and LAB_GATEWAY_TOKEN');
+  }
   const read = (name: string, path: string) => {
     try {
       return readFile(path);
@@ -98,6 +107,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     clones: { vault: e.LAB_VAULT_CLONE, iac: e.LAB_IAC_CLONE, mediaIac: e.LAB_MEDIA_IAC_CLONE },
     vault: { addr: e.LAB_VAULT_ADDR, token: e.LAB_VAULT_TOKEN, caPem: vaultCa },
     deskHealthUrl: e.LAB_DESK_HEALTH_URL,
+    drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,
   };
 }

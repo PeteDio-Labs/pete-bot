@@ -16,6 +16,8 @@ import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
+import { HostIndex } from './tools/hosts.js';
+import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -87,6 +89,11 @@ const checks: Record<string, Check> = {
   async kuma() {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
+  // Down when the last run could not DM what it found, or when no run has happened for
+  // about a day (a dead timer, or a restart across the schedule). See driftHealth.
+  async drift() {
+    return driftHealth(lastDrift, startedAt, new Date(), cfg.drift.at);
+  },
   async secrets() {
     return secretsHealth(secrets, lastRenewError, async () => {
       await renew();
@@ -95,16 +102,57 @@ const checks: Record<string, Check> = {
   },
 };
 
+const callModel = gatewayCaller(cfg.gateway.url, cfg.gateway.token);
+
+// The nightly drift check (PET-671). Its own HostIndex over the same clone, so a run reads
+// the vault at the commit the fetch just brought in.
+const hostIndex = new HostIndex(vault);
+const notify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken);
+let lastDrift: DriftOutcome | null = null;
+const startedAt = new Date();
+const runDrift = singleFlight(async () => {
+  lastDrift = await runDriftCheck({
+    read: () =>
+      readLab({
+        guests: () => pve.guests(),
+        async vault() {
+          const index = await hostIndex.load();
+          const { fetchError } = await vault.state();
+          return { inventory: index.inventory, notes: index.notes, unparsed: index.unparsed, source: index.source, fetchError: fetchError ?? null };
+        },
+      }),
+    notify,
+    log,
+  });
+  return lastDrift;
+});
+// setTimeout, re-armed after each run, so a run that overlaps midnight or a clock change
+// still lands once a day at LAB_DRIFT_AT.
+function scheduleDrift(): void {
+  const wait = msUntil(cfg.drift.at, new Date());
+  log('drift check scheduled', { at: `${cfg.drift.at}Z`, inMinutes: Math.round(wait / 60_000) });
+  setTimeout(() => {
+    runDrift()
+      .catch((err) => log('drift check crashed', { level: 'error', error: (err as Error).message }))
+      .finally(scheduleDrift);
+  }, wait);
+}
+scheduleDrift();
+
 const handler = createLabHandler({
   askToken: cfg.askToken,
   tools,
-  callModel: gatewayCaller(cfg.gateway.url, cfg.gateway.token),
+  callModel,
   model: cfg.gateway.model,
   checks,
   log,
+  runDrift,
 });
 
-const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, fetch: handler });
+// Bun closes an idle connection after 10 s by default. An answer can take 80 s, and a drift
+// run with a failing DM waits through two retries (75 s) after three 15 s tries, so the
+// caller would lose the reply to a run that still sends a DM. 255 s is Bun's maximum.
+const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 255, fetch: handler });
 log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], model: cfg.gateway.model });
 
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.

@@ -25,6 +25,7 @@ const baseEnv = {
   LAB_IAC_CLONE: '/var/lib/lab-agent/petedio-iac',
   LAB_MEDIA_IAC_CLONE: '/var/lib/lab-agent/petedio-media-iac',
   LAB_VAULT_TOKEN: 'hvs.' + 'v'.repeat(24),
+  LAB_NOTIFY_TOKEN: 'n'.repeat(40),
 };
 
 describe('loadLabConfig', () => {
@@ -36,6 +37,7 @@ describe('loadLabConfig', () => {
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
     expect(cfg.vault.addr).toBe('https://192.168.50.223:8200');
     expect(cfg.mcp).toBeNull();
+    expect(cfg.drift).toEqual({ notifyUrl: 'http://127.0.0.1:3015/v1/notify', notifyToken: 'n'.repeat(40), at: '11:15' });
   });
 
   it('turns the MCP door on only with every Access setting', () => {
@@ -65,6 +67,8 @@ describe('loadLabConfig', () => {
   it('refuses plain http to Proxmox, a reused bearer, and an unreadable CA', () => {
     expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, () => CA)).toThrow('must be https://');
     expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, () => CA)).toThrow('must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_NOTIFY_TOKEN: GW }, () => CA)).toThrow('LAB_NOTIFY_TOKEN must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_DRIFT_AT: '25:00' }, () => CA)).toThrow('must be HH:MM in UTC');
     expect(() =>
       loadLabConfig(baseEnv, () => {
         throw new Error('ENOENT');
