@@ -23,6 +23,7 @@ const clean: DriftReads = {
   inventory: [row(235, 'plane'), row(237, 'media-dash')],
   notes: [note(235), note(237), { file: 'Hosts/pve03.md', frontmatter: { type: 'host', kind: 'node', node: 'pve03' }, body: '' }],
   vaultSource: 'petedio-vault @ abc1234',
+  unparsed: [],
 };
 
 const reply = (text: string, stop = 'end_turn'): ModelResponse => ({ content: [{ type: 'text', text }], stop_reason: stop });
@@ -74,8 +75,40 @@ describe('compareLab', () => {
   });
 });
 
+describe('what the vault index could not read', () => {
+  it('reports an unreadable row or note as a finding, never as a clean lab', () => {
+    const r = compareLab({
+      ...clean,
+      unparsed: ['Hosts/hosts-inventory.md under pve03: cannot read the row "| 24x | plane | running |"', 'Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note'],
+    });
+    expect(r.findings.map((f) => `${f.vmid} ${f.what}`)).toEqual([
+      'null Hosts/hosts-inventory.md under pve03: cannot read the row "| 24x | plane | running |"',
+      'null Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note',
+    ]);
+    expect(driftMessage(r)).toContain('- vault: Hosts/oops.md has no');
+  });
+
+  it('flags a guest note it cannot place, and lets nodes and bare metal through', () => {
+    const r = compareLab({
+      ...clean,
+      notes: [
+        ...clean.notes,
+        { file: 'Hosts/noid.md', frontmatter: { type: 'host', kind: 'lxc', status: 'live' }, body: '' },
+        { file: 'Hosts/odd.md', frontmatter: { type: 'host', kind: 'container', vmid: '9' }, body: '' },
+        { file: 'Hosts/nokind.md', frontmatter: { type: 'host' }, body: '' },
+        { file: 'Hosts/pi.md', frontmatter: { type: 'host', kind: 'bare-metal' }, body: '' },
+      ],
+    });
+    expect(r.findings.map((f) => f.what)).toEqual([
+      'Hosts/noid.md is a lxc note with no numeric vmid, so it is not compared',
+      'Hosts/nokind.md has kind "(none)", not lxc, vm, bare-metal or node, so it is not compared',
+      'Hosts/odd.md has kind "container", not lxc, vm, bare-metal or node, so it is not compared',
+    ]);
+  });
+});
+
 describe('readLab', () => {
-  const vaultOk = async () => ({ inventory: clean.inventory, notes: clean.notes, source: 'petedio-vault @ abc1234', fetchError: null });
+  const vaultOk = async () => ({ inventory: clean.inventory, notes: clean.notes, unparsed: [], source: 'petedio-vault @ abc1234', fetchError: null });
 
   it('returns the three reads when both succeed', async () => {
     const r = await readLab({ guests: async () => clean.guests, vault: vaultOk });

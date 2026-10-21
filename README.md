@@ -135,6 +135,9 @@ plus one plain line per finding.
   27 guest notes (petedio-vault @ 1a2b3c4)`.
 - A clean run logs those counts and sends nothing.
 - A failed read sends a failure DM. It never reports "no drift".
+- A vault file or table row the check cannot read is a finding, listed first as `vault:`. A
+  `Hosts/` file with no `type: host`, an inventory row that does not parse, and a guest note
+  with no numeric `vmid` or an unknown `kind` are all reported, never skipped.
 - A DM that pete-bot refuses is tried three times, with waits of 15 s and 60 s, so a restart at
   11:15 UTC does not lose the night. `/health` reports `drift` down if all three fail.
 - The DM holds about 1,700 characters. Past that it drops whole lines and says how many. Every

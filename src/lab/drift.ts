@@ -16,7 +16,8 @@ import type { HostNote, InventoryRow } from './tools/hosts.js';
 
 /** One way the lab and the vault disagree. `vmid` keys the line, `what` says how. */
 export interface DriftFinding {
-  vmid: number;
+  /** null for a finding about the vault itself, such as a note or a row that could not be read. */
+  vmid: number | null;
   what: string;
 }
 
@@ -26,6 +27,8 @@ export interface DriftReads {
   notes: HostNote[];
   /** Such as "petedio-vault @ 1a2b3c4 (fetched 06:12Z)". */
   vaultSource: string;
+  /** What the vault index could not read. Each one is a finding: unread is not agreeing. */
+  unparsed: string[];
 }
 
 export interface DriftResult {
@@ -35,6 +38,7 @@ export interface DriftResult {
 }
 
 const GUEST_KINDS = new Set(['lxc', 'vm']);
+const NON_GUEST_KINDS = new Set(['bare-metal', 'node']);
 const LIVE_NODES = /^pve\d+$/;
 
 /** Proxmox says running or stopped; the inventory writes the same words. */
@@ -45,8 +49,18 @@ export function compareLab(reads: DriftReads): DriftResult {
   const rows = new Map(reads.inventory.map((r) => [r.vmid, r]));
   // Host notes for guests only: bare metal and nodes carry no VMID that Proxmox knows.
   const guestNotes = reads.notes.filter((n) => GUEST_KINDS.has(n.frontmatter.kind ?? '') && /^\d+$/.test(n.frontmatter.vmid ?? ''));
+  // ⚠ A NOTE THIS CHECK CANNOT PLACE IS NOT A NOTE THAT AGREES. Only bare metal and nodes are
+  // legitimately outside the guest comparison; every other host note must be a guest note.
+  const findings: DriftFinding[] = reads.unparsed.map((what) => ({ vmid: null, what }));
+  for (const n of reads.notes) {
+    const kind = n.frontmatter.kind ?? '';
+    if (GUEST_KINDS.has(kind) && !/^\d+$/.test(n.frontmatter.vmid ?? '')) {
+      findings.push({ vmid: null, what: `${n.file} is a ${kind} note with no numeric vmid, so it is not compared` });
+    } else if (!GUEST_KINDS.has(kind) && !NON_GUEST_KINDS.has(kind)) {
+      findings.push({ vmid: null, what: `${n.file} has kind "${kind || '(none)'}", not lxc, vm, bare-metal or node, so it is not compared` });
+    }
+  }
   const notes = new Map(guestNotes.map((n) => [Number(n.frontmatter.vmid), n]));
-  const findings: DriftFinding[] = [];
 
   // A map keeps one entry per VMID, so a duplicate would vanish from every check below.
   const dupes = (vmids: number[], where: string) => {
@@ -96,7 +110,8 @@ export function compareLab(reads: DriftReads): DriftResult {
     }
   }
 
-  findings.sort((a, b) => a.vmid - b.vmid || a.what.localeCompare(b.what));
+  // Findings about the vault itself (no VMID) sort first: they say the comparison is partial.
+  findings.sort((a, b) => (a.vmid ?? -1) - (b.vmid ?? -1) || a.what.localeCompare(b.what));
   return {
     read: `${reads.guests.length} guests from Proxmox, ${reads.inventory.length} inventory rows, ${guestNotes.length} guest notes (${reads.vaultSource})`,
     findings,
@@ -105,7 +120,7 @@ export function compareLab(reads: DriftReads): DriftResult {
 
 /** The findings as plain lines, one per VMID-keyed finding. */
 export function plainLines(findings: DriftFinding[]): string {
-  return findings.map((f) => `- ${f.vmid}: ${f.what}`).join('\n');
+  return findings.map((f) => `- ${f.vmid ?? 'vault'}: ${f.what}`).join('\n');
 }
 
 /** notify's message cap is 1,800 characters; the header line takes some of that. */
@@ -141,7 +156,7 @@ export class DriftReadError extends Error {
 
 export interface LabReaders {
   guests: () => Promise<Guest[]>;
-  vault: () => Promise<{ inventory: InventoryRow[]; notes: HostNote[]; source: string; fetchError: string | null }>;
+  vault: () => Promise<{ inventory: InventoryRow[]; notes: HostNote[]; unparsed: string[]; source: string; fetchError: string | null }>;
 }
 
 /**
@@ -171,7 +186,7 @@ export async function readLab(readers: LabReaders): Promise<DriftReads> {
     parts.push(`vault: ${v.value.inventory.length} inventory rows and ${v.value.notes.length} notes`);
   }
   if (failed || g.status !== 'fulfilled' || v.status !== 'fulfilled') throw new DriftReadError(parts.join('; '));
-  return { guests: g.value, inventory: v.value.inventory, notes: v.value.notes, vaultSource: v.value.source };
+  return { guests: g.value, inventory: v.value.inventory, notes: v.value.notes, unparsed: v.value.unparsed, vaultSource: v.value.source };
 }
 
 export type Notify = (message: string) => Promise<void>;

@@ -119,7 +119,7 @@ const runDrift = singleFlight(async () => {
         async vault() {
           const index = await hostIndex.load();
           const { fetchError } = await vault.state();
-          return { inventory: index.inventory, notes: index.notes, source: index.source, fetchError: fetchError ?? null };
+          return { inventory: index.inventory, notes: index.notes, unparsed: index.unparsed, source: index.source, fetchError: fetchError ?? null };
         },
       }),
     notify,
