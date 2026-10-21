@@ -154,6 +154,26 @@ jobs:
             kv/data/services/pete-bot desk_installation_id | PB_DESK_INSTALLATION_ID ;
             kv/data/services/pete-bot desk_app_pem | PB_DESK_APP_PEM
 
+      # The scheduled reports' read-only Plane token (PET-701), optional in the same way and
+      # placed after the strict step for the same reason. ⚠ IT MUST ARRIVE HERE TOO. The play
+      # rewrites /etc/pete-bot.env from its extra vars on every deploy, so a push to main
+      # that omitted this field would blank PLANE_API_KEY and quietly switch the reports off.
+      # scripts/seed-pete-bot-plane-key.sh in petedio-iac writes the field.
+      - name: Vault — the optional Plane token for the reports, absent is allowed
+        continue-on-error: true
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/pete-bot plane_api_key | PB_PLANE_API_KEY
+
       # lab-agent's two paths (PET-670). ⚠ NO continue-on-error, UNLIKE THE TWO STEPS ABOVE.
       # The seed and the mint play write every field of a path at once, so the only "absent"
       # case is a missing PATH, which ignoreNotFound covers. continue-on-error would also
@@ -235,6 +255,8 @@ jobs:
               "pete_bot_desk_app_id":          os.environ.get("PB_DESK_APP_ID", ""),
               "pete_bot_desk_installation_id": os.environ.get("PB_DESK_INSTALLATION_ID", ""),
               "pete_bot_desk_app_pem":         os.environ.get("PB_DESK_APP_PEM", ""),
+              # .get for the same reason. Empty keeps the scheduled reports off (PET-701).
+              "pete_bot_plane_api_key":        os.environ.get("PB_PLANE_API_KEY", ""),
               # Required, in the strict step above (PET-617): the Claude API gateway's
               # key and lab-map's bearer. petedio-iac's scripts/seed-llm-gateway.sh
               # writes both. This change merged only after that seed, because the
