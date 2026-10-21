@@ -169,7 +169,12 @@ describe('the MCP door', () => {
   });
 
   it('refuses an unknown tool or method, a GET, a batch and a bad body', async () => {
-    expect((await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'shell' } })).error.code).toBe(-32602);
+    expect((await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'shell', arguments: { cmd: 'id' } } })).error.code).toBe(-32602);
+    // The refusal leaves a record naming the caller, the requested tool and its input.
+    expect(logs.at(-1)).toEqual({
+      msg: 'mcp call',
+      fields: { email: 'pedelgadillo@gmail.com', tool: 'shell', input: { cmd: 'id' }, ok: false, rejected: 'unknown tool' },
+    });
     expect((await rpc({ jsonrpc: '2.0', id: 7, method: 'resources/list' })).error.code).toBe(-32601);
     expect((await call(null, { method: 'GET' })).status).toBe(405);
     expect((await call([{ jsonrpc: '2.0', id: 8, method: 'ping' }])).status).toBe(400);
