@@ -35,7 +35,6 @@ import {
   takeHold,
   discardDown,
   markHoldUp,
-  markHoldAnnounced,
   activeHolds,
   setNote,
   type AlertBatch,
@@ -142,10 +141,8 @@ export function createAlertHandler(
   retryMs = 30_000,
 ) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Monitors whose deadline DM is being sent right now. */
-  const announcing = new Set<string>();
-  /** Recovered batches whose message edit has not landed yet, kept so a retry does not record the UP twice. */
-  const pendingRecovery = new Map<string, AlertBatch>();
+  /** Monitors whose deadline DM is in flight, with a promise that settles when the attempt ends. */
+  const announcing = new Map<string, Promise<void>>();
 
   /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
@@ -165,17 +162,15 @@ export function createAlertHandler(
   }
 
   /**
-   * The deadline passed: send the DM as an ordinary DOWN, with the extra line, and follow it
-   * with the recovery when an UP has arrived since.
+   * The deadline passed with no settled outcome: tell Pedro, then forget the hold.
    *
-   * The hold stays in place until the incident is settled. A repeated DOWN heartbeat answers
-   * "held" instead of sending a second DM, and an UP only records itself on the hold
-   * (`upAt`). Two phases, each safe to retry:
-   *   1. send the DOWN. A failure undoes the batch entry and leaves the hold unannounced.
-   *      Once it lands, the hold is marked `announced`, so a retry never sends it again.
-   *   2. when an UP has been recorded, edit the DOWN message to recovered. A failure keeps
-   *      the hold and retries, so the message never stays red for a recovered monitor.
-   * An unexpected throw takes the same path: log, re-arm, never lose the hold.
+   * - No UP so far: send the DOWN with the extra line. The hold is taken right after the send
+   *   lands, in the same tick, so the red message and the ordinary batch machinery take over.
+   * - The UP already arrived (`upAt`): send one green "recovered after N" message with the same
+   *   line. There is no DOWN message to edit, so nothing is left half done.
+   * A failure at any point leaves the hold and any batch entry undone, and retries. While the
+   * attempt is in flight, a repeated DOWN answers "held" and an UP waits for it, then takes
+   * the ordinary path against the message that now exists.
    */
   async function expire(monitor: string): Promise<void> {
     timers.delete(monitor);
@@ -186,49 +181,44 @@ export function createAlertHandler(
       retry(monitor);
       return;
     }
-    announcing.add(monitor);
-    try {
+    const attempt = (async () => {
       const user = await client.users.fetch(config.discord.ownerUserId);
       const dm = (await user.createDM()) as DMChannel;
-      let hold = getHold(monitor);
+      const hold = getHold(monitor);
       if (!hold) return; // released while Discord was being reached: nothing to send
-      if (!hold.announced) {
-        const s = stats(monitor);
-        const usual = s ? `usually back in ${seconds(s.meanMs)} ± ${seconds(s.sdMs)} (${s.n} nights)` : 'no recovery history yet';
-        const note = `↳ held in ${hold.window}; ${usual}; the ${seconds(hold.deadlineAt - hold.since)} deadline passed`;
-        try {
-          await sendDown(dm, monitor, hold.detail, note, hold.since);
-        } catch (err) {
-          discardDown(monitor);
-          throw err;
-        }
-        markHoldAnnounced(monitor);
-        logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" deadlineMs=${hold.deadlineAt - hold.since} outcome=alerted`);
-        alertDecisions.inc({ decision: 'deadline', outcome: 'alerted' });
-      }
-      hold = getHold(monitor);
-      if (!hold) return;
-      if (hold.upAt === undefined) {
-        takeHold(monitor); // still down: the red message stands
+      const s = stats(monitor);
+      const usual = s ? `usually back in ${seconds(s.meanMs)} ± ${seconds(s.sdMs)} (${s.n} nights)` : 'no recovery history yet';
+      const note = `↳ held in ${hold.window}; ${usual}; the ${seconds(hold.deadlineAt - hold.since)} deadline passed`;
+      if (hold.upAt !== undefined) {
+        const took = Math.max(0, Math.round((hold.upAt - hold.since) / 1000));
+        const embed = new EmbedBuilder()
+          .setColor(COLOR_UP)
+          .setTitle(`🟢 UP — ${monitor}`)
+          .setDescription(`recovered after ${humanise(took)}\n${note}`)
+          .setTimestamp(new Date());
+        await dm.send({ embeds: [embed] });
+        alertDms.inc({ action: 'sent', status: 'success' });
+        takeHold(monitor);
+        logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" recoveredAfterMs=${hold.upAt - hold.since} outcome=recovered_late`);
+        alertDecisions.inc({ decision: 'deadline', outcome: 'recovered_late' });
         return;
       }
-      let batch = pendingRecovery.get(monitor);
-      if (!batch) {
-        batch = recordUp(monitor, { now: hold.upAt }).batch ?? undefined;
-        if (batch) pendingRecovery.set(monitor, batch);
+      try {
+        await sendDown(dm, monitor, hold.detail, note, hold.since);
+      } catch (err) {
+        discardDown(monitor);
+        throw err;
       }
-      if (batch?.messageId) {
-        const embed = renderBatch(batch, '');
-        if (!(await editInPlace(dm, batch.messageId, embed))) await dm.send({ embeds: [embed] });
-        alertBatchesOpen.set(size());
-      }
-      pendingRecovery.delete(monitor);
       takeHold(monitor);
-      logger.info(`[alert] decision=deadline monitor=${monitor} recoveredAfterMs=${hold.upAt - hold.since} outcome=recovered_late`);
-      alertDecisions.inc({ decision: 'deadline', outcome: 'recovered_late' });
+      logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" deadlineMs=${hold.deadlineAt - hold.since} outcome=alerted`);
+      alertDecisions.inc({ decision: 'deadline', outcome: 'alerted' });
+    })();
+    announcing.set(monitor, attempt.then(() => undefined, () => undefined));
+    try {
+      await attempt;
     } catch (err) {
       alertDecisions.inc({ decision: 'deadline', outcome: 'error' });
-      logger.error(`[alert] held DOWN for ${monitor} passed its deadline and could not be settled, retrying in ${retryMs / 1000}s: ${err instanceof Error ? err.message : String(err)}`);
+      logger.error(`[alert] held DOWN for ${monitor} passed its deadline and could not be announced, retrying in ${retryMs / 1000}s: ${err instanceof Error ? err.message : String(err)}`);
       if (getHold(monitor)) retry(monitor);
     } finally {
       announcing.delete(monitor);
@@ -283,15 +273,8 @@ export function createAlertHandler(
       try {
         const received = Date.now();
         const held = getHold(monitor);
-        if (held && pendingRecovery.has(monitor)) {
-          // Already announced and recovered; only the message edit is outstanding. This DOWN
-          // is a new outage: settle the old hold and take the ordinary path below.
-          pendingRecovery.delete(monitor);
-          takeHold(monitor);
-          clearTimeout(timers.get(monitor));
-          timers.delete(monitor);
-        } else if (held) {
-          // A DOWN after a late UP: the monitor is down again, so the pending recovery is void.
+        if (held) {
+          // A DOWN after a late UP: the monitor is down again, so the recorded UP is void.
           if (held.upAt !== undefined) markHoldUp(monitor, undefined);
           res.json({ ok: true, action: 'held', monitor });
           return;
@@ -312,12 +295,15 @@ export function createAlertHandler(
       }
     }
     if (up) {
+      // An UP that lands while the deadline DM is in flight waits for it, then takes the
+      // ordinary path below against the message that now exists.
+      while (announcing.has(monitor)) await announcing.get(monitor);
       // A held DOWN that recovers before its deadline is released with no DM, and its
       // recovery time trains the deadline.
       const hold = getHold(monitor);
       if (hold) {
         const now = Date.now();
-        if (now <= hold.deadlineAt && !announcing.has(monitor)) {
+        if (now <= hold.deadlineAt) {
           takeHold(monitor);
           clearTimeout(timers.get(monitor));
           timers.delete(monitor);
@@ -332,15 +318,12 @@ export function createAlertHandler(
           res.json({ ok: true, action: 'released', monitor, recoveryMs: took });
           return;
         }
-        // The deadline passed and the DM has not gone out yet (Discord down, a restored hold
-        // before login, or the send in flight). The outage is announced, then closed. A late
-        // recovery does not train the deadline.
+        // The deadline passed and the DM has not gone out yet (Discord down, or a restored
+        // hold before login). Pedro hears of the outage in one "recovered after N" message.
+        // A late recovery does not train the deadline.
         markHoldUp(monitor, now);
-        logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" recoveredAfterMs=${now - hold.since} outcome=recovered_late`);
-        if (!announcing.has(monitor)) {
-          clearTimeout(timers.get(monitor));
-          void expire(monitor);
-        }
+        clearTimeout(timers.get(monitor));
+        void expire(monitor);
         res.json({ ok: true, action: 'recovered_late', monitor, recoveryMs: now - hold.since });
         return;
       }

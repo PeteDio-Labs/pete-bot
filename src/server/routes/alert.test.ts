@@ -456,18 +456,22 @@ describe('a held DOWN when Discord is unavailable', () => {
     return { client, release };
   }
 
-  it('announces the outage, then closes it, when the UP arrives after the deadline but before the DM', async () => {
+  it('makes an UP that lands during the deadline send wait, then edits the DOWN message', async () => {
     config.alerts.maintenanceDeadlineMs = 10;
     const d = fakeDiscord();
-    const { client, release } = gatedClient(d);
-    const app = await appWith(client);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    d.send.mockImplementationOnce((async () => {
+      await gate;
+      return { id: 'msg-1' };
+    }) as never);
+    const app = await appWith(d.client);
     await post(app, inWindow(0, 'vault')).expect(200);
-    await new Promise((r) => setTimeout(r, 40)); // the deadline fires and waits on Discord
-    const up = await post(app, inWindow(1, 'vault')).expect(200);
-    expect(up.body.action).toBe('recovered_late');
+    await new Promise((r) => setTimeout(r, 40)); // the deadline fires; dm.send is waiting
+    const up = post(app, inWindow(1, 'vault')).then((r) => r);
+    await new Promise((r) => setTimeout(r, 20));
     release();
-    await new Promise((r) => setTimeout(r, 60));
-
+    expect((await up).body.action).toBe('edited');
     expect(d.send).toHaveBeenCalledTimes(1); // the DOWN message
     expect(d.edit).toHaveBeenCalledTimes(1); // edited to recovered
     expect(JSON.stringify(d.edit.mock.calls[0])).toContain('recovered');
@@ -489,7 +493,7 @@ describe('a held DOWN when Discord is unavailable', () => {
     expect(d.send).toHaveBeenCalledTimes(1);
   });
 
-  it('announces an over-deadline outage that recovers while Discord is down', async () => {
+  it('sends one recovered message for an over-deadline outage that recovers while Discord is down', async () => {
     config.alerts.maintenanceDeadlineMs = 10;
     const d = fakeDiscord();
     let down = true;
@@ -511,8 +515,10 @@ describe('a held DOWN when Discord is unavailable', () => {
     down = false;
     await new Promise((r) => setTimeout(r, 100));
     expect(d.send).toHaveBeenCalledTimes(1);
-    expect(d.edit).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(d.send.mock.calls[0])).toContain('recovered after');
+    expect(d.edit).not.toHaveBeenCalled();
     expect(heldCount()).toBe(0);
+    expect(activeBatches()).toHaveLength(0);
   });
 
   it('undoes the batch entry and restores the hold when the deadline send fails', async () => {
@@ -587,33 +593,51 @@ describe('a held DOWN when Discord is unavailable', () => {
     expect(heldCount()).toBe(0);
   });
 
-  it('retries the recovery edit, and never resends the DOWN, when the edit and its fallback fail', async () => {
+  it('retries the recovered message when its send fails, and never sends a DOWN', async () => {
     config.alerts.maintenanceDeadlineMs = 10;
     const d = fakeDiscord();
-    let release: () => void = () => {};
-    const gate = new Promise<void>((r) => (release = r));
+    let down = true;
     const client = {
       users: {
         fetch: vi.fn(async () => {
-          await gate;
+          if (down) throw new Error('discord down');
           return (await (d.client as { users: { fetch: () => Promise<unknown> } }).users.fetch()) as never;
         }),
       },
     } as never;
-    d.edit.mockRejectedValueOnce(new Error('edit failed'));
-    d.send.mockImplementationOnce((async () => ({ id: 'msg-1' })) as never);
-    d.send.mockRejectedValueOnce(new Error('fallback failed'));
+    d.send.mockRejectedValueOnce(new Error('send failed'));
     const app = await appWith(client, 30);
     await post(app, inWindow(0, 'vault')).expect(200);
-    await new Promise((r) => setTimeout(r, 40));
-    await post(app, inWindow(1, 'vault')).expect(200); // late UP, with the DM still unsent
-    release();
+    await new Promise((r) => setTimeout(r, 50));
+    await post(app, inWindow(1, 'vault')).expect(200);
+    down = false;
     await new Promise((r) => setTimeout(r, 200));
 
-    // send 1 = the DOWN, send 2 = the failed fallback; the retry edits successfully.
-    expect(d.send).toHaveBeenCalledTimes(2);
-    expect(d.edit).toHaveBeenCalledTimes(2);
+    expect(d.send).toHaveBeenCalledTimes(2); // the failed attempt, then the retry
+    expect(JSON.stringify(d.send.mock.calls[1])).toContain('recovered after');
     expect(heldCount()).toBe(0);
+  });
+
+  it('announces a second outage that starts while the first deadline DM is in flight as the same message', async () => {
+    config.alerts.maintenanceDeadlineMs = 10;
+    const d = fakeDiscord();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    d.send.mockImplementationOnce((async () => {
+      await gate;
+      return { id: 'msg-1' };
+    }) as never);
+    const app = await appWith(d.client);
+    await post(app, inWindow(0, 'vault')).expect(200);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(heldCount()).toBe(1);
+    expect((await post(app, inWindow(0, 'vault')).expect(200)).body.action).toBe('held');
+    release();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(heldCount()).toBe(0);
+    expect(d.send).toHaveBeenCalledTimes(1);
+    // The red message stands, and a later DOWN edits it rather than posting again.
+    expect((await post(app, inWindow(0, 'vault')).expect(200)).body.action).toBe('edited');
   });
 
   it('reports how long the monitor has been down, not zero', async () => {
