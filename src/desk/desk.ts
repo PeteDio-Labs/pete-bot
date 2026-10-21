@@ -77,6 +77,7 @@ export function parseButtonId(id: string): { action: 'merge' | 'again'; repo: st
 }
 
 const short = (sha: string) => sha.slice(0, 7);
+const QUOTA_DM_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Paths the classifier on the default branch must grade tier 2 before the desk trusts any
@@ -107,6 +108,8 @@ export class MergeDesk {
   private readonly delivering = new Map<string, Promise<void>>();
   /** Queue calls in flight, so tests and shutdown can wait for them. */
   readonly inflight = new Set<Promise<unknown>>();
+  /** When the last quota-refusal DM went out. A quota refusal hits every PR at once (PET-704). */
+  private lastQuotaDmAt = 0;
 
   constructor(private readonly deps: DeskDeps) {
     this.state = {
@@ -455,10 +458,21 @@ export class MergeDesk {
   private async reportQueueFailure(repo: string, n: number, sha: string, why: string, tail: string): Promise<void> {
     this.deps.store.update(repo, n, { queueFailedSha: sha });
     const detail = tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : '';
+    // A quota refusal fails every open PR the same way until the quota resets. Each PR keeps
+    // its comment; Pedro gets one DM per six hours, not one per PR and head.
+    const quota = /rate_limit_reached|codex-quota/.test(tail);
+    const quotaDmDue = Date.now() - this.lastQuotaDmAt > QUOTA_DM_INTERVAL_MS;
+    if (quota && quotaDmDue) this.lastQuotaDmAt = Date.now();
+    const quiet = quota && !quotaDmDue;
+    const note = quota ? ' Codex is out of quota, so every open PR fails the same way. The PR comments carry the detail; this is the only DM for six hours.' : '';
     await this.report(repo, n, {
       comment: `Merge desk: queueing a Codex review of \`${short(sha)}\` failed (${why}). Nothing merges until a review of the head exists.${detail}`,
-      dm: `**Merge desk** · Codex queue failed for [${repo}#${n}](https://github.com/${this.deps.settings.org}/${repo}/pull/${n}) at \`${short(sha)}\` (${why}).`,
-      buttons: [{ customId: buttonId('again', repo, n, sha), label: 'Review again', style: 'secondary' }],
+      ...(quiet
+        ? {}
+        : {
+            dm: `**Merge desk** · Codex queue failed for [${repo}#${n}](https://github.com/${this.deps.settings.org}/${repo}/pull/${n}) at \`${short(sha)}\` (${why}).${note}`,
+            buttons: [{ customId: buttonId('again', repo, n, sha), label: 'Review again', style: 'secondary' }],
+          }),
     });
   }
 
