@@ -47,8 +47,6 @@ export interface Hold {
   detail: string;
   /** When the UP arrived after the deadline. The deadline DM is then followed by the recovery. */
   upAt?: number;
-  /** The deadline DM went out. A retry then only closes the incident; it never sends the DOWN again. */
-  announced?: boolean;
 }
 
 export interface AlertBatch {
@@ -334,14 +332,6 @@ export function markHoldUp(monitor: string, at: number | undefined): boolean {
   else hold.upAt = at;
   persist();
   return true;
-}
-
-/** The deadline DM exists. Persisted, so a retry after a failure never sends the DOWN twice. */
-export function markHoldAnnounced(monitor: string): void {
-  const hold = holds.get(monitor);
-  if (!hold) return;
-  hold.announced = true;
-  persist();
 }
 
 export function activeHolds(): Hold[] {
