@@ -178,13 +178,13 @@ beforeEach(() => {
 });
 
 describe('tiers 0 and 1', () => {
-  it('approves and merges the reviewed head, then reports once on the PR and in a DM', async () => {
+  it('approves and merges the reviewed head, then reports once on the PR and sends no DM', async () => {
     const desk = makeDesk();
     await desk.poll();
     expect(gh.approvals).toEqual([HEAD]);
     expect(gh.merges).toEqual([HEAD]);
     expect(gh.comments.at(-1)).toContain('merged as `mmmmmmm` on `main`');
-    expect(dms).toHaveLength(1);
+    expect(dms).toEqual([]);
     expect(desk.status()).toMatchObject({ merged: 1, lastPollPrs: 1, lastPollError: null });
   });
 
@@ -382,7 +382,7 @@ describe('review fixes (Codex round 1)', () => {
     await desk.poll();
     expect(gh.comments).toHaveLength(1);
     expect(gh.comments[0]).toContain('merged as `mmmmmmm`');
-    expect(dms).toHaveLength(1);
+    expect(dms).toEqual([]);
     await desk.poll();
     expect(gh.comments).toHaveLength(1);
     expect(gh.merges).toEqual([HEAD]);
