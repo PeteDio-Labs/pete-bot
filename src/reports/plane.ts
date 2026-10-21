@@ -8,7 +8,6 @@
  *
  * ⚠ fetch HAS NO DEFAULT TIMEOUT. Every call carries one.
  */
-import { localTime } from './schedule.js';
 import type { PlaneSettings } from './settings.js';
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -48,7 +47,7 @@ export interface PlaneCycle {
 
 /** The cycles around today. A Monday-to-Sunday cycle covers `today`; `previous` ended before it. */
 export type CycleRead =
-  | { ok: true; current: PlaneCycle | null; previous: PlaneCycle | null; next: PlaneCycle | null; total: number }
+  | { ok: true; current: PlaneCycle | null; previous: PlaneCycle | null; next: PlaneCycle | null; upcoming: PlaneCycle[]; dated: number; undated: number }
   | { ok: false; error: string };
 
 type Fetch = typeof fetch;
@@ -86,13 +85,6 @@ interface Page<T> {
   next_cursor?: string;
   next_page_results?: boolean;
   total_count?: number;
-}
-
-/** A bare date stays as written. A timestamp becomes its Eastern date, so 23:59 Eastern is not read as the next UTC day. */
-export function easternDate(v: string): string {
-  if (!v.includes('T')) return v.slice(0, 10);
-  const t = new Date(v);
-  return Number.isNaN(t.getTime()) ? v.slice(0, 10) : localTime(t).date;
 }
 
 const ref = (v: string | { id: string } | null | undefined): string | null => (typeof v === 'string' ? v : (v?.id ?? null));
@@ -190,6 +182,11 @@ export class PlaneClient {
   }
 
   /**
+   * Cycle dates are UTC wall-clock dates in the cycle's own timezone (live Plane: start
+   * "2026-11-02T00:00:01Z", end "2026-11-08T23:59:00Z"), so the first ten characters are the
+   * day. A cycle-issues row names its work item in `issue`; a row shaped like a work item
+   * (it has `sequence_id`) is that item, and any other row is an error.
+   *
    * The cycles around `today` (YYYY-MM-DD, Eastern) and the items of the current and previous
    * one. A cycle read that fails returns an error, and the morning queue says so.
    */
@@ -198,7 +195,7 @@ export class PlaneClient {
       const raw = await this.all<RawCycle>('reading cycles', 'cycles/');
       const dated: PlaneCycle[] = raw
         .filter((c) => c.start_date && c.end_date)
-        .map((c) => ({ id: c.id, name: c.name ?? '?', start: easternDate(c.start_date!), end: easternDate(c.end_date!), itemIds: null }))
+        .map((c) => ({ id: c.id, name: c.name ?? '?', start: c.start_date!.slice(0, 10), end: c.end_date!.slice(0, 10), itemIds: null }))
         .sort((a, b) => b.start.localeCompare(a.start));
       const current = dated.find((c) => c.start <= today && today <= c.end) ?? null;
       const before = dated.filter((c) => c.end < (current?.start ?? today));
@@ -207,12 +204,12 @@ export class PlaneClient {
       const next = after.length ? after.reduce((a, b) => (b.start < a.start ? b : a)) : null;
       for (const c of [current, previous]) {
         if (!c) continue;
-        const rows = await this.all<{ issue?: string | { id: string } | null }>('reading cycle items', `cycles/${c.id}/cycle-issues/`);
-        const ids = rows.map((r) => ref(r.issue));
-        if (ids.some((i) => i === null)) throw new Error(`cycle "${c.name}" has an item row with no work item id (a row's own id is the join row, not the item)`);
+        const rows = await this.all<{ id?: string; issue?: string | { id: string } | null; sequence_id?: number }>('reading cycle items', `cycles/${c.id}/cycle-issues/`);
+        const ids = rows.map((r) => ref(r.issue) ?? (r.sequence_id !== undefined ? (r.id ?? null) : null));
+        if (ids.some((i) => i === null)) throw new Error(`cycle "${c.name}" has an item row with no work item id (a join row's own id is not the item's)`);
         c.itemIds = ids as string[];
       }
-      return { ok: true, current, previous, next, total: raw.length };
+      return { ok: true, current, previous, next, upcoming: after, dated: dated.length, undated: raw.length - dated.length };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

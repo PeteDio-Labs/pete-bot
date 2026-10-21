@@ -96,7 +96,7 @@ export function cycleBlock(s: Snapshot): string[] {
 export function rolloverBlock(s: Snapshot): string[] {
   const t = localTime(s.at);
   if (t.weekday !== 1 || !s.cycles || !s.cycles.ok || !s.plane.ok) return [];
-  const { previous, next, current } = s.cycles;
+  const { previous, next, current, upcoming } = s.cycles;
   const out: string[] = ['', '**Cycle rollover (Monday)**'];
   const left = (c: PlaneCycle): PlaneItem[] => {
     const byId = new Map((s.plane as Extract<typeof s.plane, { ok: true }>).items.map((i) => [i.id, i]));
@@ -111,7 +111,8 @@ export function rolloverBlock(s: Snapshot): string[] {
     if (missing > 0) out.push(`  - ${missing} items of that cycle are not on the board read, so they are not listed`);
   }
   const want = nextMonday(t.date);
-  if (next && next.start === want) out.push(`- Next week's cycle exists: ${clip(next.name, 40)}.`);
+  const match = upcoming.find((c) => c.start === want);
+  if (match) out.push(`- Next week's cycle exists: ${clip(match.name, 40)}.`);
   else if (next) out.push(`- Could not match next week's cycle: Plane has ${clip(next.name, 40)} starting ${next.start}, and the report expected a cycle starting ${want}. Check it by hand.`);
   else out.push(`- Next week's cycle does not exist. Create \`Week of ${want}\`.`);
   out.push('_This report moves and creates nothing. The transfer is a hand step until a write path exists._');

@@ -64,7 +64,7 @@ export function summarizeReads(s: Snapshot): ReadSummary {
   if (s.cycles && !s.cycles.ok) gaps.push(`Cycles not read: ${s.cycles.error}`);
   else if (s.cycles) {
     const part = (label: string, c: { itemIds: string[] | null } | null): string => (c ? `${label} ${c.itemIds?.length ?? 0} items` : `no ${label} cycle`);
-    cycles = `; ${s.cycles.total} cycles (${part('current', s.cycles.current)}, ${part('previous', s.cycles.previous)})`;
+    cycles = `; ${s.cycles.dated} dated cycles${s.cycles.undated ? `, ${s.cycles.undated} undated skipped` : ''} (${part('current', s.cycles.current)}, ${part('previous', s.cycles.previous)})`;
   }
   return { line: `Read: ${gh}; ${plane}${cycles}.`, gaps };
 }
