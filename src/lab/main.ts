@@ -14,7 +14,7 @@ import { loadLabConfig, type LabConfig } from './config.js';
 import { AccessVerifier } from './access.js';
 import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
-import { buildLabTools, GitClone, LAB_UNITS, VaultMetadataClient } from './tools/index.js';
+import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
 import { msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
@@ -99,8 +99,7 @@ const checks: Record<string, Check> = {
     return summary;
   },
   async secrets() {
-    const keys = await secrets.list();
-    return `${keys.length} entries under ${secrets.scope}${lastRenewError ? `; last renewal failed: ${lastRenewError}` : ''}`;
+    return secretsHealth(secrets, lastRenewError);
   },
 };
 

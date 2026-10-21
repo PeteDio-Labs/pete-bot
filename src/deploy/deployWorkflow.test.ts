@@ -122,6 +122,13 @@ describe('deploy.yml secret contract', () => {
 
   // PET-518. pete-bot calls nothing on mtrace, and that secret path also holds mtrace's
   // SSH key. A read of it here is a read the pete-bot-cd role no longer grants.
+  // PET-724. The deploy connects to 237 with its own key, kept in kv/services/pete-bot. The
+  // shared kv/iac/lxc-ssh key is root on every Terraform-built LXC, and the role no longer reads it.
+  it('never reads the shared lxc-ssh key', () => {
+    const paths = vaultSteps.flatMap((s) => s.with.secrets.split(';').map((l) => l.trim()));
+    expect(paths.filter((l) => l.includes('iac/lxc-ssh'))).toEqual([]);
+  });
+
   it('never reads the mtrace secret', () => {
     const paths = vaultSteps.flatMap((s) => s.with.secrets.split(';').map((l) => l.trim()));
     expect(paths.filter((l) => l.includes('services/media/dashboard'))).toEqual([]);

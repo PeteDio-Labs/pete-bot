@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { GitClone, runGit } from './git.js';
-import { gitHistoryTool } from './history.js';
+import { gitHistoryTool, parseLog } from './history.js';
 import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory, parseInventoryChecked } from './hosts.js';
 import { buildLabTools, toolDefinitions } from './index.js';
 import { kumaStatusTool } from './kuma.js';
@@ -419,6 +419,11 @@ describe('git_history', () => {
     expect(commits[1]!.pet).toEqual(['PET-617', 'PET-645']);
     expect(commits[0]!.sha).toMatch(/^[0-9a-f]{7}$/);
     expect(out.source).toMatch(/^2 commits from petedio-iac at [0-9a-f]{7}/);
+  });
+
+  it('reads PDL keys beside PET keys', () => {
+    const [c] = parseLog('abcdef1234\x1f2026-10-21\x1fPedro\x1fPDL-3: follow PET-730 and PET-730');
+    expect(c!.pet).toEqual(['PDL-3', 'PET-730']);
   });
 
   it('filters by path and by text', async () => {
