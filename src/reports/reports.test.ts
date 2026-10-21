@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadReportSettings, type ReportSettings } from './settings.js';
 import { dueReports, localTime } from './schedule.js';
-import { PlaneClient, type CycleRead } from './plane.js';
+import { PlaneClient, easternDate, type CycleRead } from './plane.js';
 import { collectRepo, petKeys, type GithubReads, type OpenPr, type RepoRead } from './collect.js';
 import { buildMorning, actionFor, nextMonday } from './morning.js';
 import { buildAudit } from './audit.js';
@@ -232,6 +232,26 @@ describe('cycle view', () => {
     const out = buildMorning(withCycles({ ok: false, error: 'HTTP 404' }), new Map());
     expect(out).toContain('INCOMPLETE');
     expect(out).toContain('Cycles not read: HTTP 404');
+  });
+  it('reads a late-evening Eastern end date as that day, not the next UTC day', () => {
+    expect(easternDate('2026-11-02T04:59:59Z')).toBe('2026-11-01');
+    expect(easternDate('2026-10-26T03:59:59Z')).toBe('2026-10-25');
+    expect(easternDate('2026-10-26')).toBe('2026-10-26');
+  });
+  it('says what the cycle read examined and does not drop a cycle row with only a join id', async () => {
+    const out = buildMorning(withCycles({ ...cycles, previous: cyc('Week of 2026-10-19', '2026-10-19', '2026-10-25', ['i5', 'i2', 'gone2']) } as CycleRead), new Map());
+    expect(out).toContain('2 cycles (current 5 items, previous 3 items)');
+    expect(out).toContain('items of that cycle are not on the board read');
+    const fetchImpl = (async (url: string | URL | Request) => String(url).includes('/cycle-issues/')
+      ? Response.json({ results: [{ id: 'join-row' }], next_page_results: false })
+      : Response.json({ results: [{ id: 'cur', name: 'W', start_date: '2026-10-26', end_date: '2026-11-01' }], next_page_results: false })) as typeof fetch;
+    expect((await new PlaneClient(plane, fetchImpl).cycles('2026-10-26')).ok).toBe(false);
+  });
+  it('does not claim the next cycle is missing when one starts on another day, and leaves no dangling dot', () => {
+    const out = buildMorning(withCycles({ ...cycles, next: cyc('Week of 2026-11-03', '2026-11-03', '2026-11-09') } as CycleRead), new Map());
+    expect(out).toContain("Could not match next week's cycle");
+    expect(out).not.toContain('does not exist');
+    expect(out).not.toMatch(/ · \n/);
   });
   it('reads cycles and their items from Plane', async () => {
     const fetchImpl = (async (url: string | URL | Request) => {

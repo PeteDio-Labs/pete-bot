@@ -60,8 +60,13 @@ export function summarizeReads(s: Snapshot): ReadSummary {
     plane = 'Plane not read';
     gaps.push(`Plane not read: ${s.plane.error}`);
   }
+  let cycles = '';
   if (s.cycles && !s.cycles.ok) gaps.push(`Cycles not read: ${s.cycles.error}`);
-  return { line: `Read: ${gh}; ${plane}.`, gaps };
+  else if (s.cycles) {
+    const part = (label: string, c: { itemIds: string[] | null } | null): string => (c ? `${label} ${c.itemIds?.length ?? 0} items` : `no ${label} cycle`);
+    cycles = `; ${s.cycles.total} cycles (${part('current', s.cycles.current)}, ${part('previous', s.cycles.previous)})`;
+  }
+  return { line: `Read: ${gh}; ${plane}${cycles}.`, gaps };
 }
 
 export function gapBlock(gaps: string[]): string[] {
