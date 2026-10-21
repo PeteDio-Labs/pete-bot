@@ -93,7 +93,7 @@ no Claude quota.
 
 | Report | When (Eastern) | What it lists |
 |---|---|---|
-| `morning` | Mondays and Fridays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item; this week's cycle split into Pedro items (`lan`, `mac`, `needs-pedro`) and AI items (`cloud`). On Mondays it also lists what last week's cycle left open and whether next week's cycle exists |
+| `morning` | Mondays and Fridays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item; this week's cycle split into Pedro items (`lan`, `mac`, `needs-pedro`) and AI items (`cloud`); the PRs merged this week and last week, by repo and by opener, with an "at least" note when a repo was not read or its closed-PR read hit the cap. On Mondays it also lists what last week's cycle left open and whether next week's cycle exists |
 | `audit` | Mondays 08:44 | Plane against GitHub: Todo items with an open PR, open items whose PRs all merged, In Review items with no PR, closed-unmerged PRs, passed target dates, PRs naming no item, and stale `verified:` dates when `REPORT_VAULT_PATH` is set |
 | `sweep` | Fridays and Sundays 18:47 | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
 
