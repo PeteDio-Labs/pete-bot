@@ -128,9 +128,8 @@ configured". `lab-agent` refuses to start on a missing or malformed setting.
 `lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the
 host notes' frontmatter, once a day at `LAB_DRIFT_AT` (11:15 UTC by default). Code finds the
 drift: a guest with no row or no note, a row or a note naming a guest Proxmox lacks, and a
-node, state or name that disagrees. Haiku only words the findings into a DM, through the
-gateway as the `lab-map` caller. When the gateway fails, the DM carries the findings as plain
-lines.
+node, state or name that disagrees. The check calls no model: the DM is the header below
+plus one plain line per finding.
 
 - Every DM leads with what the run read, such as `21 guests from Proxmox, 21 inventory rows,
   27 guest notes (petedio-vault @ 1a2b3c4)`.
