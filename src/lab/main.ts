@@ -148,9 +148,10 @@ const handler = createLabHandler({
   runDrift,
 });
 
-// Bun closes an idle connection after 10 s by default. An answer or a drift run can take
-// 80 s, so the caller would lose the reply to a run that still spends the cap and sends a DM.
-const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 120, fetch: handler });
+// Bun closes an idle connection after 10 s by default. An answer can take 80 s, and a drift
+// run with a failing DM waits through two retries (75 s) after three 15 s tries, so the
+// caller would lose the reply to a run that still sends a DM. 255 s is Bun's maximum.
+const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 255, fetch: handler });
 log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], model: cfg.gateway.model });
 
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.

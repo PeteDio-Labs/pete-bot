@@ -111,10 +111,23 @@ export function plainLines(findings: DriftFinding[]): string {
 /** notify's message cap is 1,800 characters; the header line takes some of that. */
 const MESSAGE_CAP = 1_700;
 
-/** The DM text for a run with findings: the counts first, then one line per finding. */
+const FOOTER = 'Proxmox is the truth: edit the note or table row.';
+
+/**
+ * The DM text for a run with findings: the counts first, then one line per finding. Past the
+ * cap it drops whole lines and says how many, and where the full list is. `journalctl -u
+ * lab-agent` holds every finding, because the run's log line carries them (PET-671).
+ */
 export function driftMessage(result: DriftResult): string {
   const header = `Drift: ${result.findings.length} finding${result.findings.length === 1 ? '' : 's'}. Read ${result.read}.`;
-  return cap(`${header}\n${plainLines(result.findings)}\nProxmox is the truth: edit the note or table row.`);
+  const lines = plainLines(result.findings).split('\n');
+  const whole = `${header}\n${lines.join('\n')}\n${FOOTER}`;
+  if (whole.length <= MESSAGE_CAP) return whole;
+  const more = (n: number) => `… ${n} more not shown. All ${lines.length} are in \`journalctl -u lab-agent\`, or POST /v1/drift/run.`;
+  let kept = lines.length;
+  const build = () => `${header}\n${lines.slice(0, kept).join('\n')}\n${more(lines.length - kept)}\n${FOOTER}`;
+  while (kept > 0 && build().length > MESSAGE_CAP) kept--;
+  return build();
 }
 
 function cap(text: string): string {
@@ -178,7 +191,7 @@ export function notifier(url: string, token: string, fetchImpl: typeof fetch = f
 
 type DriftKind =
   | { kind: 'clean'; read: string }
-  | { kind: 'drift'; read: string; findings: number }
+  | { kind: 'drift'; read: string; findings: number; lines: string[] }
   | { kind: 'read-failed'; error: string };
 /** `delivered` is null when the run had nothing to send. */
 export type DriftOutcome = DriftKind & { at: string; delivered: boolean | null };
@@ -186,6 +199,8 @@ export type DriftOutcome = DriftKind & { at: string; delivered: boolean | null }
 export interface DriftDeps {
   read: () => Promise<DriftReads>;
   notify: Notify;
+  /** Waits before each retry of a failed DM. Defaults to 15 s and 60 s: three tries in all. */
+  retryDelaysMs?: number[];
   log: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
@@ -201,7 +216,7 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
     if (result.findings.length === 0) {
       outcome = { kind: 'clean', read: result.read };
     } else {
-      outcome = { kind: 'drift', read: result.read, findings: result.findings.length };
+      outcome = { kind: 'drift', read: result.read, findings: result.findings.length, lines: plainLines(result.findings).split('\n') };
       message = driftMessage(result);
     }
   } catch (err) {
@@ -213,12 +228,17 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
   // null when there was nothing to send, so a clean run never reads as a failed delivery.
   let delivered: boolean | null = null;
   if (message) {
-    try {
-      await deps.notify(message);
-      delivered = true;
-    } catch (err) {
-      delivered = false;
-      deps.log('drift check could not DM', { level: 'error', outcome: outcome.kind, error: (err as Error).message });
+    // One failed delivery must not lose the night: pete-bot may be restarting at 11:15Z.
+    const delays = deps.retryDelaysMs ?? [15_000, 60_000];
+    for (let attempt = 0; attempt <= delays.length && delivered !== true; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, delays[attempt - 1]));
+      try {
+        await deps.notify(message);
+        delivered = true;
+      } catch (err) {
+        delivered = false;
+        deps.log('drift check could not DM', { level: 'error', outcome: outcome.kind, attempt: attempt + 1, error: (err as Error).message });
+      }
     }
   }
   const done: DriftOutcome = { ...outcome, at: new Date().toISOString(), delivered };

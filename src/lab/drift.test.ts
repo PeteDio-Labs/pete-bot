@@ -134,7 +134,11 @@ describe('driftMessage', () => {
     const many = { read: 'r', findings: Array.from({ length: 200 }, (_, i) => ({ vmid: i, what: 'x'.repeat(40) })) };
     const text = driftMessage(many);
     expect(text.length).toBeLessThanOrEqual(1700);
-    expect(text).toContain('cut; run /lab');
+    expect(text).toMatch(/… \d+ more not shown\. All 200 are in `journalctl -u lab-agent`/);
+    // Whole lines only, and the count adds up.
+    const shown = text.split('\n').filter((l) => l.startsWith('- ')).length;
+    expect(text).toContain(`… ${200 - shown} more not shown`);
+    expect(text.endsWith('Proxmox is the truth: edit the note or table row.')).toBe(true);
   });
 });
 
@@ -145,6 +149,7 @@ describe('runDriftCheck', () => {
       sent.push(m);
     },
     log: (msg: string, f: Record<string, unknown> = {}) => logs.push({ msg, ...f }),
+    retryDelaysMs: [0, 0],
   });
 
   it('logs the counts and sends nothing when clean', async () => {
@@ -175,8 +180,37 @@ describe('runDriftCheck', () => {
     };
     const out = await runDriftCheck(d);
     expect(out).toMatchObject({ kind: 'drift', findings: 2, delivered: false });
+    // Three tries, each logged, then the outcome.
+    expect(logs.slice(0, 3).map((l) => l.attempt)).toEqual([1, 2, 3]);
     expect(logs[0]).toMatchObject({ msg: 'drift check could not DM', level: 'error', outcome: 'drift', error: '/v1/notify answered HTTP 502' });
-    expect(logs[1]).toMatchObject({ msg: 'drift check', delivered: false });
+    expect(logs[3]).toMatchObject({ msg: 'drift check', delivered: false });
+  });
+
+  it('delivers on a retry after pete-bot restarts, and sends one DM', async () => {
+    const sent: string[] = [];
+    const logs: Array<Record<string, unknown>> = [];
+    const d = deps(async () => ({ ...clean, guests: [...clean.guests, guest(240, 'newbox')] }), sent, logs);
+    let calls = 0;
+    d.notify = async (m: string) => {
+      if (++calls < 3) throw new Error('ECONNREFUSED');
+      sent.push(m);
+    };
+    const out = await runDriftCheck(d);
+    expect(out).toMatchObject({ kind: 'drift', delivered: true });
+    expect(sent).toHaveLength(1);
+    expect(calls).toBe(3);
+  });
+
+  it('keeps every finding in the outcome and the log, past the DM cap', async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    const guests = Array.from({ length: 80 }, (_, i) => guest(300 + i, `extra-${i}`));
+    const out = await runDriftCheck(deps(async () => ({ ...clean, guests: [...clean.guests, ...guests] }), [], logs));
+    expect(out.kind).toBe('drift');
+    if (out.kind === 'drift') {
+      expect(out.lines).toHaveLength(out.findings);
+      expect(out.findings).toBeGreaterThan(80);
+    }
+    expect(logs.at(-1)).toMatchObject({ msg: 'drift check', kind: 'drift', lines: expect.any(Array) });
   });
 });
 
