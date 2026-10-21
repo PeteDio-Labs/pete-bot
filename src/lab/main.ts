@@ -17,7 +17,7 @@ import { createLabHandler, type Check } from './server.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
-import { msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
+import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -89,14 +89,10 @@ const checks: Record<string, Check> = {
   async kuma() {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
-  // Down only when the last run had something to say and could not DM it: a drift or a
-  // failed read that nobody heard about. A failed read that was DMed is the lab's fault, not
-  // lab-agent's, and before the first run there is nothing to report.
+  // Down when the last run could not DM what it found, or when no run has happened for
+  // about a day (a dead timer, or a restart across the schedule). See driftHealth.
   async drift() {
-    if (!lastDrift) return `no run yet; next at ${cfg.drift.at}Z`;
-    const summary = `last run ${lastDrift.at}: ${lastDrift.kind}`;
-    if (lastDrift.delivered === false) throw new Error(`${summary}, and its DM to /v1/notify failed`);
-    return summary;
+    return driftHealth(lastDrift, startedAt, new Date(), cfg.drift.at);
   },
   async secrets() {
     return secretsHealth(secrets, lastRenewError, async () => {
@@ -113,6 +109,7 @@ const callModel = gatewayCaller(cfg.gateway.url, cfg.gateway.token);
 const hostIndex = new HostIndex(vault);
 const notify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken);
 let lastDrift: DriftOutcome | null = null;
+const startedAt = new Date();
 const runDrift = singleFlight(async () => {
   lastDrift = await runDriftCheck({
     read: () =>
@@ -135,7 +132,9 @@ function scheduleDrift(): void {
   const wait = msUntil(cfg.drift.at, new Date());
   log('drift check scheduled', { at: `${cfg.drift.at}Z`, inMinutes: Math.round(wait / 60_000) });
   setTimeout(() => {
-    void runDrift().finally(scheduleDrift);
+    runDrift()
+      .catch((err) => log('drift check crashed', { level: 'error', error: (err as Error).message }))
+      .finally(scheduleDrift);
   }, wait);
 }
 scheduleDrift();

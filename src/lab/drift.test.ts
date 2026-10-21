@@ -2,7 +2,7 @@
  * The nightly drift check (PET-671): the comparison, the DM it drafts, and a run's outcomes.
  */
 import { describe, expect, it } from 'bun:test';
-import { compareLab, driftMessage, msUntil, readLab, runDriftCheck, singleFlight, type DriftReads } from './drift.js';
+import { compareLab, driftHealth, driftMessage, NotifyRefused, msUntil, readLab, runDriftCheck, singleFlight, type DriftReads } from './drift.js';
 import { createLabHandler } from './server.js';
 import type { ModelResponse } from './agent.js';
 import type { Guest } from './tools/proxmox.js';
@@ -274,5 +274,55 @@ describe('POST /v1/drift/run', () => {
     const res = await post(`Bearer ${ASK}`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ kind: 'clean', read: '2 guests', at: '2026-10-19T11:15:00Z', delivered: null });
+  });
+});
+
+describe('driftHealth', () => {
+  const start = new Date('2026-10-21T06:00:00Z');
+  const at = (h: number) => new Date(start.getTime() + h * 3_600_000);
+  const ran = { kind: 'clean', read: '21 guests from Proxmox', at: '2026-10-21T11:15:00Z', delivered: null } as const;
+
+  it('is red when no run has happened for a day, and green before that', () => {
+    expect(driftHealth(null, start, at(2), '11:15')).toContain('no run since start');
+    expect(() => driftHealth(null, start, at(26), '11:15')).toThrow('nightly check has stopped running');
+  });
+  it('counts from the last run and names what it examined', () => {
+    const now = new Date('2026-10-22T11:20:00Z');
+    expect(driftHealth(ran, start, now, '11:15')).toBe('last examined 21 guests from Proxmox at 2026-10-21T11:15:00Z (clean)');
+    expect(() => driftHealth(ran, start, new Date('2026-10-22T13:00:00Z'), '11:15')).toThrow('stopped running');
+  });
+  it('is red when the last DM failed, and says a failed read examined nothing', () => {
+    const now = new Date('2026-10-21T12:00:00Z');
+    expect(() => driftHealth({ ...ran, kind: 'drift', findings: 1, lines: ['x'], delivered: false }, start, now, '11:15')).toThrow('DM to /v1/notify failed');
+    expect(driftHealth({ kind: 'read-failed', error: 'boom', at: ran.at, delivered: true }, start, now, '11:15')).toContain('examined nothing: boom');
+  });
+});
+
+describe('DM retries', () => {
+  const base = (notify: (m: string) => Promise<void>) => ({
+    read: async () => { throw new Error('x'); },
+    notify,
+    log: () => {},
+    retryDelaysMs: [0, 0],
+  });
+  it('does not retry a 401 or 400, and retries a 503', async () => {
+    for (const status of [400, 401]) {
+      let n = 0;
+      const out = await runDriftCheck(base(async () => { n++; throw new NotifyRefused(status); }));
+      expect([n, out.delivered]).toEqual([1, false]);
+    }
+    let n = 0;
+    await runDriftCheck(base(async () => { n++; throw new NotifyRefused(503); }));
+    expect(n).toBe(3);
+  });
+  it('answers 502 from /v1/drift/run when nothing was examined or the DM failed', async () => {
+    const ASK = 'a'.repeat(40);
+    const run = (o: object) =>
+      createLabHandler({ askToken: ASK, tools: new Map(), callModel: async () => reply('x'), model: 'm', checks: {}, runDrift: async () => o as never })(
+        new Request('http://x/v1/drift/run', { method: 'POST', headers: { authorization: `Bearer ${ASK}` } }),
+      );
+    expect((await run({ kind: 'read-failed', error: 'e', at: 't', delivered: true })).status).toBe(502);
+    expect((await run({ kind: 'drift', read: 'r', findings: 1, lines: [], at: 't', delivered: false })).status).toBe(502);
+    expect((await run({ kind: 'drift', read: 'r', findings: 1, lines: [], at: 't', delivered: true })).status).toBe(200);
   });
 });

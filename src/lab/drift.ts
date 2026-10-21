@@ -200,8 +200,39 @@ export function notifier(url: string, token: string, fetchImpl: typeof fetch = f
       body: JSON.stringify({ from: 'lab-agent drift check', message }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) throw new Error(`/v1/notify answered HTTP ${res.status}`);
+    if (!res.ok) throw new NotifyRefused(res.status);
   };
+}
+
+/** pete-bot answered, and not with 2xx. A 4xx here is a wrong request or bearer, and a retry sends the same one. */
+export class NotifyRefused extends Error {
+  constructor(readonly status: number) {
+    super(`/v1/notify answered HTTP ${status}`);
+  }
+  get retryable(): boolean {
+    return ![400, 401, 403, 404].includes(this.status);
+  }
+}
+
+/** The hours after a run that /health tolerates before it reads the nightly check as dead. */
+export const DRIFT_MAX_AGE_HOURS = 25;
+
+/**
+ * The `drift` line of /health. ⚠ NO RUN IS NOT GREEN: a dead timer, or a restart across
+ * LAB_DRIFT_AT, would otherwise read as a clean lab. The age counts from the last run, or from
+ * start-up when none has run, so the check goes red about a day after it last examined anything.
+ */
+export function driftHealth(last: DriftOutcome | null, startedAt: Date, now: Date, at: string): string {
+  const since = last ? new Date(last.at) : startedAt;
+  const ageH = (now.getTime() - since.getTime()) / 3_600_000;
+  const examined = !last
+    ? `no run since start at ${startedAt.toISOString()}`
+    : last.kind === 'read-failed'
+      ? `last run ${last.at} examined nothing: ${last.error}`
+      : `last examined ${last.read} at ${last.at} (${last.kind})`;
+  if (!(ageH <= DRIFT_MAX_AGE_HOURS)) throw new Error(`${examined}; ${Math.floor(ageH)} h ago, so the nightly check has stopped running`);
+  if (last?.delivered === false) throw new Error(`${examined}, and its DM to /v1/notify failed`);
+  return last ? examined : `${examined}; next at ${at}Z`;
 }
 
 type DriftKind =
@@ -253,6 +284,8 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
       } catch (err) {
         delivered = false;
         deps.log('drift check could not DM', { level: 'error', outcome: outcome.kind, attempt: attempt + 1, error: (err as Error).message });
+        // A refused request or bearer fails the same way each time, so stop trying.
+        if (err instanceof NotifyRefused && !err.retryable) break;
       }
     }
   }

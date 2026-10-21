@@ -75,7 +75,10 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
       // runDrift is single-flight: a call during a run waits for that run's outcome.
-      return json(await deps.runDrift());
+      // 502 when the run examined nothing or its DM was not delivered, so a caller that
+      // reads only the status never mistakes either for a clean run.
+      const outcome = await deps.runDrift();
+      return json(outcome, outcome.kind === 'read-failed' || outcome.delivered === false ? 502 : 200);
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {
