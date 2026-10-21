@@ -110,7 +110,13 @@ export class AccessVerifier {
       return { ok: false, reason: `cannot read Access certs: ${(err as Error).message}` };
     }
     if (!jwk) return { ok: false, reason: 'JWT signed by an unknown key' };
-    const good = verifySignature('RSA-SHA256', Buffer.from(`${h}.${p}`), createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
+    let good: boolean;
+    try {
+      good = verifySignature('RSA-SHA256', Buffer.from(`${h}.${p}`), createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
+    } catch {
+      // A malformed published key must refuse with a reason, not escape as a 500.
+      return { ok: false, reason: 'cannot verify the JWT signature with the published key' };
+    }
     if (!good) return { ok: false, reason: 'bad JWT signature' };
 
     const nowSec = Math.floor(this.now() / 1000);

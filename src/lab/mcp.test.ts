@@ -132,6 +132,17 @@ describe('AccessVerifier', () => {
     expect(await v.verify(sign(claims()))).toEqual({ ok: false, reason: 'JWT signed by an unknown key' });
   });
 
+  it('refuses with a reason when the published key is malformed', async () => {
+    const v = new AccessVerifier({
+      teamDomain: TEAM,
+      aud: AUD,
+      emails: ['pedelgadillo@gmail.com'],
+      now: () => NOW,
+      fetch: (async () => json({ keys: [{ kid: 'k1', kty: 'RSA', e: 'AQAB' }] })) as unknown as typeof fetch,
+    });
+    expect(await v.verify(good())).toEqual({ ok: false, reason: 'cannot verify the JWT signature with the published key' });
+  });
+
   it('refuses everything when the certs cannot be read', async () => {
     const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: ['a@b.c'], now: () => NOW, fetch: (async () => json({}, 500)) as unknown as typeof fetch });
     expect(await v.verify(good())).toEqual({ ok: false, reason: 'cannot read Access certs: Access certs answered HTTP 500' });
@@ -342,12 +353,15 @@ describe('vault_presence', () => {
     await expect(refused.renewSelf()).rejects.toThrow('renew-self answered HTTP 403');
   });
 
-  it('reports a sealed Vault as unverified, and every other fault as a fault', async () => {
+  it('fails the health check when Vault is sealed, renewal failed or the listing is hollow', async () => {
     const list = (status: number, body: unknown = {}) =>
       new VaultMetadataClient({ ...cfg, fetch: (async () => json(body, status)) as unknown as typeof fetch });
-    expect(await secretsHealth(list(503), null)).toBe('unverified: Vault is sealed (nightly seal)');
-    expect(await secretsHealth(list(503), 'Vault renew-self answered HTTP 503')).toContain('last renewal failed');
-    expect(await secretsHealth(list(200, { data: { keys: ['a', 'b'] } }), null)).toBe('2 entries under kv/metadata/services/');
+    const keys = { data: { keys: ['a', 'b'] } };
+    expect(await secretsHealth(list(200, keys), null)).toBe('2 entries under kv/metadata/services/');
+    await expect(secretsHealth(list(503), null)).rejects.toThrow(/^SEALED: Vault is sealed \(nightly seal\)/);
+    // A sealed Vault never reads as green, even with a renewal error to report as well.
+    await expect(secretsHealth(list(503), 'Vault renew-self answered HTTP 503')).rejects.toThrow('SEALED');
+    await expect(secretsHealth(list(200, keys), 'Vault renew-self answered HTTP 403')).rejects.toThrow('last renewal failed');
     await expect(secretsHealth(list(403), null)).rejects.toThrow('HTTP 403');
     await expect(secretsHealth(list(200, { data: { keys: [] } }), null)).rejects.toThrow('listed 0 secrets');
   });

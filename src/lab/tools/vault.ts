@@ -37,20 +37,24 @@ interface Metadata {
 export class VaultSealedError extends LabToolError {}
 
 /**
- * The /health line for the Vault token (PET-667). A sealed Vault reports UP with an
- * unverified detail, because the seal is scheduled and the deploy gate waits on /health:
- * a merge in the seal window must not fail its deploy. Every other fault still throws,
- * and a lapsed token (403) or a hollow listing is one of those.
+ * The /health line for the Vault token (PET-667).
+ *
+ * ⚠ A CHECK THAT READ NOTHING IS NOT GREEN. A sealed Vault, a failed renewal and an empty
+ * listing all throw, so /health answers 503 and the iac deploy gate stops on them. Pedro chose
+ * this over reporting the nightly seal as up (2026-10-21): a merge in the seal window fails
+ * its deploy and passes on a re-run after the watcher unseals, and no deploy passes over a
+ * token it did not verify. The sealed message starts with SEALED so it reads as the seal.
  */
 export async function secretsHealth(client: VaultMetadataClient, lastRenewError: string | null): Promise<string> {
-  const renewal = lastRenewError ? `; last renewal failed: ${lastRenewError}` : '';
+  let keys: string[];
   try {
-    const keys = await client.list();
-    return `${keys.length} entries under ${client.scope}${renewal}`;
+    keys = await client.list();
   } catch (err) {
-    if (err instanceof VaultSealedError) return `unverified: Vault is sealed (nightly seal)${renewal}`;
+    if (err instanceof VaultSealedError) throw new Error(`SEALED: Vault is sealed (nightly seal), so the lab-agent token was not verified. Re-run once the watcher unseals it.`);
     throw err;
   }
+  if (lastRenewError) throw new Error(`the Vault token's last renewal failed (${lastRenewError}); it lapses within its period unless renewal works`);
+  return `${keys.length} entries under ${client.scope}`;
 }
 
 export class VaultMetadataClient {
