@@ -25,7 +25,7 @@ import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
-import { size as openIncidents } from './alertStore.js';
+import { size as openIncidents, heldCount } from './alertStore.js';
 import { deskHealth } from '../desk/index.js';
 import { reportsHealth } from '../reports/index.js';
 import { parseGatewaySettings } from '../gateway/config.js';
@@ -79,6 +79,8 @@ export function createApp(client: Client, options: AppOptions = {}): Express {
       service: 'pete-bot-http',
       uptimeSeconds: process.uptime(),
       alertBatches: openIncidents(),
+      // DOWNs held inside a maintenance window, waiting for their UP or their deadline (PET-492).
+      held: heldCount(),
       // off, misconfigured or on. Off is normal until a key is seeded. Misconfigured
       // means a guard setting is wrong, and the deploy check should fail on it.
       llm: llm.state,

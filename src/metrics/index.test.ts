@@ -91,6 +91,7 @@ describe('metrics', () => {
       'discord_bot_up',
       'discord_bot_websocket_latency_seconds',
       'pete_bot_alert_batches_open',
+      'pete_bot_alert_decisions_total',
       'pete_bot_alert_dms_total',
       'pete_bot_ask_duration_seconds',
       'pete_bot_ask_total',

@@ -23,8 +23,23 @@ import type { Client, DMChannel, EmbedBuilder as Embed } from 'discord.js';
 import { EmbedBuilder } from 'discord.js';
 import { config } from '../../config.js';
 import { logger } from '../../utils/index.js';
-import { recordDown, recordUp, attachMessage, size, type AlertBatch } from '../alertStore.js';
-import { alertDms, alertBatchesOpen } from '../../metrics/index.js';
+import {
+  recordDown,
+  recordUp,
+  foldOrphanUp,
+  attachMessage,
+  size,
+  isInBatch,
+  getHold,
+  addHold,
+  takeHold,
+  activeHolds,
+  setNote,
+  type AlertBatch,
+} from '../alertStore.js';
+import { alertDms, alertBatchesOpen, alertDecisions } from '../../metrics/index.js';
+import { scheduleDecider, type MaintenanceDecider } from '../decider.js';
+import { addSample, deadlineMs, stats } from '../baseline.js';
 
 // Kuma sends more than this; only these are depended on, and unknown keys are
 // ignored rather than rejected so a Kuma upgrade cannot break alerting.
@@ -76,13 +91,15 @@ function renderBatch(batch: AlertBatch, detail: string, now = Date.now()): Embed
 
   const lines = entries.map(([name, state]) => {
     if (state.recoveredAt !== undefined) {
+      // PET-436: no DOWN reached this process, so there is no outage length to report.
+      if (state.unseenDown) return `🟢 **${name}** — recovered`;
       return `🟢 **${name}** — recovered after ${humanise(Math.max(0, Math.round((state.recoveredAt - state.since) / 1000)))}`;
     }
     const bits: string[] = [];
     const seconds = Math.max(0, Math.round((now - state.since) / 1000));
     if (seconds >= 60) bits.push(`down for ${humanise(seconds)}`);
     if (state.checks > 1) bits.push(`${state.checks} checks`);
-    return `🔴 **${name}**${bits.length ? ` — ${bits.join(', ')}` : ''}`;
+    return `🔴 **${name}**${bits.length ? ` — ${bits.join(', ')}` : ''}${state.note ? `\n${state.note}` : ''}`;
   });
 
   // The probe's own message is worth showing for one monitor and unreadable for eight.
@@ -104,7 +121,69 @@ async function editInPlace(dm: DMChannel, messageId: string, embed: Embed): Prom
   }
 }
 
-export function createAlertHandler(client: Client) {
+/** When Kuma's heartbeat time parses, the decider reads it; otherwise the receipt time. Kuma runs TZ=UTC. */
+function heartbeatTime(raw: string | undefined, receivedAt: number): Date {
+  if (!raw) return new Date(receivedAt);
+  const parsed = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`);
+  return Number.isNaN(parsed.getTime()) ? new Date(receivedAt) : parsed;
+}
+
+function seconds(ms: number): string {
+  return `${Math.round(ms / 1000)}s`;
+}
+
+export function createAlertHandler(client: Client, decider: MaintenanceDecider = scheduleDecider(config.alerts.maintenanceWindows)) {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
+  async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string) {
+    const { batch, action } = recordDown(monitor);
+    if (note) setNote(batch.id, monitor, note);
+    const embed = renderBatch(batch, detail);
+    if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {
+      alertDms.inc({ action: 'edited', status: 'success' });
+      alertBatchesOpen.set(size());
+      return { action: 'edited' as const, messageId: batch.messageId };
+    }
+    const sent = await dm.send({ embeds: [embed] });
+    attachMessage(batch.id, dm.id, sent.id);
+    alertDms.inc({ action: 'sent', status: 'success' });
+    alertBatchesOpen.set(size());
+    return { action: 'sent' as const, messageId: sent.id };
+  }
+
+  /** The deadline passed with no UP: send the DM as an ordinary DOWN, with the extra line. */
+  async function expire(monitor: string): Promise<void> {
+    timers.delete(monitor);
+    const hold = takeHold(monitor);
+    if (!hold) return;
+    const s = stats(monitor);
+    const usual = s ? `usually back in ${seconds(s.meanMs)} ± ${seconds(s.sdMs)} (${s.n} nights)` : 'no recovery history yet';
+    const note = `↳ held in ${hold.window}; ${usual}; the ${seconds(hold.deadlineAt - hold.since)} deadline passed`;
+    logger.info(`[alert] decision=deadline monitor=${monitor} window="${hold.window}" deadlineMs=${hold.deadlineAt - hold.since} outcome=alerted`);
+    alertDecisions.inc({ decision: 'deadline', outcome: 'alerted' });
+    try {
+      const user = await client.users.fetch(config.discord.ownerUserId);
+      const dm = (await user.createDM()) as DMChannel;
+      await sendDown(dm, monitor, hold.detail, note);
+    } catch (err) {
+      // Fail open: a hold that cannot DM is retried by the next DOWN heartbeat, which no
+      // longer finds a hold and takes the ordinary path.
+      alertDecisions.inc({ decision: 'deadline', outcome: 'error' });
+      logger.error(`[alert] held DOWN for ${monitor} passed its deadline and the DM failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function arm(monitor: string, deadlineAt: number): void {
+    clearTimeout(timers.get(monitor));
+    const timer = setTimeout(() => void expire(monitor), Math.max(0, deadlineAt - Date.now()));
+    timer.unref?.();
+    timers.set(monitor, timer);
+  }
+
+  // Restart while holding: a deadline already past sends at once (arm clamps to 0).
+  for (const hold of activeHolds()) arm(hold.monitor, hold.deadlineAt);
+
   return async function alertHandler(req: Request, res: Response): Promise<void> {
     // ⚠ Bearer, not HMAC — see the module docstring. Compared with a length check
     // first so a wrong-length token cannot be distinguished by timing alone.
@@ -145,19 +224,54 @@ export function createAlertHandler(client: Client) {
       };
 
       if (down) {
-        const { batch, action } = recordDown(monitor);
-        const embed = renderBatch(batch, detail);
-        if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {
-          alertDms.inc({ action: 'edited', status: 'success' });
-          alertBatchesOpen.set(size());
-          res.json({ ok: true, action: 'edited', monitor, messageId: batch.messageId });
-          return;
+        // PET-492: a DOWN that starts inside a maintenance window is held, not sent. A
+        // monitor already in an open batch or already held skips the decision, and any error
+        // in it falls through to today's path: fail open, never mute an outage.
+        try {
+          const received = Date.now();
+          const held = getHold(monitor);
+          if (held) {
+            res.json({ ok: true, action: 'held', monitor });
+            return;
+          }
+          const window = isInBatch(monitor) ? null : decider.isMaintenance(heartbeatTime(parsed.data.heartbeat?.time, received));
+          if (window) {
+            const wait = deadlineMs(monitor);
+            addHold({ monitor, since: received, deadlineAt: received + wait, window, detail });
+            arm(monitor, received + wait);
+            logger.info(`[alert] decision=held monitor=${monitor} window="${window}" heartbeat=${parsed.data.heartbeat?.time ?? 'none'} deadlineMs=${wait}`);
+            alertDecisions.inc({ decision: 'held', outcome: 'pending' });
+            res.json({ ok: true, action: 'held', monitor, deadlineMs: wait });
+            return;
+          }
+        } catch (err) {
+          alertDecisions.inc({ decision: 'held', outcome: 'error' });
+          logger.error(`[alert] maintenance decision failed for ${monitor}, alerting as usual: ${err instanceof Error ? err.message : String(err)}`);
         }
-        await deliver(embed, batch.id);
+        const sent = await sendDown(dm, monitor, detail);
+        res.json({ ok: true, action: sent.action, monitor, channelId: dm.id, messageId: sent.messageId });
         return;
       }
 
       if (up) {
+        // A held DOWN that recovers before its deadline is released with no DM, and its
+        // recovery time trains the deadline.
+        const hold = takeHold(monitor);
+        if (hold) {
+          clearTimeout(timers.get(monitor));
+          timers.delete(monitor);
+          const took = Date.now() - hold.since;
+          try {
+            addSample(monitor, took);
+          } catch (err) {
+            logger.error(`[alert] cannot record the recovery of ${monitor}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          logger.info(`[alert] decision=released monitor=${monitor} window="${hold.window}" recoveryMs=${took} outcome=recovered`);
+          alertDecisions.inc({ decision: 'released', outcome: 'recovered' });
+          res.json({ ok: true, action: 'released', monitor, recoveryMs: took });
+          return;
+        }
+
         const { batch } = recordUp(monitor);
         if (batch?.messageId) {
           const embed = renderBatch(batch, detail);
@@ -168,14 +282,22 @@ export function createAlertHandler(client: Client) {
             return;
           }
         }
-        // A recovery for an outage this process never saw — a restart with no state
-        // path, most often. Say it plainly rather than dropping it.
-        const embed = new EmbedBuilder()
-          .setColor(COLOR_UP)
-          .setTitle(`🟢 UP — ${monitor}`)
-          .setTimestamp(new Date());
-        if (detail) embed.setDescription(`\`\`\`${detail.slice(0, 900)}\`\`\``);
-        await deliver(embed);
+        // A recovery for an outage this process never saw (PET-436). Fold it into the open
+        // or most recent incident message, or open one message that the rest of the burst
+        // folds into, instead of posting a DM per monitor.
+        const orphan = batch ? null : foldOrphanUp(monitor);
+        if (orphan && !orphan.isNew && orphan.batch.messageId) {
+          if (await editInPlace(dm, orphan.batch.messageId, renderBatch(orphan.batch, detail))) {
+            alertDms.inc({ action: 'edited', status: 'success' });
+            res.json({ ok: true, action: 'edited', monitor, messageId: orphan.batch.messageId });
+            return;
+          }
+        }
+        const embed = orphan
+          ? renderBatch(orphan.batch, detail)
+          : new EmbedBuilder().setColor(COLOR_UP).setTitle(`🟢 UP — ${monitor}`).setTimestamp(new Date());
+        if (!orphan && detail) embed.setDescription(`\`\`\`${detail.slice(0, 900)}\`\`\``);
+        await deliver(embed, orphan?.batch.id);
         return;
       }
 

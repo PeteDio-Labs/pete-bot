@@ -1,5 +1,6 @@
 // Configuration module
 import 'dotenv/config';
+import { parseWindows, type MaintenanceWindow } from './server/decider.js';
 
 interface Config {
   discord: {
@@ -34,6 +35,16 @@ interface Config {
      * and posts the recovery separately.
      */
     statePath: string;
+    /**
+     * PET-492 — windows in which a DOWN is held instead of sent. petedio-iac renders them
+     * from the backup schedule. Empty turns the hold off. A malformed value throws at
+     * start, so the deploy's health check fails instead of the hold silently turning off.
+     */
+    maintenanceWindows: MaintenanceWindow[];
+    /** The deadline for a held DOWN until a monitor has enough recoveries on record. */
+    maintenanceDeadlineMs: number;
+    /** Recovery times per monitor, for the deadline. Empty keeps them in memory only. */
+    baselinePath: string;
   };
   /**
    * /update (PET-395). pete-bot starts petedio-media-iac's media-updates.yml and reads
@@ -113,6 +124,10 @@ export const config: Config = {
   alerts: {
     coalesceMs: parseInt(getEnvVar('ALERT_COALESCE_MS', '60000'), 10),
     statePath: getEnvVar('ALERT_STATE_PATH', ''),
+    maintenanceWindows: parseWindows(getEnvVar('ALERT_MAINTENANCE_WINDOWS', '')),
+    // The longest nightly recovery on record is 100 s, so 5 minutes suppresses every ordinary night.
+    maintenanceDeadlineMs: parseInt(getEnvVar('ALERT_MAINTENANCE_DEADLINE_MS', '300000'), 10),
+    baselinePath: getEnvVar('ALERT_BASELINE_PATH', ''),
   },
   updates: {
     token: getEnvVar('GITHUB_UPDATES_TOKEN', ''),
