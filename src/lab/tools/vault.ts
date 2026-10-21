@@ -45,7 +45,12 @@ export class VaultSealedError extends LabToolError {}
  * its deploy and passes on a re-run after the watcher unseals, and no deploy passes over a
  * token it did not verify. The sealed message starts with SEALED so it reads as the seal.
  */
-export async function secretsHealth(client: VaultMetadataClient, lastRenewError: string | null): Promise<string> {
+export async function secretsHealth(
+  client: VaultMetadataClient,
+  lastRenewError: string | null,
+  /** Renews now and returns the new error, or null. Without it a failed renewal stays red until the next scheduled one. */
+  retryRenew?: () => Promise<string | null>,
+): Promise<string> {
   let keys: string[];
   try {
     keys = await client.list();
@@ -53,6 +58,9 @@ export async function secretsHealth(client: VaultMetadataClient, lastRenewError:
     if (err instanceof VaultSealedError) throw new Error(`SEALED: Vault is sealed (nightly seal), so the lab-agent token was not verified. Re-run once the watcher unseals it.`);
     throw err;
   }
+  // The listing worked, so Vault is open. A renewal that failed while it was sealed would
+  // otherwise keep /health red until the next 12-hour tick, so try it again now.
+  if (lastRenewError && retryRenew) lastRenewError = await retryRenew();
   if (lastRenewError) throw new Error(`the Vault token's last renewal failed (${lastRenewError}); it lapses within its period unless renewal works`);
   return `${keys.length} entries under ${client.scope}`;
 }

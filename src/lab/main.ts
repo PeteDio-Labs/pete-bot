@@ -88,7 +88,10 @@ const checks: Record<string, Check> = {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
   async secrets() {
-    return secretsHealth(secrets, lastRenewError);
+    return secretsHealth(secrets, lastRenewError, async () => {
+      await renew();
+      return lastRenewError;
+    });
   },
 };
 
