@@ -28,10 +28,22 @@ export function monthOf(at: Date): string {
   return at.toISOString().slice(0, 7);
 }
 
+/** One caller and model's totals for a month, in nano-dollars and tokens. */
+export interface MonthTotal {
+  caller: string;
+  model: string;
+  costNanoUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 export class Ledger {
   private readonly db: Database;
   private readonly insert: Statement;
   private readonly spent: Statement;
+  private readonly totals: Statement;
 
   constructor(path: string) {
     this.db = new Database(path, { create: true, strict: true });
@@ -60,6 +72,15 @@ export class Ledger {
     this.spent = this.db.prepare(
       'SELECT COALESCE(SUM(cost_nano_usd), 0) AS total FROM llm_usage WHERE caller = ? AND month = ?',
     );
+    this.totals = this.db.prepare(`
+      SELECT caller, model,
+        COALESCE(SUM(cost_nano_usd), 0)      AS cost,
+        COALESCE(SUM(input_tokens), 0)       AS input,
+        COALESCE(SUM(output_tokens), 0)      AS output,
+        COALESCE(SUM(cache_read_tokens), 0)  AS cache_read,
+        COALESCE(SUM(cache_write_tokens), 0) AS cache_write
+      FROM llm_usage WHERE month = ? GROUP BY caller, model
+    `);
   }
 
   record(entry: LedgerEntry, at = new Date()): void {
@@ -83,6 +104,20 @@ export class Ledger {
     return Number(row?.total ?? 0);
   }
 
+  /** Every caller and model's totals in the month `at` falls in. Feeds the Prometheus gauges (PET-711). */
+  monthTotals(at = new Date()): MonthTotal[] {
+    const rows = this.totals.all(monthOf(at)) as Array<Record<string, string | number | bigint>>;
+    return rows.map((r) => ({
+      caller: String(r.caller),
+      model: String(r.model),
+      costNanoUsd: Number(r.cost),
+      inputTokens: Number(r.input),
+      outputTokens: Number(r.output),
+      cacheReadTokens: Number(r.cache_read),
+      cacheWriteTokens: Number(r.cache_write),
+    }));
+  }
+
   /**
    * bun:sqlite keeps a database open while a prepared statement holds it, so the
    * statements are finalized first. After close, every read and write throws.
@@ -90,6 +125,7 @@ export class Ledger {
   close(): void {
     this.insert.finalize();
     this.spent.finalize();
+    this.totals.finalize();
     this.db.close();
   }
 }

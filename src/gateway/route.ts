@@ -49,6 +49,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '../utils/index.js';
 import type { Caller, GatewaySettings } from './config.js';
+import { setLlmUsageSource } from '../metrics/index.js';
 import { Ledger } from './ledger.js';
 import { canonicalModel, costNanoUsd, priceFor, type Usage } from './pricing.js';
 
@@ -207,6 +208,9 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
     );
     return closedGateway('misconfigured');
   }
+
+  // The scrape reads this month's totals from the same ledger the caps read (PET-711).
+  setLlmUsageSource(() => ledger.monthTotals(now()));
 
   /**
    * Set when an answered request could not be recorded. Its cost is missing from the
@@ -392,6 +396,9 @@ export function createGateway(settings: GatewaySettings, deps: GatewayDeps = {})
     state: 'on',
     guard,
     handle,
-    close: () => ledger.close(),
+    close: () => {
+      setLlmUsageSource(null);
+      ledger.close();
+    },
   };
 }
