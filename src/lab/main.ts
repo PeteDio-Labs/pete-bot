@@ -10,6 +10,7 @@
  * Built as its own binary: `bun run build:lab-binary`.
  */
 import { gatewayCaller } from './agent.js';
+import { ollamaCaller } from './ollama.js';
 import { loadLabConfig, type LabConfig } from './config.js';
 import { AccessVerifier } from './access.js';
 import { createMcpHandler } from './mcp.js';
@@ -64,7 +65,17 @@ void renew();
 setInterval(() => void renew(), 12 * 60 * 60_000);
 
 const checks: Record<string, Check> = {
+  // The model backend. The check keeps the name `gateway` so /health and its readers do not change.
   async gateway() {
+    if (cfg.provider === 'ollama') {
+      // /api/tags lists the pulled models and spends nothing. A missing model is a fault now,
+      // not a surprise at the first question.
+      const res = await fetch(`${cfg.ollama.url}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+      if (!res.ok) throw new Error(`ollama answered HTTP ${res.status} to /api/tags`);
+      const names = ((await res.json()) as { models?: Array<{ name: string }> }).models?.map((m) => m.name) ?? [];
+      if (!names.some((n) => n === cfg.gateway.model || n === `${cfg.gateway.model}:latest`)) throw new Error(`ollama has not pulled ${cfg.gateway.model}`);
+      return `ollama up, ${cfg.gateway.model} pulled`;
+    }
     // An empty body proves the bearer and spends nothing: the gateway checks the bearer
     // first (401), then refuses the body (400) before it forwards anything. It cannot prove
     // the model grant or the monthly cap; only a forwarded request can, and that spends.
@@ -103,7 +114,7 @@ const checks: Record<string, Check> = {
   },
 };
 
-const callModel = gatewayCaller(cfg.gateway.url, cfg.gateway.token);
+const callModel = cfg.provider === 'ollama' ? ollamaCaller(cfg.ollama.url, cfg.ollama.numCtx) : gatewayCaller(cfg.gateway.url, cfg.gateway.token);
 
 // The nightly drift check (PET-671). Its own HostIndex over the same clone, so a run reads
 // the vault at the commit the fetch just brought in.

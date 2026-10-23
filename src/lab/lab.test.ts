@@ -32,6 +32,7 @@ describe('loadLabConfig', () => {
   it('fills the defaults and reads the CA', () => {
     const cfg = loadLabConfig(baseEnv, () => CA);
     expect(cfg.port).toBe(3016);
+    expect(cfg.provider).toBe('gateway');
     expect(cfg.gateway).toEqual({ url: 'http://127.0.0.1:3015/v1/llm', token: GW, model: 'claude-haiku-4-5' });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
@@ -39,6 +40,16 @@ describe('loadLabConfig', () => {
     expect(cfg.mcp).toBeNull();
     expect(cfg.plane).toBeNull();
     expect(cfg.drift).toEqual({ notifyUrl: 'http://127.0.0.1:3015/v1/notify', notifyToken: 'n'.repeat(40), at: '11:15' });
+  });
+
+  it('runs on Ollama with no gateway bearer, and requires the bearer for the gateway', () => {
+    const { LAB_GATEWAY_TOKEN: _drop, ...noToken } = baseEnv;
+    expect(() => loadLabConfig(noToken, () => CA)).toThrow('LAB_GATEWAY_TOKEN: is required');
+    const cfg = loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama' }, () => CA);
+    expect(cfg.provider).toBe('ollama');
+    expect(cfg.gateway.model).toBe('qwen3:8b');
+    expect(cfg.ollama).toEqual({ url: 'http://192.168.50.12:11434', numCtx: 8192 });
+    expect(loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama', LAB_MODEL: 'qwen3:4b' }, () => CA).gateway.model).toBe('qwen3:4b');
   });
 
   it('turns plane_item on only with a token, and defaults the rest', () => {
