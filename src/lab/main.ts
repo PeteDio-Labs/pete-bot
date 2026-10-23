@@ -44,6 +44,7 @@ const tools = buildLabTools({
   secrets: cfg.vault,
   deskHealthUrl: cfg.deskHealthUrl,
   plane: cfg.plane ?? undefined,
+  search: cfg.search ?? undefined,
   units: LAB_UNITS,
 });
 const pve = new ProxmoxClient(cfg.proxmox);

@@ -12,6 +12,7 @@ import { kumaStatusTool, type KumaConfig } from './kuma.js';
 import { deskStatusTool, systemdStatusTool, type SystemctlRunner } from './local.js';
 import { VaultMetadataClient, vaultPresenceTool, type VaultConfig } from './vault.js';
 import { PlaneClient, planeItemTool, type PlaneConfig } from './plane.js';
+import { searchLabTool, type SearchConfig } from './search.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool, type ProxmoxConfig } from './proxmox.js';
 import { inputJsonSchema, type LabTool } from './types.js';
 
@@ -34,6 +35,8 @@ export interface LabToolsConfig {
   deskHealthUrl: string;
   /** Plane, for plane_item (PET-672). Absent until the token is seeded, and then the tool is not offered. */
   plane?: PlaneConfig;
+  /** petedio-search, for search_lab (PET-745). Absent until the token is seeded, and then the tool is not offered. */
+  search?: SearchConfig;
   /** The systemd units on this host that systemd_status may read. */
   units: readonly string[];
   systemctl?: SystemctlRunner;
@@ -53,6 +56,7 @@ export function buildLabTools(cfg: LabToolsConfig): Map<string, LabTool> {
     systemdStatusTool(cfg.units, cfg.systemctl),
     vaultPresenceTool(new VaultMetadataClient(cfg.secrets)),
     ...(cfg.plane ? [planeItemTool(new PlaneClient(cfg.plane))] : []),
+    ...(cfg.search ? [searchLabTool(cfg.search)] : []),
   ];
   return new Map(tools.map((t) => [t.name, t]));
 }
