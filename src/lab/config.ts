@@ -55,6 +55,9 @@ const EnvSchema = z.object({
   LAB_PLANE_WORKSPACE: z.string().min(1).default('petedio'),
   LAB_PLANE_PROJECT_ID: z.string().uuid().default('2b962587-cfc8-404d-bbfc-d57c3a60e07f'),
   LAB_PLANE_TOKEN: TOKEN.optional(),
+  // search_lab (PET-745). The tool is offered only when the token is set.
+  LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
+  LAB_SEARCH_TOKEN: TOKEN.optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
 }).superRefine((e, ctx) => {
@@ -77,6 +80,8 @@ export interface LabConfig {
   deskHealthUrl: string;
   /** null while no Plane token is set. */
   plane: { baseUrl: string; workspace: string; projectId: string; token: string } | null;
+  /** null while no search token is set. */
+  search: { baseUrl: string; token: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
@@ -136,6 +141,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     plane: e.LAB_PLANE_TOKEN
       ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, projectId: e.LAB_PLANE_PROJECT_ID, token: e.LAB_PLANE_TOKEN }
       : null,
+    search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,
   };
