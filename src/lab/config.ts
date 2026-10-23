@@ -18,8 +18,13 @@ const EnvSchema = z.object({
   LAB_PORT: z.coerce.number().int().min(1024).max(65535).default(3016),
   LAB_ASK_TOKEN: TOKEN,
   LAB_GATEWAY_URL: z.string().url().default('http://127.0.0.1:3015/v1/llm'),
-  LAB_GATEWAY_TOKEN: TOKEN,
-  LAB_MODEL: z.string().min(1).default('claude-haiku-4-5'),
+  // The model provider (PET-742): the Anthropic gateway, or a local Ollama lane. The gateway
+  // bearer is needed only for the gateway.
+  LAB_PROVIDER: z.enum(['gateway', 'ollama']).default('gateway'),
+  LAB_GATEWAY_TOKEN: TOKEN.optional(),
+  LAB_OLLAMA_URL: z.string().url().default('http://192.168.50.12:11434'),
+  LAB_OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).max(32768).default(8192),
+  LAB_MODEL: z.string().min(1).optional(),
   LAB_PVE_URL: z.string().regex(/^https:\/\//, 'must be https://'),
   LAB_PVE_TOKEN_ID: z.string().regex(/^[^@\s]+@[^!\s]+![^\s=]+$/, 'must look like user@realm!name'),
   LAB_PVE_TOKEN_SECRET: z.string().min(8),
@@ -52,12 +57,19 @@ const EnvSchema = z.object({
   LAB_PLANE_TOKEN: TOKEN.optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
+}).superRefine((e, ctx) => {
+  if (e.LAB_PROVIDER === 'gateway' && !e.LAB_GATEWAY_TOKEN) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['LAB_GATEWAY_TOKEN'], message: 'is required when LAB_PROVIDER is gateway' });
+  }
 });
 
 export interface LabConfig {
   port: number;
   askToken: string;
+  /** Which backend answers: the Anthropic gateway or Ollama. `gateway.model` is the model for either. */
+  provider: 'gateway' | 'ollama';
   gateway: { url: string; token: string; model: string };
+  ollama: { url: string; numCtx: number };
   proxmox: { baseUrl: string; tokenId: string; tokenSecret: string; caPem: string };
   kuma: { baseUrl: string; slug: string };
   clones: { vault: string; iac: string; mediaIac: string };
@@ -109,7 +121,13 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
   return {
     port: e.LAB_PORT,
     askToken: e.LAB_ASK_TOKEN,
-    gateway: { url: e.LAB_GATEWAY_URL.replace(/\/$/, ''), token: e.LAB_GATEWAY_TOKEN, model: e.LAB_MODEL },
+    provider: e.LAB_PROVIDER,
+    gateway: {
+      url: e.LAB_GATEWAY_URL.replace(/\/$/, ''),
+      token: e.LAB_GATEWAY_TOKEN ?? '',
+      model: e.LAB_MODEL ?? (e.LAB_PROVIDER === 'ollama' ? 'qwen3:8b' : 'claude-haiku-4-5'),
+    },
+    ollama: { url: e.LAB_OLLAMA_URL.replace(/\/$/, ''), numCtx: e.LAB_OLLAMA_NUM_CTX },
     proxmox: { baseUrl: e.LAB_PVE_URL, tokenId: e.LAB_PVE_TOKEN_ID, tokenSecret: e.LAB_PVE_TOKEN_SECRET, caPem },
     kuma: { baseUrl: e.LAB_KUMA_URL, slug: e.LAB_KUMA_SLUG },
     clones: { vault: e.LAB_VAULT_CLONE, iac: e.LAB_IAC_CLONE, mediaIac: e.LAB_MEDIA_IAC_CLONE },
