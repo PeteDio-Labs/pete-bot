@@ -233,6 +233,26 @@ jobs:
             kv/data/services/claude-workspace-mirror installation_id | LAB_GH_INSTALL_ID ;
             kv/data/services/claude-workspace-mirror app_pem | LAB_GH_APP_PEM
 
+      # lab-agent's two optional tool tokens (PET-672 plane_item, PET-745 search_lab). The play
+      # refuses a deploy that would drop an installed token, so a deploy-on-merge that does not
+      # read these paths fails closed once either is installed. Absent paths are allowed:
+      # before a seed, the tool stays off and the deploy passes. A 403 or an outage still
+      # fails the step, as in the steps above.
+      - name: Vault — the lab-agent plane and search tokens, an absent path is allowed
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/lab-agent-plane token | LAB_PLANE_TOKEN ;
+            kv/data/services/lab-agent-search token | LAB_SEARCH_TOKEN
+
       - name: Stage the secrets as files, never as arguments
         run: |
           umask 077
@@ -276,6 +296,9 @@ jobs:
               "lab_agent_pve_token_secret": os.environ.get("LAB_PVE_SECRET", ""),
               "lab_agent_pve_endpoint":     os.environ.get("LAB_PVE_ENDPOINT", ""),
               "lab_agent_pve_ca_pem":       os.environ.get("LAB_PVE_CA", ""),
+              # .get for the same reason. Empty keeps plane_item and search_lab off.
+              "lab_agent_plane_token":      os.environ.get("LAB_PLANE_TOKEN", ""),
+              "lab_agent_search_token":     os.environ.get("LAB_SEARCH_TOKEN", ""),
               # The public half of the key above. The play authorizes it for root on 237 and
               # drops any older pete-bot-cd key (PET-724).
               "pete_bot_cd_public_key":       os.environ["PB_CD_PUBLIC_KEY"],
