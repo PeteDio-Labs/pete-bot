@@ -60,6 +60,14 @@ export const alertDms = new Counter({
   registers: [register],
 });
 
+/** decision: held, released or deadline. outcome: pending, recovered, alerted, recovered_late or error. */
+export const alertDecisions = new Counter({
+  name: 'pete_bot_alert_decisions_total',
+  help: 'Maintenance-window decisions for DOWN alerts (PET-492), by decision and outcome',
+  labelNames: ['decision', 'outcome'],
+  registers: [register],
+});
+
 export const alertBatchesOpen = new Gauge({
   name: 'pete_bot_alert_batches_open',
   help: 'Incidents currently open, each one message in the owner DM',

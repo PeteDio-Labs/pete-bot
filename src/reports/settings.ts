@@ -33,8 +33,6 @@ export interface ReportSettings {
   /** null when PLANE_API_KEY is empty. The reports then say Plane was not read. */
   plane: PlaneSettings | null;
   enabled: ReadonlySet<ReportName>;
-  /** The sweep runs on Mondays only. Pedro's plan sets this on 2026-12-01. */
-  sweepWeekly: boolean;
   /** An open PR with no update for this many days is stale. */
   staleDays: number;
   statePath: string;
@@ -50,7 +48,6 @@ export type ReportsState =
 export interface ReportsEnv {
   REPORTS_MODE?: string;
   REPORTS_ENABLED?: string;
-  REPORT_SWEEP_WEEKLY?: string;
   REPORT_STALE_DAYS?: string;
   REPORT_STATE_PATH?: string;
   REPORT_VAULT_PATH?: string;
@@ -134,7 +131,6 @@ export function loadReportSettings(
       privateKeyPem,
       plane,
       enabled: new Set(names as ReportName[]),
-      sweepWeekly: (env.REPORT_SWEEP_WEEKLY ?? '').trim() === 'true',
       staleDays,
       statePath,
       vaultPath: (env.REPORT_VAULT_PATH ?? '').trim(),

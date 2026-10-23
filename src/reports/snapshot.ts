@@ -4,12 +4,14 @@
 import type { CodexReview } from '../desk/codex.js';
 import type { CheckSummary } from '../desk/github.js';
 import type { OpenPr, RepoRead } from './collect.js';
-import type { PlaneItem, PlaneRead } from './plane.js';
+import type { CycleRead, PlaneItem, PlaneRead } from './plane.js';
 
 export interface Snapshot {
   at: Date;
   repos: RepoRead[];
   plane: PlaneRead;
+  /** Read only for the morning queue. `undefined` means the report does not show cycles. */
+  cycles?: CycleRead;
 }
 
 export const PLANE_BROWSE = 'https://plane.pdlab.dev/petedio/browse';
@@ -58,7 +60,13 @@ export function summarizeReads(s: Snapshot): ReadSummary {
     plane = 'Plane not read';
     gaps.push(`Plane not read: ${s.plane.error}`);
   }
-  return { line: `Read: ${gh}; ${plane}.`, gaps };
+  let cycles = '';
+  if (s.cycles && !s.cycles.ok) gaps.push(`Cycles not read: ${s.cycles.error}`);
+  else if (s.cycles) {
+    const part = (label: string, c: { itemIds: string[] | null } | null): string => (c ? `${label} ${c.itemIds?.length ?? 0} items` : `no ${label} cycle`);
+    cycles = `; ${s.cycles.dated} dated cycles${s.cycles.undated ? `, ${s.cycles.undated} undated skipped` : ''} (${part('current', s.cycles.current)}, ${part('previous', s.cycles.previous)})`;
+  }
+  return { line: `Read: ${gh}; ${plane}${cycles}.`, gaps };
 }
 
 export function gapBlock(gaps: string[]): string[] {

@@ -35,7 +35,29 @@ export type PlaneRead =
   | { ok: true; items: PlaneItem[]; states: number; labels: number }
   | { ok: false; error: string };
 
+export interface PlaneCycle {
+  id: string;
+  name: string;
+  /** YYYY-MM-DD. */
+  start: string;
+  end: string;
+  /** Work item ids in the cycle. `null` when the cycle's items were not read. */
+  itemIds: string[] | null;
+}
+
+/** The cycles around today. A Monday-to-Sunday cycle covers `today`; `previous` ended before it. */
+export type CycleRead =
+  | { ok: true; current: PlaneCycle | null; previous: PlaneCycle | null; next: PlaneCycle | null; upcoming: PlaneCycle[]; dated: number; undated: number }
+  | { ok: false; error: string };
+
 type Fetch = typeof fetch;
+
+interface RawCycle {
+  id: string;
+  name?: string;
+  start_date?: string | null;
+  end_date?: string | null;
+}
 
 interface RawState {
   id: string;
@@ -157,5 +179,39 @@ export class PlaneClient {
     const newest = rows.reduce((a, b) => ((b.created_at ?? '') > (a.created_at ?? '') ? b : a));
     const text = (newest.comment_stripped ?? newest.comment_html ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     return { at: newest.created_at ?? '', text };
+  }
+
+  /**
+   * Cycle dates are UTC wall-clock dates in the cycle's own timezone (live Plane: start
+   * "2026-11-02T00:00:01Z", end "2026-11-08T23:59:00Z"), so the first ten characters are the
+   * day. A cycle-issues row names its work item in `issue`; a row shaped like a work item
+   * (it has `sequence_id`) is that item, and any other row is an error.
+   *
+   * The cycles around `today` (YYYY-MM-DD, Eastern) and the items of the current and previous
+   * one. A cycle read that fails returns an error, and the morning queue says so.
+   */
+  async cycles(today: string): Promise<CycleRead> {
+    try {
+      const raw = await this.all<RawCycle>('reading cycles', 'cycles/');
+      const dated: PlaneCycle[] = raw
+        .filter((c) => c.start_date && c.end_date)
+        .map((c) => ({ id: c.id, name: c.name ?? '?', start: c.start_date!.slice(0, 10), end: c.end_date!.slice(0, 10), itemIds: null }))
+        .sort((a, b) => b.start.localeCompare(a.start));
+      const current = dated.find((c) => c.start <= today && today <= c.end) ?? null;
+      const before = dated.filter((c) => c.end < (current?.start ?? today));
+      const previous = before.length ? before.reduce((a, b) => (b.end > a.end ? b : a)) : null;
+      const after = dated.filter((c) => c.start > today);
+      const next = after.length ? after.reduce((a, b) => (b.start < a.start ? b : a)) : null;
+      for (const c of [current, previous]) {
+        if (!c) continue;
+        const rows = await this.all<{ id?: string; issue?: string | { id: string } | null; sequence_id?: number }>('reading cycle items', `cycles/${c.id}/cycle-issues/`);
+        const ids = rows.map((r) => ref(r.issue) ?? (r.sequence_id !== undefined ? (r.id ?? null) : null));
+        if (ids.some((i) => i === null)) throw new Error(`cycle "${c.name}" has an item row with no work item id (a join row's own id is not the item's)`);
+        c.itemIds = ids as string[];
+      }
+      return { ok: true, current, previous, next, upcoming: after, dated: dated.length, undated: raw.length - dated.length };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 }

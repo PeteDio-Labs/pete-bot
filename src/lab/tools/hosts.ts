@@ -51,7 +51,19 @@ export function parseFrontmatter(text: string): { frontmatter: Record<string, st
  * "## Live inventory". Rows elsewhere in the note (history, the node summary) are skipped.
  */
 export function parseInventory(text: string): InventoryRow[] {
+  return parseInventoryChecked(text).rows;
+}
+
+/**
+ * As parseInventory, and it names every table line it could not read as a row.
+ *
+ * ⚠ A SKIPPED LINE IS A GUEST THE COMPARISON NEVER SEES. A row with a mistyped VMID or a lost
+ * cell would drop out of the table, and the drift check would then report a clean lab for it.
+ * The caller must surface `skipped`. A header or separator line is not a row and not skipped.
+ */
+export function parseInventoryChecked(text: string): { rows: InventoryRow[]; skipped: string[] } {
   const rows: InventoryRow[] = [];
+  const skipped: string[] = [];
   let inLive = false;
   let node = '';
   for (const line of text.split(/\r?\n/)) {
@@ -66,10 +78,21 @@ export function parseInventory(text: string): InventoryRow[] {
       node = heading[1];
       continue;
     }
-    if (!node) continue;
     // Split on pipes that are not escaped inside a wikilink alias (`[[a\|b]]`).
     const cells = line.split(/(?<!\\)\|/).map((c) => c.trim());
-    if (cells.length < 5 || !/^\d+$/.test(cells[1] ?? '')) continue;
+    const trimmed = line.trim();
+    // A table line, or a line that begins like a row without its leading pipe.
+    const looksLikeRow = trimmed.startsWith('|') || /^\d+\s*\|/.test(trimmed);
+    const isSeparator = /^\|[\s:|-]*$/.test(trimmed);
+    const isHeader = /^vmid$/i.test(cells[1] ?? '') || /^vmid$/i.test(cells[0] ?? '');
+    const parsed = node !== '' && trimmed.startsWith('|') && cells.length >= 5 && /^\d+$/.test(cells[1] ?? '');
+    if (!parsed) {
+      if (looksLikeRow && !isSeparator && !isHeader) {
+        const where = node ? `under ${node}` : 'above the first ### node heading';
+        skipped.push(`${INVENTORY} ${where}: cannot read the row "${trimmed.slice(0, 80)}"`);
+      }
+      continue;
+    }
     const nameCell = cells[2] ?? '';
     const alias = /\[\[[^\]]*?\\\|([^\]]+)\]\]/.exec(nameCell) ?? /\[\[([^\]|]+)\]\]/.exec(nameCell);
     rows.push({
@@ -80,14 +103,16 @@ export function parseInventory(text: string): InventoryRow[] {
       block: (cells[4] ?? '').split(/\s+[—-]\s+/)[0]?.trim() ?? '',
     });
   }
-  return rows;
+  return { rows, skipped };
 }
 
-interface VaultIndex {
+export interface VaultIndex {
   sha: string;
   source: string;
   notes: HostNote[];
   inventory: InventoryRow[];
+  /** Files and table rows the index could not read as a host. The drift check reports each. */
+  unparsed: string[];
 }
 
 /** Reads and caches the vault's host notes, once per commit. */
@@ -111,6 +136,7 @@ export class HostIndex {
       throw new LabToolError(`cannot list ${HOSTS_DIR}/ in ${this.clone.name}: ${(err as Error).message}`);
     }
     const notes: HostNote[] = [];
+    const unparsed: string[] = [];
     let inventory: InventoryRow[] = [];
     for (const name of files) {
       const file = `${HOSTS_DIR}/${name}`;
@@ -121,18 +147,23 @@ export class HostIndex {
         throw new LabToolError(`cannot read ${file} in ${this.clone.name}: ${(err as Error).message}`);
       }
       if (file === INVENTORY) {
-        inventory = parseInventory(text);
+        const checked = parseInventoryChecked(text);
+        inventory = checked.rows;
+        unparsed.push(...checked.skipped);
         continue;
       }
       const { frontmatter, body } = parseFrontmatter(text);
-      if (frontmatter.type !== 'host') continue;
+      if (frontmatter.type !== 'host') {
+        unparsed.push(`${file} has no \`type: host\` frontmatter, so it is not read as a host note`);
+        continue;
+      }
       notes.push({ file, frontmatter, body });
     }
     // An empty read is a failure, never "no such host" (see types.ts).
     if (notes.length === 0) throw new LabToolError(`read 0 host notes from ${this.clone.name}/${HOSTS_DIR}`);
     if (inventory.length === 0) throw new LabToolError(`read 0 rows from the live inventory in ${INVENTORY}`);
 
-    this.cached = { sha: state.sha, source: GitClone.describe(this.clone.name, state), notes, inventory };
+    this.cached = { sha: state.sha, source: GitClone.describe(this.clone.name, state), notes, inventory, unparsed };
     return this.cached;
   }
 }

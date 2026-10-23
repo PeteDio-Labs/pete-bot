@@ -10,10 +10,15 @@
  * Built as its own binary: `bun run build:lab-binary`.
  */
 import { gatewayCaller } from './agent.js';
+import { ollamaCaller } from './ollama.js';
 import { loadLabConfig, type LabConfig } from './config.js';
+import { AccessVerifier } from './access.js';
+import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
-import { buildLabTools, GitClone } from './tools/index.js';
+import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
+import { HostIndex } from './tools/hosts.js';
+import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
 
@@ -34,11 +39,46 @@ const vault = new GitClone('petedio-vault', cfg.clones.vault).useAuth(
   gitAuthFromToken(repoReadToken({ ...cfg.github, repo: cfg.github.vaultRepo })),
 );
 const history = [new GitClone('petedio-iac', cfg.clones.iac), new GitClone('petedio-media-iac', cfg.clones.mediaIac)];
-const tools = buildLabTools({ vault, history, proxmox: cfg.proxmox, kuma: cfg.kuma });
+const tools = buildLabTools({
+  vault,
+  history,
+  proxmox: cfg.proxmox,
+  kuma: cfg.kuma,
+  secrets: cfg.vault,
+  deskHealthUrl: cfg.deskHealthUrl,
+  plane: cfg.plane ?? undefined,
+  units: LAB_UNITS,
+});
 const pve = new ProxmoxClient(cfg.proxmox);
+const secrets = new VaultMetadataClient(cfg.vault);
+
+// Keep the periodic Vault token alive. A failure is logged and shows on /health; it is not
+// fatal, because Vault seals nightly and a sealed Vault refuses renewals until it opens.
+let lastRenewError: string | null = null;
+async function renew(): Promise<void> {
+  try {
+    await secrets.renewSelf();
+    lastRenewError = null;
+  } catch (err) {
+    lastRenewError = (err as Error).message;
+    log('vault token renewal failed', { error: lastRenewError });
+  }
+}
+void renew();
+setInterval(() => void renew(), 12 * 60 * 60_000);
 
 const checks: Record<string, Check> = {
+  // The model backend. The check keeps the name `gateway` so /health and its readers do not change.
   async gateway() {
+    if (cfg.provider === 'ollama') {
+      // /api/tags lists the pulled models and spends nothing. A missing model is a fault now,
+      // not a surprise at the first question.
+      const res = await fetch(`${cfg.ollama.url}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+      if (!res.ok) throw new Error(`ollama answered HTTP ${res.status} to /api/tags`);
+      const names = ((await res.json()) as { models?: Array<{ name: string }> }).models?.map((m) => m.name) ?? [];
+      if (!names.some((n) => n === cfg.gateway.model || n === `${cfg.gateway.model}:latest`)) throw new Error(`ollama has not pulled ${cfg.gateway.model}`);
+      return `ollama up, ${cfg.gateway.model} pulled`;
+    }
     // An empty body proves the bearer and spends nothing: the gateway checks the bearer
     // first (401), then refuses the body (400) before it forwards anything. It cannot prove
     // the model grant or the monthly cap; only a forwarded request can, and that spends.
@@ -64,16 +104,83 @@ const checks: Record<string, Check> = {
   async kuma() {
     return `${(await readKuma(cfg.kuma)).length} monitors`;
   },
+  // Down when the last run could not DM what it found, or when no run has happened for
+  // about a day (a dead timer, or a restart across the schedule). See driftHealth.
+  async drift() {
+    return driftHealth(lastDrift, startedAt, new Date(), cfg.drift.at);
+  },
+  async secrets() {
+    return secretsHealth(secrets, lastRenewError, async () => {
+      await renew();
+      return lastRenewError;
+    });
+  },
 };
+
+const callModel = cfg.provider === 'ollama' ? ollamaCaller(cfg.ollama.url, cfg.ollama.numCtx) : gatewayCaller(cfg.gateway.url, cfg.gateway.token);
+
+// The nightly drift check (PET-671). Its own HostIndex over the same clone, so a run reads
+// the vault at the commit the fetch just brought in.
+const hostIndex = new HostIndex(vault);
+const notify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken);
+let lastDrift: DriftOutcome | null = null;
+const startedAt = new Date();
+const runDrift = singleFlight(async () => {
+  lastDrift = await runDriftCheck({
+    read: () =>
+      readLab({
+        guests: () => pve.guests(),
+        async vault() {
+          const index = await hostIndex.load();
+          const { fetchError } = await vault.state();
+          return { inventory: index.inventory, notes: index.notes, unparsed: index.unparsed, source: index.source, fetchError: fetchError ?? null };
+        },
+      }),
+    notify,
+    log,
+  });
+  return lastDrift;
+});
+// setTimeout, re-armed after each run, so a run that overlaps midnight or a clock change
+// still lands once a day at LAB_DRIFT_AT.
+function scheduleDrift(): void {
+  const wait = msUntil(cfg.drift.at, new Date());
+  log('drift check scheduled', { at: `${cfg.drift.at}Z`, inMinutes: Math.round(wait / 60_000) });
+  setTimeout(() => {
+    runDrift()
+      .catch((err) => log('drift check crashed', { level: 'error', error: (err as Error).message }))
+      .finally(scheduleDrift);
+  }, wait);
+}
+scheduleDrift();
 
 const handler = createLabHandler({
   askToken: cfg.askToken,
   tools,
-  callModel: gatewayCaller(cfg.gateway.url, cfg.gateway.token),
+  callModel,
   model: cfg.gateway.model,
   checks,
   log,
+  runDrift,
 });
 
-const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, fetch: handler });
+// Bun closes an idle connection after 10 s by default. An answer can take 80 s, and a drift
+// run with a failing DM waits through two retries (75 s) after three 15 s tries, so the
+// caller would lose the reply to a run that still sends a DM. 255 s is Bun's maximum.
+const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 255, fetch: handler });
 log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], model: cfg.gateway.model });
+
+// The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.
+if (cfg.mcp) {
+  const mcpCfg = cfg.mcp;
+  const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails });
+  const mcpHandler = createMcpHandler({ tools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
+  const mcpServer = Bun.serve({
+    hostname: mcpCfg.host,
+    port: mcpCfg.port,
+    fetch: (req, srv) => mcpHandler(req, srv.requestIP(req)?.address),
+  });
+  log('lab MCP listening', { address: `${mcpCfg.host}:${mcpServer.port}`, peer: mcpCfg.peer, tools: [...tools.keys()] });
+} else {
+  log('lab MCP off: LAB_ACCESS_AUD is not set');
+}

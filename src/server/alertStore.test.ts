@@ -200,3 +200,70 @@ describe('bounds', () => {
     expect(size()).toBeLessThanOrEqual(5000);
   });
 });
+
+// ── PET-436: a recovery whose DOWN never reached this process ─────────────────
+describe('an orphan recovery', () => {
+  it('folds into an open incident instead of posting its own message', () => {
+    down('plex-gpu', T0);
+    const { batch, isNew } = alertStore.foldOrphanUp('radarr', { now: T0 + 30_000, windowMs: WINDOW });
+    expect(isNew).toBe(false);
+    expect(batch.monitors.radarr).toMatchObject({ unseenDown: true, recoveredAt: T0 + 30_000 });
+    expect(activeBatches()).toHaveLength(1);
+  });
+
+  it('does not keep the incident open: only the real DOWN decides when it closes', () => {
+    down('plex-gpu', T0);
+    alertStore.foldOrphanUp('radarr', { now: T0 + 1_000, windowMs: WINDOW });
+    expect(recordUp('plex-gpu', { now: T0 + 2_000 }).closed).toBe(true);
+  });
+
+  it('folds into an incident that fully recovered inside the window', () => {
+    down('vault', T0);
+    recordUp('vault', { now: T0 + 10_000 });
+    const { batch, isNew } = alertStore.foldOrphanUp('pve02', { now: T0 + 20_000, windowMs: WINDOW });
+    expect(isNew).toBe(false);
+    expect(batch.messageId).toBeTruthy();
+  });
+
+  it('opens one message for a burst and folds the rest into it', () => {
+    const first = alertStore.foldOrphanUp('radarr', { now: T0, windowMs: WINDOW });
+    expect(first.isNew).toBe(true);
+    attachMessage(first.batch.id, 'dm-1', 'msg-orphans');
+    const second = alertStore.foldOrphanUp('prowlarr', { now: T0 + 5_000, windowMs: WINDOW });
+    expect(second.isNew).toBe(false);
+    expect(second.batch.id).toBe(first.batch.id);
+  });
+
+  it('starts a fresh message once the window has passed', () => {
+    down('vault', T0);
+    recordUp('vault', { now: T0 + 10_000 });
+    expect(alertStore.foldOrphanUp('pve02', { now: T0 + 10_000 + WINDOW + 1, windowMs: WINDOW }).isNew).toBe(true);
+  });
+});
+
+// ── PET-492: holds ────────────────────────────────────────────────────────────
+describe('holds', () => {
+  const hold = { monitor: 'vault', since: T0, deadlineAt: T0 + 120_000, window: 'w', detail: 'timeout' };
+
+  it('takes a hold once', () => {
+    alertStore.addHold(hold);
+    expect(alertStore.heldCount()).toBe(1);
+    expect(alertStore.takeHold('vault')).toEqual(hold);
+    expect(alertStore.takeHold('vault')).toBeUndefined();
+    expect(alertStore.heldCount()).toBe(0);
+  });
+
+  it('survives a restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pete-bot-holds-'));
+    const original = config.alerts.statePath;
+    config.alerts.statePath = join(dir, 'alerts.json');
+    try {
+      alertStore.addHold(hold);
+      alertStore.restoreFromDisk();
+      expect(alertStore.getHold('vault')).toEqual(hold);
+    } finally {
+      config.alerts.statePath = original;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

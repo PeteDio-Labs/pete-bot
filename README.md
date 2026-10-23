@@ -15,7 +15,7 @@ something to tell the owner. It adds no incident state.
 for the rest (PET-645).
 
 It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
-and plain-DM questions went in PET-518, when Bobbert took over asking mtrace with its own
+and plain-DM questions went in PET-518, when Muse took over asking mtrace with its own
 token. The bot reads no messages, so it requests no privileged intent.
 
 ## It is a user-installed app, not a server bot
@@ -41,6 +41,8 @@ Vault outage reached nobody (PET-374). So `/v1/alert` groups:
 | Another monitor fails inside `ALERT_COALESCE_MS` | It joins that message — a node reboot is one DM |
 | A monitor fails after the window | A **new** message, because an edit notifies nobody |
 | A monitor recovers | Its line turns green; the message closes when all recover |
+| A recovery arrives for a monitor whose DOWN was never seen | It folds into the open or most recent incident message inside the window (PET-436). With none, it opens one message that the rest of the burst folds into |
+| A DOWN starts inside a maintenance window | It is **held**: no DM, and a deadline timer starts. An UP before the deadline releases it silently. A deadline that passes sends the DM with the window and the usual recovery time (PET-492) |
 
 Open incidents live in `ALERT_STATE_PATH`, so a restart between the failure and the
 recovery still edits the original message instead of orphaning it.
@@ -91,9 +93,9 @@ no Claude quota.
 
 | Report | When (Eastern) | What it lists |
 |---|---|---|
-| `morning` | Weekdays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item |
+| `morning` | Mondays and Fridays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item; this week's cycle split into Pedro items (`lan`, `mac`, `needs-pedro`) and AI items (`cloud`); the PRs merged this week and last week, by repo and by opener, with an "at least" note when a repo was not read or its closed-PR read hit the cap. On Mondays it also lists what last week's cycle left open and whether next week's cycle exists |
 | `audit` | Mondays 08:44 | Plane against GitHub: Todo items with an open PR, open items whose PRs all merged, In Review items with no PR, closed-unmerged PRs, passed target dates, PRs naming no item, and stale `verified:` dates when `REPORT_VAULT_PATH` is set |
-| `sweep` | Daily 18:47, or Mondays with `REPORT_SWEEP_WEEKLY=true` | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
+| `sweep` | Fridays and Sundays 18:47 | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
 
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
@@ -101,7 +103,7 @@ that failed to read is listed under "Not read", and the title says INCOMPLETE. A
 cannot read GitHub or Plane at all sends a failure DM. An empty section therefore means
 "examined and found none".
 
-A report is due from its time until three hours later, once per local date, so a restart
+No scheduled report sends from Tuesday to Thursday, the school days in workspace#169; `/report` still works on those days. The morning queue reads cycles and writes nothing, so the Monday rollover is listed, not performed. A report is due from its time until three hours later, once per local date, so a restart
 neither loses nor repeats one. `/report which:<name>` sends one now. `/health` carries each
 report's last result under `reports`.
 
@@ -148,6 +150,67 @@ gets 429.
 the tools, any failed reads and the tokens. pete-bot runs no model for it and gives
 `lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
 configured". `lab-agent` refuses to start on a missing or malformed setting.
+
+## The nightly drift check (PET-671)
+
+`lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the
+host notes' frontmatter, once a day at `LAB_DRIFT_AT` (11:15 UTC by default). Code finds the
+drift: a guest with no row or no note, a row or a note naming a guest Proxmox lacks, and a
+node, state or name that disagrees. The check calls no model: the DM is the header below
+plus one plain line per finding.
+
+- Every DM leads with what the run read, such as `21 guests from Proxmox, 21 inventory rows,
+  27 guest notes (petedio-vault @ 1a2b3c4)`.
+- A clean run logs those counts and sends nothing.
+- A failed read sends a failure DM. It never reports "no drift".
+- A vault file or table row the check cannot read is a finding, listed first as `vault:`. A
+  `Hosts/` file with no `type: host`, an inventory row that does not parse (including one above
+  the first `###` node heading or with no leading pipe), and a guest note
+  with no numeric `vmid` or an unknown `kind` are all reported, never skipped.
+- A DM that pete-bot refuses is tried three times, with waits of 15 s and 60 s, so a restart at
+  11:15 UTC does not lose the night. `/health` reports `drift` down if all three fail.
+- The DM holds about 1,700 characters. Past that it drops whole lines and says how many. Every
+  finding is in the run's `drift check` log line (`journalctl -u lab-agent`) and in the
+  `lines` field of the `POST /v1/drift/run` answer.
+
+The DM goes through pete-bot's `/v1/notify` with `LAB_NOTIFY_TOKEN`. To run the check
+without waiting for the schedule, `POST /v1/drift/run` with the ask bearer; it DMs exactly
+as the nightly run does, and returns the outcome with every finding.
+
+## The lab MCP (PET-667)
+
+`lab-agent` also serves the lab tools to claude.ai project threads as an MCP server, at
+`https://pdlab.dev/mcp/lab` through the Cloudflare tunnel. It stays off until
+`LAB_ACCESS_AUD` is set, and then every setting below must be valid.
+
+| Setting | What it is |
+|---|---|
+| `LAB_MCP_HOST`, `LAB_MCP_PORT` | The LAN address and port it listens on, `192.168.50.237:3017` |
+| `LAB_MCP_PEER` | The only source it accepts, the tunnel host `192.168.50.112` |
+| `LAB_ACCESS_TEAM_DOMAIN`, `LAB_ACCESS_AUD` | The Access team and the lab app's AUD tag, for the JWT check |
+| `LAB_ACCESS_EMAILS` | The emails it admits, comma-separated |
+
+- **Transport:** Streamable HTTP, stateless. Each POST carries one JSON-RPC request:
+  `initialize`, `ping`, `tools/list` or `tools/call`. There is no stream, no session and no
+  `ask` tool, because a thread is already a model.
+- **Two checks on every request:** the source address must be the tunnel host, and the
+  `Cf-Access-Jwt-Assertion` JWT must verify against the team's keys, the app's AUD tag, the
+  issuer, its expiry and the email list. Either failure gets 403 and runs nothing.
+- **Audit:** every call logs the caller's email, the tool, its input, its outcome, its size
+  and its duration to the journal.
+
+Phase 1 adds three tools to the library for both doors:
+
+| Tool | Reads |
+|---|---|
+| `desk_status` | pete-bot's `/health`: the merge desk's mode and last poll, and the gateway state |
+| `systemd_status` | `systemctl show` for `pete-bot.service` and `lab-agent.service` only |
+| `vault_presence` | KV v2 metadata under `kv/metadata/services/`: names, versions and times, never a value or a field name |
+
+`vault_presence` uses a periodic token with read and list on that metadata path only.
+`lab-agent` renews it twice a day. While Vault is sealed, the tool says so.
+`LAB_VAULT_TOKEN` and `LAB_VAULT_CA_FILE` are required even while the MCP door is off, so
+`lab-agent` starts only after `PET-670`'s seed script has minted that token.
 
 ## Quick start
 
@@ -265,6 +328,9 @@ the prompt or the answer.
 | `OWNER_USER_ID` | Yes | — | The only account this app answers, and the only one it DMs |
 | `HTTP_SERVER_ENABLED` | No | `true` | Serve `/health`, `/v1/alert` and `/v1/notify` |
 | `HTTP_SERVER_PORT` | No | `3015` | Port for the above |
+| `ALERT_MAINTENANCE_WINDOWS` | No | — | Comma-separated `<IANA zone> <HH:MM> <minutes>`, for example `America/New_York 02:45 30`. A DOWN inside one is held. Empty turns the hold off. A malformed value stops the process at start |
+| `ALERT_MAINTENANCE_DEADLINE_MS` | No | `300000` | Whole milliseconds, 1 to 24 days; empty uses the default. The deadline for a held DOWN until a monitor has 5 recoveries on record. After that: mean plus one SD, rounded up to a 20 s heartbeat, plus one heartbeat |
+| `ALERT_BASELINE_PATH` | No | — | Where recovery times persist. Empty keeps them in memory |
 | `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert`, which Uptime Kuma sends. Empty refuses every alert |
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
@@ -296,6 +362,7 @@ been deleted, so a working command and a broken one scraped identically.
 | `pete_bot_ask_duration_seconds` | Histogram | `surface` | Command to rendered result |
 | `pete_bot_alert_dms_total` | Counter | `action`, `status` | Alerts delivered, sent vs edited |
 | `pete_bot_alert_batches_open` | Gauge | — | Incidents currently open |
+| `pete_bot_alert_decisions_total` | Counter | `decision`, `outcome` | Maintenance-window decisions: `decision` held, released or deadline; `outcome` pending, recovered, alerted, recovered_late (the deadline passed and the monitor had recovered: one "recovered after N" message) or error |
 
 ## Project structure
 
@@ -317,7 +384,7 @@ src/
 An Ollama tool-calling bot for Mission Control, ArgoCD and Kubernetes. All three are torn
 down, so the tool layer, the SSE event stream, the plan-expiry sweep and the HMAC-gated
 Mission Control routes are gone with them. It then forwarded `/ask` and plain DMs to mtrace
-until PET-518 handed that job to Bobbert.
+until PET-518 handed that job to Muse.
 
 ## Deployment
 

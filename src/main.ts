@@ -6,7 +6,7 @@
  * through GitHub Actions; the run holds the privileges, and this process holds a token
  * that can start that one workflow. /status reports what it is holding.
  *
- * It asks mtrace nothing. /ask and plain-DM questions went in PET-518, when Bobbert took
+ * It asks mtrace nothing. /ask and plain-DM questions went in PET-518, when Muse took
  * over asking mtrace with its own token. The Mission Control, ArgoCD and Kubernetes
  * clients this started as are gone with the cluster they queried.
  */

@@ -11,9 +11,10 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { GitClone, runGit } from './git.js';
 import { gitHistoryTool, parseLog } from './history.js';
-import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory } from './hosts.js';
+import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory, parseInventoryChecked } from './hosts.js';
 import { buildLabTools, toolDefinitions } from './index.js';
 import { kumaStatusTool } from './kuma.js';
+import { PlaneClient, planeItemTool } from './plane.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool } from './proxmox.js';
 import { makeTestRepo, type TestRepo } from './testGit.js';
 import { callTool, capText, inputJsonSchema, LabToolError, type LabTool, type ToolResult } from './types.js';
@@ -104,7 +105,7 @@ describe('inputJsonSchema', () => {
   });
 
   it('throws on a shape it does not know, so a wrong schema cannot ship', () => {
-    expect(() => inputJsonSchema(z.object({ a: z.array(z.string()) }))).toThrow('unsupported');
+    expect(() => inputJsonSchema(z.object({ a: z.record(z.string()) }))).toThrow('unsupported');
   });
 });
 
@@ -281,6 +282,58 @@ describe('vault notes', () => {
     ]);
   });
 
+  it('names every table row it could not read, and skips headers, separators and other sections', () => {
+    expect(parseInventoryChecked(INVENTORY).skipped).toEqual([]);
+    const broken = INVENTORY.replace('| 235 |', '| 23x |').replace('| 110 | [[110-qbittorrent-vpn\\|qbittorrent-vpn]] | running |', '| 110 | qbit');
+    const out = parseInventoryChecked(broken);
+    expect(out.rows).toEqual([]);
+    expect(out.skipped).toEqual([
+      'Hosts/hosts-inventory.md under pve02: cannot read the row "| 110 | qbit Media — beside the disks |"',
+      expect.stringContaining('under pve03: cannot read the row "| 23x |'),
+    ]);
+  });
+
+  it('names rows above the first node heading and rows with no leading pipe', () => {
+    const text = `## Live inventory
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+| 301 | orphan | running | Core |
+
+### pve03
+
+| VMID | Name | State | Block |
+|---|---|---|---|
+235 | plane | running | Core
+| 237 | media-dash | running | Media |
+`;
+    const out = parseInventoryChecked(text);
+    expect(out.rows.map((r) => r.vmid)).toEqual([237]);
+    expect(out.skipped).toEqual([
+      'Hosts/hosts-inventory.md above the first ### node heading: cannot read the row "| 301 | orphan | running | Core |"',
+      'Hosts/hosts-inventory.md under pve03: cannot read the row "235 | plane | running | Core"',
+    ]);
+  });
+
+  describe('the drift view of a clone', () => {
+    it('lists a Hosts/ file with no host frontmatter and a row it cannot read', async () => {
+      const repo = await makeTestRepo();
+      await repo.commit(
+        {
+          'Hosts/235-plane.md': PLANE_NOTE,
+          'Hosts/oops.md': 'no frontmatter at all\n',
+          'Hosts/hosts-inventory.md': INVENTORY.replace('| 235 |', '| 23x |'),
+        },
+        'Add notes',
+      );
+      const loaded = await new HostIndex(new GitClone('petedio-vault', repo.clone, 'main', 0)).load();
+      expect(loaded.unparsed).toEqual([
+        expect.stringContaining('Hosts/hosts-inventory.md under pve03: cannot read the row'),
+        'Hosts/oops.md has no `type: host` frontmatter, so it is not read as a host note',
+      ]);
+    });
+  });
+
   describe('against a clone', () => {
     let repo: TestRepo;
     let index: HostIndex;
@@ -398,6 +451,94 @@ describe('git_history', () => {
   });
 });
 
+describe('plane_item', () => {
+  const PROJECT = '2b962587-cfc8-404d-bbfc-d57c3a60e07f';
+  const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', projectId: PROJECT, token: 'plane_api_secret' };
+  const states = json(JSON.stringify({ results: [{ id: 's1', name: 'In Review' }, { id: 's2', name: 'Done' }] }));
+  const item = (name: string, state: string, project = PROJECT) =>
+    json(JSON.stringify({ id: 'i1', name, state, project, updated_at: '2026-10-19T07:21:32Z' }));
+  const tool = (routes: Record<string, Route>, seen: Array<{ url: string; init?: RequestInit }> = []) =>
+    planeItemTool(new PlaneClient({ ...cfg, fetch: stubFetch(routes, seen) }));
+
+  it('names each item with its title and state, and sends the token only to Plane', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    const out = data(
+      await callTool(
+        tool(
+          {
+            [`/projects/${PROJECT}/states/?per_page=100`]: states,
+            '/work-items/PET-672/': item('Plane read tool', 's1'),
+            '/work-items/PET-1/': () => new Response('{}', { status: 404 }),
+          },
+          seen,
+        ),
+        { keys: ['PET-672', 'PET-1', 'PET-672'] },
+      ),
+    );
+    expect(out.source).toBe('1 of 2 PET items found in Plane');
+    expect(out.data.items).toEqual([
+      { key: 'PET-672', found: true, title: 'Plane read tool', state: 'In Review', updated: '2026-10-19T07:21:32Z' },
+      { key: 'PET-1', found: false },
+    ]);
+    // One states call, then one call per distinct key.
+    expect(seen).toHaveLength(3);
+    expect(seen.every((s) => s.url.startsWith('http://plane.test:8080/api/v1/workspaces/petedio/'))).toBe(true);
+    expect(seen.every((s) => (s.init?.method ?? 'GET') === 'GET')).toBe(true);
+    expect(seen.every((s) => (s.init?.headers as Record<string, string>)['X-API-Key'] === 'plane_api_secret')).toBe(true);
+  });
+
+  it('fails on a 200 with a null body, a state Plane does not list, and a redirect', async () => {
+    const nul = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': json('null') });
+    expect(error(await callTool(nul, { keys: ['PET-672'] }))).toContain('not a work item');
+    const lost = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 'nope') });
+    expect(error(await callTool(lost, { keys: ['PET-672'] }))).toContain('does not list');
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    await callTool(tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 's1') }, seen), { keys: ['PET-672'] });
+    expect(seen.every((s) => s.init?.redirect === 'error')).toBe(true);
+  });
+
+  it('fails when every key answers 404, since that may be a missing route', async () => {
+    const t = tool({ [`/projects/${PROJECT}/states/?per_page=100`]: states });
+    expect(error(await callTool(t, { keys: ['PET-1', 'PET-2'] }))).toContain('404 for all 2 key(s)');
+  });
+
+  it('refetches the states once when an item names a state it has not seen', async () => {
+    let calls = 0;
+    const growing: Route = () => {
+      calls++;
+      const rows = calls === 1 ? [{ id: 's1', name: 'In Review' }] : [{ id: 's1', name: 'In Review' }, { id: 's3', name: 'Blocked' }];
+      return new Response(JSON.stringify({ results: rows }), { status: 200 });
+    };
+    const t = tool({ '/states/?per_page=100': growing, '/work-items/PET-672/': item('x', 's3') });
+    const out = data(await callTool(t, { keys: ['PET-672'] }));
+    expect((out.data.items as Array<{ state: string }>)[0]!.state).toBe('Blocked');
+    expect(calls).toBe(2);
+  });
+
+  it('fails the call when the token is refused, never reporting items as missing', async () => {
+    const denied = tool({ '/states/?per_page=100': () => new Response('no', { status: 401 }) });
+    expect(error(await callTool(denied, { keys: ['PET-672'] }))).toContain('refused the lab-agent token');
+    const mid = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': () => new Response('x', { status: 502 }) });
+    expect(error(await callTool(mid, { keys: ['PET-672'] }))).toContain('HTTP 502');
+  });
+
+  it('fails on no states, a body that is not a work item, and an item from another project', async () => {
+    const none = tool({ '/states/?per_page=100': json('{"results":[]}') });
+    expect(error(await callTool(none, { keys: ['PET-672'] }))).toContain('0 states');
+    const odd = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': json('{"error":"Page not found."}') });
+    expect(error(await callTool(odd, { keys: ['PET-672'] }))).toContain('not a work item');
+    const other = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 's1', 'other-project') });
+    expect(error(await callTool(other, { keys: ['PET-672'] }))).toContain('other than PET');
+  });
+
+  it('refuses keys that are not PET keys, and more than ten', async () => {
+    const t = tool({});
+    expect(error(await callTool(t, { keys: ['../x'] }))).toContain('must look like PET-123');
+    expect(error(await callTool(t, { keys: Array.from({ length: 11 }, (_, i) => `PET-${i + 1}`) }))).toContain('invalid input');
+    expect(error(await callTool(t, { keys: [] }))).toContain('invalid input');
+  });
+});
+
 describe('buildLabTools', () => {
   it('builds every tool, and each one has a valid input schema', () => {
     const clone = new GitClone('petedio-iac', '/nonexistent');
@@ -406,9 +547,34 @@ describe('buildLabTools', () => {
       history: [clone],
       proxmox: { baseUrl: 'https://x:8006', tokenId: 'a@pve!b', tokenSecret: 'c', caPem: CA },
       kuma: { baseUrl: 'http://x:3001', slug: 'fault-study' },
+      secrets: { addr: 'https://x:8200', token: 't', caPem: CA },
+      deskHealthUrl: 'http://127.0.0.1:3015/health',
+      units: ['pete-bot.service', 'lab-agent.service'],
     });
     const defs = toolDefinitions(tools);
-    expect(defs.map((d) => d.name)).toEqual(['find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history']);
+    expect(defs.map((d) => d.name)).toEqual([
+      'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
+    ]);
+    // plane_item joins only when a Plane token is configured.
+    const withPlane = buildLabTools({
+      vault: new GitClone('petedio-vault', '/nonexistent'),
+      history: [clone],
+      proxmox: { baseUrl: 'https://x:8006', tokenId: 'a@pve!b', tokenSecret: 'c', caPem: CA },
+      kuma: { baseUrl: 'http://x:3001', slug: 'fault-study' },
+      secrets: { addr: 'https://x:8200', token: 't', caPem: CA },
+      deskHealthUrl: 'http://127.0.0.1:3015/health',
+      plane: { baseUrl: 'http://x:8080', workspace: 'petedio', projectId: 'p', token: 't' },
+      units: ['pete-bot.service', 'lab-agent.service'],
+    });
+    expect([...withPlane.keys()].at(-1)).toBe('plane_item');
+    // The schema of every tool, plane_item's array included, must render.
+    const planeDef = toolDefinitions(withPlane).find((d) => d.name === 'plane_item')!;
+    expect(planeDef.input_schema).toEqual({
+      type: 'object',
+      properties: { keys: { type: 'array', items: { type: 'string', pattern: '^PET-\\d{1,5}$' }, minItems: 1, maxItems: 10 } },
+      required: ['keys'],
+      additionalProperties: false,
+    });
     for (const d of defs) {
       expect(d.input_schema.type).toBe('object');
       expect(d.description.length).toBeGreaterThan(40);

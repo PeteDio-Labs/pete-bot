@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadReportSettings, type ReportSettings } from './settings.js';
 import { dueReports, localTime } from './schedule.js';
-import { PlaneClient } from './plane.js';
+import { PlaneClient, type CycleRead } from './plane.js';
 import { collectRepo, petKeys, type GithubReads, type OpenPr, type RepoRead } from './collect.js';
-import { buildMorning, actionFor } from './morning.js';
+import { buildMorning, actionFor, nextMonday } from './morning.js';
 import { buildAudit } from './audit.js';
 import { buildSweep, mergedOverCodex } from './sweep.js';
 import { ReportRunner, chunk } from './runner.js';
@@ -51,26 +51,31 @@ describe('schedule', () => {
     expect(localTime(new Date('2026-10-20T11:52:00Z'))).toMatchObject({ date: '2026-10-20', weekday: 2, minutes: 7 * 60 + 52 });
     expect(localTime(new Date('2026-12-01T12:52:00Z')).minutes).toBe(7 * 60 + 52);
   });
-  it('sends the morning queue on a weekday from 07:52 and not before', () => {
-    expect(dueReports(new Date('2026-10-20T11:51:00Z'), {}, all, false)).toEqual([]);
-    expect(dueReports(new Date('2026-10-20T11:52:00Z'), {}, all, false)).toEqual(['morning']);
+  it('sends the morning queue on a Monday from 07:52 and not before', () => {
+    expect(dueReports(new Date('2026-10-26T11:51:00Z'), {}, all)).toEqual([]);
+    expect(dueReports(new Date('2026-10-26T11:52:00Z'), {}, all)).toEqual(['morning']);
   });
   it('catches up inside the grace window and gives up after it', () => {
-    expect(dueReports(new Date('2026-10-20T13:30:00Z'), {}, all, false)).toEqual(['morning']);
-    expect(dueReports(new Date('2026-10-20T15:00:00Z'), {}, all, false)).toEqual([]);
+    const morning = new Set(['morning'] as const);
+    expect(dueReports(new Date('2026-10-26T13:30:00Z'), {}, morning)).toEqual(['morning']);
+    expect(dueReports(new Date('2026-10-26T15:00:00Z'), {}, morning)).toEqual([]);
   });
   it('sends once per local date', () => {
-    expect(dueReports(new Date('2026-10-20T11:53:00Z'), { morning: '2026-10-20' }, all, false)).toEqual([]);
+    expect(dueReports(new Date('2026-10-26T11:53:00Z'), { morning: '2026-10-26' }, all)).toEqual([]);
   });
-  it('skips the morning queue on a weekend and runs the audit on Monday only', () => {
-    expect(dueReports(new Date('2026-10-24T12:00:00Z'), {}, all, false)).toEqual([]);
-    expect(dueReports(new Date('2026-10-26T12:50:00Z'), {}, all, false).sort()).toEqual(['audit', 'morning']);
-    expect(dueReports(new Date('2026-10-21T12:50:00Z'), {}, all, false)).toEqual(['morning']);
+  it('runs the morning queue on Monday and Friday, the audit on Monday, and nothing from Tuesday to Thursday', () => {
+    expect(dueReports(new Date('2026-10-26T12:50:00Z'), {}, all).sort()).toEqual(['audit', 'morning']);
+    expect(dueReports(new Date('2026-10-23T12:50:00Z'), {}, all)).toEqual(['morning']);
+    for (const day of ['20', '21', '22']) {
+      expect(dueReports(new Date(`2026-10-${day}T12:50:00Z`), {}, all)).toEqual([]);
+      expect(dueReports(new Date(`2026-10-${day}T22:50:00Z`), {}, all)).toEqual([]);
+    }
+    expect(dueReports(new Date('2026-10-24T12:00:00Z'), {}, all)).toEqual([]);
   });
-  it('runs the sweep daily, or Mondays when weekly', () => {
-    expect(dueReports(new Date('2026-10-21T22:50:00Z'), {}, all, false)).toEqual(['sweep']);
-    expect(dueReports(new Date('2026-10-21T22:50:00Z'), {}, all, true)).toEqual([]);
-    expect(dueReports(new Date('2026-10-26T22:50:00Z'), {}, all, true)).toEqual(['sweep']);
+  it('runs the sweep on Friday and Sunday evenings only', () => {
+    for (const [day, due] of [['23', true], ['24', false], ['25', true], ['26', false], ['21', false]] as const) {
+      expect(dueReports(new Date(`2026-10-${day}T22:50:00Z`), {}, all)).toEqual(due ? ['sweep'] : []);
+    }
   });
 });
 
@@ -143,7 +148,7 @@ describe('collectRepo', () => {
   });
 });
 
-const AT = new Date('2026-10-20T11:52:00Z');
+const AT = new Date('2026-10-26T11:52:00Z');
 const pr = (over: Partial<OpenPr> = {}): OpenPr => ({
   repo: 'petedio-iac', number: 460, title: 'PET-670 x', url: 'https://x/460', draft: false, author: 'u', headSha: 'b'.repeat(40), headRef: 'pet-670-x',
   updatedAt: '2026-10-19T00:00:00Z', mergeable: true, petKeys: [670], checks: { total: 2, passed: 2, pending: [], failed: [], skipped: [] }, codex: [], gaps: [], ...over,
@@ -185,8 +190,98 @@ describe('buildMorning', () => {
   });
 });
 
+describe('cycle view', () => {
+  const cyc = (name: string, start: string, end: string, itemIds: string[] | null = null) => ({ id: name, name, start, end, itemIds });
+  const items = [
+    item(1, { labels: ['needs-pedro'], stateName: 'Todo', stateGroup: 'unstarted' }),
+    item(2, { labels: ['mac'], stateName: 'Done', stateGroup: 'completed' }),
+    item(3, { labels: ['cloud'], stateName: 'In Progress' }),
+    item(4, { labels: [], stateName: 'Todo', stateGroup: 'unstarted' }),
+    item(5, { labels: ['lan'], stateName: 'Todo', stateGroup: 'unstarted' }),
+  ];
+  const cycles: CycleRead = {
+    ok: true, dated: 2, undated: 0, upcoming: [],
+    current: cyc('Week of 2026-10-26', '2026-10-26', '2026-11-01', ['i1', 'i2', 'i3', 'i4', 'gone']),
+    previous: cyc('Week of 2026-10-19', '2026-10-19', '2026-10-25', ['i5', 'i2']),
+    next: null,
+  };
+  const withCycles = (c: CycleRead | undefined, at = AT): Snapshot => ({ ...snap([repoOk([])], planeOk(items)), at, cycles: c });
+
+  it('splits the cycle into Pedro, AI and unlabelled items and names the ones it cannot find', () => {
+    const out = buildMorning(withCycles(cycles), new Map());
+    expect(out).toContain('**Cycle: Week of 2026-10-26**');
+    expect(out).toContain('Pedro (lan, mac, needs-pedro): 2 · 1 done · 1 open');
+    expect(out).toContain('AI (cloud): 1 · 0 done · 1 open');
+    expect(out).toContain('No routing label: 1');
+    expect(out).toContain('1 cycle items are not on the board read');
+  });
+  it('lists the rollover on Monday, with what is left open and a missing next cycle', () => {
+    const out = buildMorning(withCycles(cycles), new Map());
+    expect(out).toContain('Cycle rollover (Monday)');
+    expect(out).toContain('2 items, 1 still open');
+    expect(out).toContain('PET-5');
+    expect(out).toContain('Create `Week of 2026-11-02`');
+    expect(nextMonday('2026-12-28')).toBe('2027-01-04');
+  });
+  it('shows no rollover on a Friday and says so when no cycle covers today', () => {
+    const fri = new Date('2026-10-30T11:52:00Z');
+    expect(buildMorning(withCycles(cycles, fri), new Map())).not.toContain('rollover');
+    expect(buildMorning(withCycles({ ...cycles, current: null } as CycleRead), new Map())).toContain('no cycle covers 2026-10-26');
+  });
+  it('marks the report INCOMPLETE when cycles could not be read', () => {
+    const out = buildMorning(withCycles({ ok: false, error: 'HTTP 404' }), new Map());
+    expect(out).toContain('INCOMPLETE');
+    expect(out).toContain('Cycles not read: HTTP 404');
+  });
+  it('says what the cycle read examined and does not drop a cycle row with only a join id', async () => {
+    const out = buildMorning(withCycles({ ...cycles, previous: cyc('Week of 2026-10-19', '2026-10-19', '2026-10-25', ['i5', 'i2', 'gone2']) } as CycleRead), new Map());
+    expect(out).toContain('2 dated cycles (current 5 items, previous 3 items)');
+    expect(out).toContain('items of that cycle are not on the board read');
+    const fetchImpl = (async (url: string | URL | Request) => String(url).includes('/cycle-issues/')
+      ? Response.json({ results: [{ id: 'join-row' }], next_page_results: false })
+      : Response.json({ results: [{ id: 'cur', name: 'W', start_date: '2026-10-26', end_date: '2026-11-01' }], next_page_results: false })) as typeof fetch;
+    expect((await new PlaneClient(plane, fetchImpl).cycles('2026-10-26')).ok).toBe(false);
+  });
+  it('does not claim the next cycle is missing when one starts on another day, and leaves no dangling dot', () => {
+    const out = buildMorning(withCycles({ ...cycles, next: cyc('Week of 2026-11-03', '2026-11-03', '2026-11-09'), upcoming: [cyc('Week of 2026-11-03', '2026-11-03', '2026-11-09')] } as CycleRead), new Map());
+    expect(out).toContain("Could not match next week's cycle");
+    expect(out).not.toContain('does not exist');
+    expect(out).not.toMatch(/ · \n/);
+  });
+  it('finds next week among all future cycles and shows an item with only a non-routing label without a dangling dot', () => {
+    const later = cyc('Week of 2026-11-09', '2026-11-09', '2026-11-15');
+    const want = cyc('Week of 2026-11-02', '2026-11-02', '2026-11-08');
+    const snapBug: Snapshot = { ...withCycles({ ...cycles, next: want, upcoming: [later, want] } as CycleRead), plane: planeOk([...items, item(6, { labels: ['bug'], stateName: 'Todo', stateGroup: 'unstarted' })]) };
+    const out = buildMorning({ ...snapBug, cycles: { ...cycles, current: { ...cycles.current!, itemIds: ['i1', 'i6'] }, next: want, upcoming: [later, want] } as CycleRead }, new Map());
+    expect(out).toContain("Next week's cycle exists: Week of 2026-11-02");
+    expect(out).toMatch(/Item 6 · Todo\n/);
+  });
+  it('reads the live cycle date strings as the cycle days and accepts work-item-shaped rows', async () => {
+    const fetchImpl = (async (url: string | URL | Request) => String(url).includes('/cycle-issues/')
+      ? Response.json({ results: [{ id: 'i7', sequence_id: 7 }], next_page_results: false })
+      : Response.json({ results: [{ id: 'nxt', name: 'Week of 2026-11-02', start_date: '2026-11-02T00:00:01Z', end_date: '2026-11-08T23:59:00Z' }], next_page_results: false })) as typeof fetch;
+    const r = await new PlaneClient(plane, fetchImpl).cycles('2026-11-03');
+    expect(r.ok && [r.current?.start, r.current?.end, r.current?.itemIds]).toEqual(['2026-11-02', '2026-11-08', ['i7']]);
+  });
+  it('reads cycles and their items from Plane', async () => {
+    const fetchImpl = (async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('/cycle-issues/')) return Response.json({ results: [{ issue: u.includes('/cur/') ? 'i1' : 'i2' }], next_page_results: false });
+      return Response.json({ results: [
+        { id: 'cur', name: 'Week of 2026-10-26', start_date: '2026-10-26T04:00:00Z', end_date: '2026-11-01T04:00:00Z' },
+        { id: 'old', name: 'Week of 2026-10-19', start_date: '2026-10-19', end_date: '2026-10-25' },
+        { id: 'nxt', name: 'Week of 2026-11-02', start_date: '2026-11-02', end_date: '2026-11-08' },
+      ], next_page_results: false });
+    }) as typeof fetch;
+    const r = await new PlaneClient(plane, fetchImpl).cycles('2026-10-26');
+    expect(r.ok && [r.current?.id, r.previous?.id, r.next?.id, r.current?.itemIds, r.previous?.itemIds]).toEqual(['cur', 'old', 'nxt', ['i1'], ['i2']]);
+    const down = (async () => new Response('x', { status: 500 })) as unknown as typeof fetch;
+    expect((await new PlaneClient(plane, down).cycles('2026-10-26')).ok).toBe(false);
+  });
+});
+
 describe('buildAudit', () => {
-  const merged: ClosedPr = { repo: 'petedio-iac', number: 9, title: 'PET-8: y', url: 'https://x/9', headSha: 'd'.repeat(40), headRef: 'pet-8-y', closedAt: '2026-10-18T00:00:00Z', mergedAt: '2026-10-18T00:00:00Z', petKeys: [8], codex: null };
+  const merged: ClosedPr = { repo: 'petedio-iac', number: 9, title: 'PET-8: y', url: 'https://x/9', headSha: 'd'.repeat(40), headRef: 'pet-8-y', closedAt: '2026-10-18T00:00:00Z', mergedAt: '2026-10-18T00:00:00Z', author: 'petedillo', petKeys: [8], codex: null };
   it('finds an open PR on a Todo item, a merged PR on an open item, and an In Review item with no PR', () => {
     const out = buildAudit(snap([repoOk([pr()], [merged])], planeOk([item(670, { stateName: 'Todo', stateGroup: 'unstarted' }), item(8), item(30)])), null);
     expect(out).toMatch(/move to In Review \(1\)[\s\S]*PET-670/);
@@ -219,7 +314,7 @@ describe('buildSweep', () => {
     expect(out).toContain('Threads: not read');
   });
   it('detects a merge over a Codex "Changes requested", at the head or arriving later', () => {
-    const base: ClosedPr = { repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 'e'.repeat(40), headRef: 'x', closedAt: '', mergedAt: '2026-10-19T12:00:00Z', petKeys: [], codex: [cx('changes-requested', 'e'.repeat(40), '2026-10-19T11:58:00Z')] };
+    const base: ClosedPr = { repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 'e'.repeat(40), headRef: 'x', closedAt: '', mergedAt: '2026-10-19T12:00:00Z', author: 'petedillo', petKeys: [], codex: [cx('changes-requested', 'e'.repeat(40), '2026-10-19T11:58:00Z')] };
     expect(mergedOverCodex(base)).toContain('merged anyway');
     expect(mergedOverCodex({ ...base, codex: [cx('changes-requested', 'f'.repeat(40), '2026-10-19T12:01:00Z')] })).toContain('after the merge');
     expect(mergedOverCodex({ ...base, codex: [cx('no-blocking', 'e'.repeat(40), '2026-10-19T11:58:00Z')] })).toBeNull();
@@ -239,7 +334,7 @@ describe('chunk', () => {
 describe('ReportRunner', () => {
   const settings = (statePath: string): ReportSettings => ({
     org: 'o', repos: ['r'], appId: '1', installationId: '2', privateKeyPem: PEM, plane: null,
-    enabled: new Set(['morning', 'audit', 'sweep']), sweepWeekly: false, staleDays: 3, statePath, vaultPath: '',
+    enabled: new Set(['morning', 'audit', 'sweep']), staleDays: 3, statePath, vaultPath: '',
   });
   const log = { info() {}, warn() {}, error() {} };
   const dir = () => join(mkdtempSync(join(tmpdir(), 'rep-')), 'state.json');
@@ -250,10 +345,16 @@ describe('ReportRunner', () => {
     const mk = () => new ReportRunner({ settings: settings(path), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT });
     await mk().tick();
     expect(sent.length).toBeGreaterThan(0);
-    expect(JSON.parse(readFileSync(path, 'utf8')).dates.morning).toBe('2026-10-20');
+    expect(JSON.parse(readFileSync(path, 'utf8')).dates.morning).toBe('2026-10-26');
     const before = sent.length;
     await mk().tick();
     expect(sent.length).toBe(before);
+  });
+  it('sends no scheduled report on a school day', async () => {
+    const sent: string[] = [];
+    const r = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => new Date('2026-10-21T22:50:00Z') });
+    await r.tick();
+    expect(sent).toEqual([]);
   });
   it('sends a failure DM when neither GitHub nor Plane can be read, and still counts the day', async () => {
     const sent: string[] = [];

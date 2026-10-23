@@ -8,6 +8,12 @@
  */
 import type { ReportName } from './settings.js';
 
+/**
+ * Pedro's weekly rhythm (PET-701 follow-up, workspace#169): his Claude and Codex usage goes
+ * to school from Tuesday to Thursday. No scheduled report sends then. /report still works.
+ */
+export const SCHOOL_DAYS = [2, 3, 4];
+
 export const TIME_ZONE = 'America/New_York';
 export const GRACE_MINUTES = 180;
 
@@ -18,17 +24,16 @@ interface Slot {
   minute: number;
 }
 
-const WEEKDAYS = [1, 2, 3, 4, 5];
-const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
-
-export function slotFor(name: ReportName, sweepWeekly: boolean): Slot {
+export function slotFor(name: ReportName): Slot {
   switch (name) {
+    // Monday and Friday are Pedro's hands-on days. The Monday run also lists the rollover.
     case 'morning':
-      return { days: WEEKDAYS, hour: 7, minute: 52 };
+      return { days: [1, 5], hour: 7, minute: 52 };
     case 'audit':
       return { days: [1], hour: 8, minute: 44 };
+    // Friday and Sunday evenings, ahead of the AI-heavy days.
     case 'sweep':
-      return { days: sweepWeekly ? [1] : EVERY_DAY, hour: 18, minute: 47 };
+      return { days: [5, 0], hour: 18, minute: 47 };
   }
 }
 
@@ -65,12 +70,12 @@ export function dueReports(
   at: Date,
   last: Partial<Record<ReportName, string>>,
   enabled: ReadonlySet<ReportName>,
-  sweepWeekly: boolean,
 ): ReportName[] {
   const t = localTime(at);
+  if (SCHOOL_DAYS.includes(t.weekday)) return [];
   const out: ReportName[] = [];
   for (const name of enabled) {
-    const slot = slotFor(name, sweepWeekly);
+    const slot = slotFor(name);
     if (!slot.days.includes(t.weekday)) continue;
     const start = slot.hour * 60 + slot.minute;
     if (t.minutes < start || t.minutes >= start + GRACE_MINUTES) continue;

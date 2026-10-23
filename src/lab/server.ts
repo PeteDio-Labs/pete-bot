@@ -5,6 +5,8 @@
  *                  one caller. Answers {answer, turns, toolCalls, incomplete, usage}.
  *   GET  /health   one flag per dependency: gateway, proxmox, vault clone, kuma. HTTP 503
  *                  unless every flag is up, so the deploy's assertion can fail on it.
+ *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
+ *                  answers with the run's outcome and DMs exactly as the nightly run does.
  *
  * ⚠ ONE QUESTION AT A TIME. Each answer spends from the lab-map cap, and Pedro is the only
  * asker, so a second request while one runs gets 429 instead of a second loop.
@@ -12,6 +14,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { ask, ASK_DEADLINE_MS, GatewayError, type AskResult, type CallModel } from './agent.js';
+import type { DriftOutcome } from './drift.js';
 import type { LabTool } from './tools/index.js';
 
 export type Check = () => Promise<string>;
@@ -26,6 +29,8 @@ export interface LabServerDeps {
   log?: (msg: string, fields?: Record<string, unknown>) => void;
   /** Tests shorten it; production uses ASK_DEADLINE_MS. */
   deadlineMs?: number;
+  /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
+  runDrift?: () => Promise<DriftOutcome>;
 }
 
 const AskBody = z.object({ question: z.string().trim().min(3).max(500) }).strict();
@@ -58,9 +63,23 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
   const log = deps.log ?? (() => {});
   const want = digest(deps.askToken);
   let busy = false;
+  const authorized = (req: Request) => {
+    const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? '';
+    return Boolean(bearer) && timingSafeEqual(digest(bearer), want);
+  };
 
   return async (req) => {
     const url = new URL(req.url);
+
+    if (url.pathname === '/v1/drift/run' && deps.runDrift) {
+      if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
+      // runDrift is single-flight: a call during a run waits for that run's outcome.
+      // 502 when the run examined nothing or its DM was not delivered, so a caller that
+      // reads only the status never mistakes either for a clean run.
+      const outcome = await deps.runDrift();
+      return json(outcome, outcome.kind === 'read-failed' || outcome.delivered === false ? 502 : 200);
+    }
 
     if (req.method === 'GET' && url.pathname === '/health') {
       const result = await runChecks(deps.checks);
@@ -69,8 +88,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
 
     if (url.pathname === '/v1/ask') {
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
-      const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? '';
-      if (!bearer || !timingSafeEqual(digest(bearer), want)) return json({ error: 'unauthorized' }, 401);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
 
       let body: z.infer<typeof AskBody>;
       try {
