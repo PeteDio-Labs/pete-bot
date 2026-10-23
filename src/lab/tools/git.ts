@@ -13,18 +13,19 @@
  * git runs with an argument array and no shell. Inputs that reach an argument are checked
  * by the tool first, and a `--` separates paths from options.
  */
+import type { GitAuth } from './githubToken.js';
 import { LabToolError } from './types.js';
 
-export type GitRunner = (dir: string, args: string[]) => Promise<string>;
+export type GitRunner = (dir: string, args: string[], env?: Record<string, string>) => Promise<string>;
 
 const GIT_TIMEOUT_MS = 20_000;
 
 /** Run git in `dir` and return stdout. A non-zero exit throws with git's own stderr. */
-export const runGit: GitRunner = async (dir, args) => {
+export const runGit: GitRunner = async (dir, args, env = {}) => {
   const proc = Bun.spawn(['git', '-C', dir, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
   });
   const timer = setTimeout(() => proc.kill(), GIT_TIMEOUT_MS);
   try {
@@ -51,6 +52,7 @@ export class GitClone {
   private lastFetchMs = 0;
   private fetchedAt: string | null = null;
   private fetchError: string | null = null;
+  private auth: GitAuth | null = null;
 
   constructor(
     readonly name: string,
@@ -66,12 +68,19 @@ export class GitClone {
     return `refs/remotes/origin/${this.branch}`;
   }
 
+  /** Authenticate every fetch, for a private repository. Reads never touch the network. */
+  useAuth(auth: GitAuth): this {
+    this.auth = auth;
+    return this;
+  }
+
   /** Fetch the branch unless it was fetched recently. Never throws: a failure is recorded. */
   async refresh(): Promise<void> {
     if (this.now() - this.lastFetchMs < this.minFetchIntervalMs) return;
     this.lastFetchMs = this.now();
     try {
-      await this.git(this.dir, ['fetch', '--quiet', 'origin', `+refs/heads/${this.branch}:${this.ref}`]);
+      const env = this.auth ? await this.auth() : undefined;
+      await this.git(this.dir, ['fetch', '--quiet', 'origin', `+refs/heads/${this.branch}:${this.ref}`], env);
       this.fetchedAt = new Date(this.now()).toISOString();
       this.fetchError = null;
     } catch (err) {

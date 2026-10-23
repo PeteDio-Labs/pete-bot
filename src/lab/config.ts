@@ -60,6 +60,12 @@ const EnvSchema = z.object({
   LAB_SEARCH_TOKEN: TOKEN.optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
+  // The vault is private and deploy keys are disabled org-wide, so its fetch carries a
+  // read token from the petedio-workspace-mirror App (PET-670, PET-542).
+  LAB_GITHUB_APP_ID: z.string().regex(/^\d+$/, 'must be a number'),
+  LAB_GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, 'must be a number'),
+  LAB_GITHUB_APP_KEY_FILE: z.string().min(1).default('/etc/lab-agent/github-app.pem'),
+  LAB_VAULT_REPO: z.string().regex(/^[\w.-]+$/, 'must be a bare repository name').default('petedio-vault'),
 }).superRefine((e, ctx) => {
   if (e.LAB_PROVIDER === 'gateway' && !e.LAB_GATEWAY_TOKEN) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['LAB_GATEWAY_TOKEN'], message: 'is required when LAB_PROVIDER is gateway' });
@@ -76,6 +82,7 @@ export interface LabConfig {
   proxmox: { baseUrl: string; tokenId: string; tokenSecret: string; caPem: string };
   kuma: { baseUrl: string; slug: string };
   clones: { vault: string; iac: string; mediaIac: string };
+  github: { appId: string; installationId: string; privateKeyPem: string; vaultRepo: string };
   vault: { addr: string; token: string; caPem: string };
   deskHealthUrl: string;
   /** null while no Plane token is set. */
@@ -123,6 +130,15 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     if (e.LAB_MCP_PORT === e.LAB_PORT) throw new Error('lab-agent settings are invalid: LAB_MCP_PORT must differ from LAB_PORT');
     mcp = { host: e.LAB_MCP_HOST!, port: e.LAB_MCP_PORT, peer: e.LAB_MCP_PEER, teamDomain: e.LAB_ACCESS_TEAM_DOMAIN!, aud: e.LAB_ACCESS_AUD, emails };
   }
+  let privateKeyPem: string;
+  try {
+    privateKeyPem = readFile(e.LAB_GITHUB_APP_KEY_FILE);
+  } catch (err) {
+    throw new Error(`lab-agent cannot read LAB_GITHUB_APP_KEY_FILE ${e.LAB_GITHUB_APP_KEY_FILE}: ${(err as Error).message}`);
+  }
+  if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(privateKeyPem)) {
+    throw new Error(`lab-agent settings are invalid: LAB_GITHUB_APP_KEY_FILE ${e.LAB_GITHUB_APP_KEY_FILE} holds no PEM private key`);
+  }
   return {
     port: e.LAB_PORT,
     askToken: e.LAB_ASK_TOKEN,
@@ -136,6 +152,12 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     proxmox: { baseUrl: e.LAB_PVE_URL, tokenId: e.LAB_PVE_TOKEN_ID, tokenSecret: e.LAB_PVE_TOKEN_SECRET, caPem },
     kuma: { baseUrl: e.LAB_KUMA_URL, slug: e.LAB_KUMA_SLUG },
     clones: { vault: e.LAB_VAULT_CLONE, iac: e.LAB_IAC_CLONE, mediaIac: e.LAB_MEDIA_IAC_CLONE },
+    github: {
+      appId: e.LAB_GITHUB_APP_ID,
+      installationId: e.LAB_GITHUB_APP_INSTALLATION_ID,
+      privateKeyPem,
+      vaultRepo: e.LAB_VAULT_REPO,
+    },
     vault: { addr: e.LAB_VAULT_ADDR, token: e.LAB_VAULT_TOKEN, caPem: vaultCa },
     deskHealthUrl: e.LAB_DESK_HEALTH_URL,
     plane: e.LAB_PLANE_TOKEN

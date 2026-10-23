@@ -15,6 +15,8 @@ const ASK = 'a'.repeat(40);
 const GW = 'g'.repeat(40);
 const CA = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
 
+const KEY = '-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n';
+const read = (p: string) => (p.endsWith('github-app.pem') ? KEY : CA);
 const baseEnv = {
   LAB_ASK_TOKEN: ASK,
   LAB_GATEWAY_TOKEN: GW,
@@ -24,18 +26,21 @@ const baseEnv = {
   LAB_VAULT_CLONE: '/var/lib/lab-agent/petedio-vault',
   LAB_IAC_CLONE: '/var/lib/lab-agent/petedio-iac',
   LAB_MEDIA_IAC_CLONE: '/var/lib/lab-agent/petedio-media-iac',
+  LAB_GITHUB_APP_ID: '1234567',
+  LAB_GITHUB_APP_INSTALLATION_ID: '89012345',
   LAB_VAULT_TOKEN: 'hvs.' + 'v'.repeat(24),
   LAB_NOTIFY_TOKEN: 'n'.repeat(40),
 };
 
 describe('loadLabConfig', () => {
   it('fills the defaults and reads the CA', () => {
-    const cfg = loadLabConfig(baseEnv, () => CA);
+    const cfg = loadLabConfig(baseEnv, read);
     expect(cfg.port).toBe(3016);
     expect(cfg.provider).toBe('gateway');
     expect(cfg.gateway).toEqual({ url: 'http://127.0.0.1:3015/v1/llm', token: GW, model: 'claude-haiku-4-5' });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
+    expect(cfg.github).toEqual({ appId: '1234567', installationId: '89012345', privateKeyPem: KEY, vaultRepo: 'petedio-vault' });
     expect(cfg.vault.addr).toBe('https://192.168.50.223:8200');
     expect(cfg.mcp).toBeNull();
     expect(cfg.plane).toBeNull();
@@ -44,40 +49,45 @@ describe('loadLabConfig', () => {
 
   it('runs on Ollama with no gateway bearer, and requires the bearer for the gateway', () => {
     const { LAB_GATEWAY_TOKEN: _drop, ...noToken } = baseEnv;
-    expect(() => loadLabConfig(noToken, () => CA)).toThrow('LAB_GATEWAY_TOKEN: is required');
-    const cfg = loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama' }, () => CA);
+    expect(() => loadLabConfig(noToken, read)).toThrow('LAB_GATEWAY_TOKEN: is required');
+    const cfg = loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama' }, read);
     expect(cfg.provider).toBe('ollama');
     expect(cfg.gateway.model).toBe('qwen3:8b');
     expect(cfg.ollama).toEqual({ url: 'http://192.168.50.12:11434', numCtx: 8192 });
-    expect(loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama', LAB_MODEL: 'qwen3:4b' }, () => CA).gateway.model).toBe('qwen3:4b');
+    expect(loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama', LAB_MODEL: 'qwen3:4b' }, read).gateway.model).toBe('qwen3:4b');
   });
 
   it('turns plane_item on only with a token, and defaults the rest', () => {
-    const cfg = loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'p'.repeat(40) }, () => CA);
+    const cfg = loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'p'.repeat(40) }, read);
     expect(cfg.plane).toEqual({
       baseUrl: 'http://192.168.50.235:8080',
       workspace: 'petedio',
       projectId: '2b962587-cfc8-404d-bbfc-d57c3a60e07f',
       token: 'p'.repeat(40),
     });
-    expect(() => loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'short' }, () => CA)).toThrow('LAB_PLANE_TOKEN');
-    expect(loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: '' }, () => CA).plane).toBeNull();
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'short' }, read)).toThrow('LAB_PLANE_TOKEN');
+    expect(loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: '' }, read).plane).toBeNull();
   });
 
   it('turns the MCP door on only with every Access setting', () => {
     const aud = 'a1'.repeat(32);
-    expect(() => loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud }, () => CA)).toThrow('LAB_MCP_HOST, LAB_ACCESS_TEAM_DOMAIN, LAB_ACCESS_EMAILS must be too');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud }, read)).toThrow('LAB_MCP_HOST, LAB_ACCESS_TEAM_DOMAIN, LAB_ACCESS_EMAILS must be too');
     const cfg = loadLabConfig(
       { ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'Pedelgadillo@gmail.com' },
-      () => CA,
+      read,
     );
     expect(cfg.mcp).toEqual({ host: '192.168.50.237', port: 3017, peer: '192.168.50.112', teamDomain: 'petedio.cloudflareaccess.com', aud, emails: ['pedelgadillo@gmail.com'] });
+  });
+
+  it('refuses to start without a PEM key for the vault App (PET-670)', () => {
+    expect(() => loadLabConfig(baseEnv, () => CA)).toThrow('holds no PEM private key');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_GITHUB_APP_ID: '' }, read)).toThrow('LAB_GITHUB_APP_ID');
   });
 
   it('refuses to start on a missing or short token, and names the field, not the value', () => {
     const err = (() => {
       try {
-        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short', LAB_GATEWAY_TOKEN: '' }, () => CA);
+        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short', LAB_GATEWAY_TOKEN: '' }, read);
       } catch (e) {
         return (e as Error).message;
       }
@@ -89,10 +99,10 @@ describe('loadLabConfig', () => {
   });
 
   it('refuses plain http to Proxmox, a reused bearer, and an unreadable CA', () => {
-    expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, () => CA)).toThrow('must be https://');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, () => CA)).toThrow('must differ');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_NOTIFY_TOKEN: GW }, () => CA)).toThrow('LAB_NOTIFY_TOKEN must differ');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_DRIFT_AT: '25:00' }, () => CA)).toThrow('must be HH:MM in UTC');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, read)).toThrow('must be https://');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, read)).toThrow('must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_NOTIFY_TOKEN: GW }, read)).toThrow('LAB_NOTIFY_TOKEN must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_DRIFT_AT: '25:00' }, read)).toThrow('must be HH:MM in UTC');
     expect(() =>
       loadLabConfig(baseEnv, () => {
         throw new Error('ENOENT');
