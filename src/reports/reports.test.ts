@@ -313,6 +313,14 @@ describe('buildSweep', () => {
     expect(out).toMatch(/idle 3 days or more \(\d\)/);
     expect(out).toContain('Threads: not read');
   });
+  it('flags an In Review item idle for 3 days or more, and only those', () => {
+    const at = new Date('2026-10-24T12:00:00Z');
+    const stale = item(7, { updatedAt: '2026-10-20T00:00:00Z' });
+    const fresh = item(8, { updatedAt: '2026-10-24T00:00:00Z' });
+    const out = buildSweep({ ...snap([repoOk([])], planeOk([stale, fresh])), at }, 3);
+    expect(out).toMatch(/In Review with no update for 3 days or more \(1\)[\s\S]*PET-7/);
+    expect(out).not.toMatch(/In Review with no update for 3 days or more \(1\)[\s\S]*PET-8\b[\s\S]*In Progress/);
+  });
   it('detects a merge over a Codex "Changes requested", at the head or arriving later', () => {
     const base: ClosedPr = { repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 'e'.repeat(40), headRef: 'x', closedAt: '', mergedAt: '2026-10-19T12:00:00Z', author: 'petedillo', petKeys: [], codex: [cx('changes-requested', 'e'.repeat(40), '2026-10-19T11:58:00Z')] };
     expect(mergedOverCodex(base)).toContain('merged anyway');
