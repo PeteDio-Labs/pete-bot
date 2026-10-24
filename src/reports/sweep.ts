@@ -30,6 +30,7 @@ import {
 
 const ROUTING_LABELS = ['cloud', 'lan', 'mac', 'needs-pedro'];
 const IN_PROGRESS_DAYS = 7;
+const IN_REVIEW_DAYS = 3;
 
 /** A PR merged while Codex's last word on its head was "changes requested", or arrived after the merge. */
 export function mergedOverCodex(p: ClosedPr): string | null {
@@ -79,6 +80,10 @@ export function buildSweep(s: Snapshot, staleDays: number): string {
     section('Plane: In Review with no open PR', inReview.map((i) => `- ${itemLink(i, 50)}`));
     section('Plane: open items with none of cloud, lan, mac or needs-pedro', open.filter((i) => !i.labels.some((l) => ROUTING_LABELS.includes(l))).map((i) => `- ${itemLink(i, 50)}`));
     section('Plane: open items with no parent epic', open.filter((i) => !i.parent).map((i) => `- ${itemLink(i, 50)}`));
+    section(
+      `Plane: In Review with no update for ${IN_REVIEW_DAYS} days or more`,
+      open.filter((i) => i.stateName.toLowerCase() === 'in review' && daysSince(i.updatedAt, s.at) >= IN_REVIEW_DAYS).map((i) => `- ${itemLink(i, 50)} · ${daysSince(i.updatedAt, s.at)} days`),
+    );
     section(
       `Plane: In Progress with no update for ${IN_PROGRESS_DAYS} days or more (a bulk edit resets this date)`,
       open.filter((i) => i.stateName.toLowerCase() === 'in progress' && daysSince(i.updatedAt, s.at) >= IN_PROGRESS_DAYS).map((i) => `- ${itemLink(i, 50)} · ${daysSince(i.updatedAt, s.at)} days`),
