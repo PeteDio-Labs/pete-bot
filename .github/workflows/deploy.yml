@@ -299,10 +299,17 @@ jobs:
       # runner-233 alike. The deploy of PET-579's merge failed three times on it. The Mac,
       # on the .86 mesh, saw no reset in ten tries, so the network is at fault, not the
       # unpinned versions. Five attempts, then a real failure.
+      #
+      # ⚠ GALAXY CAN BE DOWN, NOT ONLY FLAKY (PET-701). galaxy.ansible.com answered HTTP 500
+      # for the same artifact on 2026-10-24, so retries alone failed three deploys. The deploy
+      # installs the `ansible` package, whose bundled collections cover community.general
+      # and ansible.posix, and scripts/install-ansible-collections.sh tries Galaxy first,
+      # then falls back to the bundle and checks both are present.
       - name: Deploy to media-dash-237
         run: |
           docker run --rm --network host \
             -v "$PWD/iac:/iac:ro" \
+            -v "$PWD/pete-bot/scripts:/scripts:ro" \
             -v "$PWD/pete-bot:/src:ro" \
             -v "$RUNNER_TEMP/lxc_ssh_key:/key:ro" \
             -v "$RUNNER_TEMP/extra.json:/extra.json:ro" \
@@ -310,12 +317,8 @@ jobs:
             -e ANSIBLE_HOST_KEY_CHECKING=False \
             python:3.12-slim sh -c \
             "apt-get update -q >/dev/null && apt-get install -y -q openssh-client rsync >/dev/null && \
-             pip install -q ansible-core && \
-             for try in 1 2 3 4 5; do \
-               ansible-galaxy collection install community.general ansible.posix && break; \
-               [ \$try -lt 5 ] || exit 1; \
-               echo galaxy install attempt \$try failed, retrying >&2; sleep 5; \
-             done && \
+             pip install -q ansible && \
+             sh /scripts/install-ansible-collections.sh && \
              if ansible-playbook -i inventory/ playbooks/configure-pete-bot.yml --list-hosts | grep -q 'hosts (0):'; then \
                echo '::error title=deploy::No hosts matched. The inventory does not carry media_dash.'; exit 1; \
              fi && \
