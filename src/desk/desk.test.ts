@@ -200,7 +200,7 @@ describe('tiers 0 and 1', () => {
     expect(dms[0]!.content).toContain('would merge');
   });
 
-  it('reports a refused merge once, then waits for a tap', async () => {
+  it('reports a refused merge once, then waits', async () => {
     gh.mergeResult = { ok: false, status: 405, message: 'Required status check is expected' };
     const desk = makeDesk();
     await desk.poll();
@@ -208,7 +208,7 @@ describe('tiers 0 and 1', () => {
     await desk.poll();
     expect(gh.merges).toEqual([HEAD]);
     expect(gh.comments.filter((c) => c.includes('failed'))).toHaveLength(1);
-    expect(dms.filter((d) => d.buttons?.length)).toHaveLength(1);
+    expect(dms.filter((d) => d.buttons?.length)).toEqual([]);
   });
 });
 
@@ -219,10 +219,9 @@ describe('tier 2', () => {
     await desk.poll();
     await desk.poll();
     expect(gh.merges).toEqual([]);
-    expect(dms).toHaveLength(1);
-    const id = dms[0]!.buttons![0]!.customId;
-    expect(id).toBe(buttonId('merge', REPO, 5, HEAD));
-    expect(await desk.tap(id)).toContain('Merged as mmmmmmm');
+    expect(dms).toEqual([]);
+    expect(gh.comments.filter((c) => c.includes('not merging'))).toHaveLength(1);
+    expect(await desk.tap(buttonId('merge', REPO, 5, HEAD))).toContain('Merged as mmmmmmm');
     expect(gh.merges).toEqual([HEAD]);
   });
 
@@ -327,9 +326,9 @@ describe('review fixes (Codex round 1)', () => {
     const desk = makeDesk();
     await desk.poll();
     expect(gh.merges).toEqual([]);
-    expect(dms).toHaveLength(1);
-    expect(dms[0]!.content).toContain('tier 2');
-    expect(dms[0]!.content).toContain('grade scripts/pr-blast-radius.py tier 0');
+    expect(dms).toEqual([]);
+    expect(gh.comments[0]).toContain('tier 2');
+    expect(gh.comments[0]).toContain('grade scripts/pr-blast-radius.py tier 0');
   });
 
   it('queues the blocked head again on Review again, without waiting for a push', async () => {
@@ -361,7 +360,7 @@ describe('review fixes (Codex round 1)', () => {
     expect(queued).toHaveLength(1);
   });
 
-  it('reports a thrown approval once, then waits for a tap', async () => {
+  it('reports a thrown approval once, then waits', async () => {
     gh.approveError = new Error('HTTP 422 reading approval');
     const desk = makeDesk();
     await desk.poll();
@@ -369,7 +368,7 @@ describe('review fixes (Codex round 1)', () => {
     await desk.poll();
     expect(gh.merges).toEqual([]);
     expect(gh.comments.filter((c) => c.includes('approval was refused'))).toHaveLength(1);
-    expect(dms.filter((d) => d.buttons?.length)).toHaveLength(1);
+    expect(dms.filter((d) => d.buttons?.length)).toEqual([]);
   });
 
   it('reads the PR back when the merge request throws, and counts a merge that landed', async () => {
