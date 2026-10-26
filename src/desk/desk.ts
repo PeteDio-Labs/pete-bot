@@ -1,6 +1,5 @@
 /**
- * The merge desk (PET-645): queue Codex, merge tiers 0 and 1, and ask Pedro for one tap on
- * the rest.
+ * The merge desk (PET-645): queue Codex, merge tiers 0 and 1, and comment on the rest.
  *
  * WHY IT POLLS. pete-bot runs on the LAN with no inbound route, and a webhook would need
  * one. A Codex review takes minutes, so a poll every three minutes costs nothing a
@@ -8,7 +7,7 @@
  * from facts (src/desk/decide.ts).
  *
  * WHAT IT SAYS. A failed merge, a failed Codex queue and the two-round stop each post one
- * comment on the PR and one DM, because each needs Pedro to act. A merge posts the PR
+ * comment on the PR and one DM, because each needs Pedro to act. A merge, and a PR the desk will not merge, post the PR
  * comment only: a DM that needs no action is noise (PET-704). Each is saved before it is
  * sent and retried until it lands. A PR that is waiting on CI, Codex or a thread is
  * logged and nothing else: those states are visible on the PR already.
@@ -388,16 +387,11 @@ export class MergeDesk {
 
       case 'ask': {
         if (mem.askedSha === d.sha) return;
-        const lines = [
-          `**Merge desk** · ${this.link(repo, f)} · ${d.why}`,
-          `"${f.pull.title.slice(0, 150)}"`,
-          `Codex: [${d.review.verdict}](${d.review.url}) at \`${short(d.sha)}\` · checks: ${f.checks.passed}/${f.checks.total} passed · threads: 0`,
-          `tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}`,
-        ];
-        await notifier.dm(lines.join('\n'), [
-          { customId: buttonId('merge', repo, n, d.sha), label: `Merge ${short(d.sha)}`, style: 'primary' },
-        ]);
+        // A comment, not a DM: Pedro asked for no tap (2026-10-26). Open PR list merges after review.
         store.update(repo, n, { askedSha: d.sha });
+        await this.report(repo, n, {
+          comment: `Merge desk: not merging \`${short(d.sha)}\` automatically (${d.why}; tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}). Codex: [${d.review.verdict}](${d.review.url}); checks ${f.checks.passed}/${f.checks.total} passed.`,
+        });
         return;
       }
 
@@ -413,13 +407,8 @@ export class MergeDesk {
           return;
         }
         if (mem.mergeFailedSha === d.sha) {
-          // One failed attempt per head. After that the merge waits for a tap, so a
-          // refusal GitHub repeats on every poll is reported once, not every three minutes.
-          if (mem.askedSha === d.sha) return;
-          await notifier.dm(`**Merge desk** · ${this.link(repo, f)}: the automatic merge of \`${short(d.sha)}\` failed once. Tap to try again.`, [
-            { customId: buttonId('merge', repo, n, d.sha), label: `Merge ${short(d.sha)}`, style: 'primary' },
-          ]);
-          store.update(repo, n, { askedSha: d.sha });
+          // One failed attempt per head, already reported with a DM when it failed. The
+          // merge waits for a person; a repeat refusal is not announced every poll.
           return;
         }
         await this.merge(repo, f, d.sha, `tier ${f.classification.tier}, merged without a tap`);

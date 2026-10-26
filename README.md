@@ -49,8 +49,8 @@ recovery still edits the original message instead of orphaning it.
 
 ## The merge desk (PET-645)
 
-The merge desk merges low-risk pull requests without a person, and asks Pedro for one tap
-on the rest. It polls every open PR in `DESK_REPOS` every three minutes and decides each one
+The merge desk merges low-risk pull requests without a person, and comments on the rest
+without a DM. It polls every open PR in `DESK_REPOS` every three minutes and decides each one
 from facts GitHub reports. No model decides a merge.
 
 | Step | What the desk checks |
@@ -59,7 +59,7 @@ from facts GitHub reports. No model decides a merge.
 | Tier | petedio-iac's `scripts/pr-blast-radius.py`, read from petedio-iac's default branch and run against the base repository's workflows on its default branch. A renamed file counts by both paths. Until the rules on main grade the desk's own guard paths tier 2, every PR is tier 2 |
 | Codex | A review of the head SHA by `petedio-codex-review[bot]`. None yet: the desk queues `codex-review <repo> <n> <effort>` on codex-248, with `low`, `medium` or `high` for tiers 0, 1 and 2 |
 | Gates | No conflict, every check run and status passed, and no unresolved review thread. A skipped or neutral check, or no check at all in a repo not on `DESK_NO_CI_REPOS`, goes to Pedro instead of merging |
-| Who merges | Tiers 0 and 1 with "No blocking findings" merge here. Tier 2, or a Codex "Escalate to Pedro", arrive as a DM with a **Merge** button |
+| Who merges | Tiers 0 and 1 with "No blocking findings" merge here. Tier 2, or a Codex "Escalate to Pedro", get a PR comment, with no DM, and wait for the Open PR list thread |
 
 The merge is a squash pinned to the reviewed head, so a push after the review blocks it
 until Codex reviews the new head. The desk approves the PR first, which satisfies a
@@ -67,7 +67,7 @@ required review and records the evidence. After the merge it reads the default b
 back, then posts one comment on the PR and one DM. Both are saved first and retried on
 later polls until they land.
 
-A tap merges only the SHA on its button, only for the owner, and only after the desk
+A tap, where one still exists, merges only the SHA on its button, only for the owner, and only after the desk
 reads every fact again. A moved head, a new thread or a red check refuses the tap and
 says why.
 
