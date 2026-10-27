@@ -209,6 +209,7 @@ export class ReportRunner {
       return { ...out, gaps: [`PET items were not filed because the findings are unreliable (${why})`] };
     }
     const want = run.findings.filter(isFileable);
+    let failedInARow = 0;
     for (const [i, f] of want.entries()) {
       if (out.created.length >= FILE_CAP) {
         out.overCap = want.length - i;
@@ -216,13 +217,14 @@ export class ReportRunner {
       }
       try {
         const r = await this.d.plane.createItem({
-          name: `Update ${f.package} on ${f.hosts.slice(0, 3).join(', ')} (${f.kev ? 'exploited, ' : ''}${f.cves[0] ?? f.advisories[0]})`,
+          name: `Update ${f.package} on ${f.hosts.slice(0, 3).join(', ')} (${f.kev ? `exploited, ${f.kevCves[0] ?? f.cves[0]}` : (f.cves[0] ?? f.advisories[0])})`,
           descriptionHtml: cveItemHtml(f),
           priority: f.kev || f.severity === 'CRITICAL' ? 'high' : 'medium',
           labels: ['security', 'lan'],
           externalSource: 'pete-bot-cve',
           externalId: f.key,
         });
+        failedInARow = 0;
         if (r.status === 'created') out.created.push(`PET-${r.seq ?? '?'}`);
         else out.existing++;
       } catch (err) {
@@ -231,7 +233,12 @@ export class ReportRunner {
         // 400 and 422 name this finding's fields. 401, 403, 404 and 429 hit every item the same way.
         const own = err instanceof PlaneHttpError && (err.status === 400 || err.status === 422);
         out.gaps.push(`could not file ${f.package}: ${String(err).slice(0, 120)}${own ? '' : `; filing stopped, ${want.length - i - 1} candidates not tried`}`);
-        if (!own) break;
+        failedInARow++;
+        // Three rejections in a row point at the request itself, not at one finding.
+        if (!own || failedInARow >= 3) {
+          if (own) out.gaps.push(`filing stopped after ${failedInARow} rejected items in a row, ${want.length - i - 1} candidates not tried`);
+          break;
+        }
       }
     }
     return out;

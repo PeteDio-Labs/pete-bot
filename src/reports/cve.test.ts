@@ -15,7 +15,7 @@ const snap = (over: Partial<InventorySnapshot> = {}): InventorySnapshot => ({
   hosts: [
     {
       name: 'media-237', ok: true, os: { id: 'debian', version: '12' }, images: [{ ref: 'x/y:1' }], apps: [], malformedLines: 0,
-      packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl', sourceVersion: '3.0.1-1' }, { name: 'curl', version: '7.88.0-1' }],
+      packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl', sourceVersion: '3.0.1-1' }, { name: 'curl', version: '7.88.0-1', sourceVersion: '7.88.0-1' }],
     },
     { name: 'pve02', ok: false, error: 'ssh timeout', packages: [], images: [], apps: [], malformedLines: 0 },
   ],
@@ -121,9 +121,21 @@ describe('fixed versions', () => {
     expect(f.kev).toBe(false);
     expect(f.kevUnfixed).toBe(true);
     expect(f.unfixed).toEqual(['B']);
-    expect(upgradeHintText(f)).toContain('does not close 1 advisories with no fix (B), one of them exploited');
+    expect(upgradeHintText(f)).toContain('does not close 1 advisory with no fix (B), exploited: B');
     expect(isActionable(f)).toBe(true);
     expect(isFileable(f)).toBe(false);
+  });
+  it('drops an unfixed advisory whose CVE another advisory fixes', () => {
+    const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', [], 'CVE-2026-1')]]), new Set(['CVE-2026-1']))[0]!;
+    expect(f.unfixed).toEqual([]);
+    expect(f.kevUnfixed).toBe(false);
+    expect(f.kev).toBe(true);
+  });
+  it('names the exploited CVE and puts the exploited unfixed advisory first in the hint', () => {
+    const f = buildFindings([{ query: q, ids: ['A', 'B', 'C'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', [], 'CVE-2026-2')], ['C', adv('C', [], 'CVE-2026-3')]]), new Set(['CVE-2026-3']))[0]!;
+    expect(f.kevCves).toEqual(['CVE-2026-3']);
+    expect(f.unfixed[0]).toBe('C');
+    expect(upgradeHintText(f)).toContain('exploited: C');
   });
   it('does not let an unfixed severe advisory raise the severity of a fixable one', () => {
     const sev = (id: string, fixes: string[], cve: string, score: string) => ({ ...adv(id, fixes, cve), severity: score as 'HIGH' | 'LOW' });
@@ -161,7 +173,7 @@ describe('runCveCheck', () => {
     expect(text).toContain('INCOMPLETE');
   });
   it('says what it examined when it finds nothing, and is not marked incomplete', async () => {
-    const clean = snap({ hosts: [{ ...snap().hosts[0]!, packages: [{ name: 'curl', version: '7.88.0-1' }] }] });
+    const clean = snap({ hosts: [{ ...snap().hosts[0]!, packages: [{ name: 'curl', version: '7.88.0-1', sourceVersion: '7.88.0-1' }] }] });
     const text = buildCveReport(await runCveCheck(clean, NOW, feeds()), '2026-10-27');
     expect(text).toContain('Examined 1 of 1 hosts, 1 package versions, 0 advisories');
     expect(text).not.toContain('INCOMPLETE');
@@ -272,6 +284,18 @@ describe('ReportRunner cve', () => {
     expect(text).toContain('already filed 2');
     expect(text).toMatch(/filed PET-\d+/);
     expect(text).toContain('not tried, daily cap of 5 reached');
+  });
+  it('stops after three rejected items in a row', async () => {
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 6 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl', sourceVersion: `1.${i}` })) }] });
+    const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
+    writeFileSync(p, JSON.stringify(many));
+    let tried = 0;
+    const plane = { createItem: async () => { tried++; throw new PlaneHttpError('bad field', 400); } } as never;
+    const sent: string[] = [];
+    const r = new ReportRunner({ settings: base(p, true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
+    await r.run('cve', { markRun: false });
+    expect(tried).toBe(3);
+    expect(sent.join('\n')).toContain('filing stopped after 3 rejected items in a row');
   });
   it('stops filing at the first Plane error and says how many candidates were not tried', async () => {
     const sent: string[] = [];
