@@ -13,10 +13,10 @@ const snap = (over: Partial<InventorySnapshot> = {}): InventorySnapshot => ({
   generatedAt: '2026-10-27T10:00:00Z',
   hosts: [
     {
-      name: 'media-237', ok: true, os: { id: 'debian', version: '12' }, images: [{ ref: 'x/y:1' }], apps: [],
+      name: 'media-237', ok: true, os: { id: 'debian', version: '12' }, images: [{ ref: 'x/y:1' }], apps: [], malformedLines: 0,
       packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl (3.0.1-1)' }, { name: 'curl', version: '7.88.0-1' }],
     },
-    { name: 'pve02', ok: false, error: 'ssh timeout', packages: [], images: [], apps: [] },
+    { name: 'pve02', ok: false, error: 'ssh timeout', packages: [], images: [], apps: [], malformedLines: 0 },
   ],
   ...over,
 });
@@ -118,7 +118,7 @@ describe('runCveCheck', () => {
     expect(text).toContain('odd was not scanned: OS "alpine"');
   });
   it('does not count an ok host with no os or no packages as examined', async () => {
-    const odd = snap({ hosts: [snap().hosts[0]!, { name: 'noos', ok: true, packages: [{ name: 'a', version: '1' }], images: [], apps: [] }, { name: 'empty', ok: true, os: { id: 'debian', version: '12' }, packages: [], images: [], apps: [] }] });
+    const odd = snap({ hosts: [snap().hosts[0]!, { name: 'noos', ok: true, packages: [{ name: 'a', version: '1' }], images: [], apps: [], malformedLines: 0 }, { name: 'empty', ok: true, os: { id: 'debian', version: '12' }, packages: [], images: [], apps: [], malformedLines: 0 }] });
     const text = buildCveReport(await runCveCheck(odd, NOW, feeds()), '2026-10-27');
     expect(text).toContain('Examined 1 of 3 hosts');
     expect(text).toContain('noos was not scanned');
