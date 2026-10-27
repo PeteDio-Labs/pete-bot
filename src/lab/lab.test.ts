@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { OllamaError } from './ollama.js';
+import { ModelError } from './ollama.js';
 import { ask, MAX_TOKENS, MAX_TURNS, type CallModel, type ModelResponse } from './agent.js';
 import { loadLabConfig } from './config.js';
 import { createLabHandler, runChecks } from './server.js';
@@ -48,7 +48,7 @@ describe('loadLabConfig', () => {
 
   it('defaults to the Ollama lane, takes a model override, and refuses the retired gateway provider', () => {
     expect(loadLabConfig({ ...baseEnv, LAB_MODEL: 'qwen3:4b' }, read).model).toBe('qwen3:4b');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_PROVIDER: 'gateway' }, read)).toThrow('LAB_PROVIDER');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PROVIDER: 'gateway' }, read)).toThrow('retired (PET-744)');
   });
 
   it('turns plane_item on only with a token, and defaults the rest', () => {
@@ -257,7 +257,7 @@ describe('lab-agent HTTP surface', () => {
     let calls = 0;
     const hangOnce: CallModel = (_b, signal) =>
       ++calls === 1
-        ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new OllamaError('stopped'))))
+        ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new ModelError('stopped'))))
         : Promise.resolve(final('second answer'));
     const h = handler({ callModel: hangOnce, deadlineMs: 20 });
     const res = await h(post({ question: 'where does plane run' }));
@@ -269,7 +269,7 @@ describe('lab-agent HTTP surface', () => {
   });
 
   it('turns a model failure into a 502 with its reason', async () => {
-    const h = handler({ callModel: async () => { throw new OllamaError('ollama answered HTTP 500: out of memory'); } });
+    const h = handler({ callModel: async () => { throw new ModelError('ollama answered HTTP 500: out of memory'); } });
     const res = await h(post({ question: 'where does plane run' }));
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: 'ollama answered HTTP 500: out of memory' });

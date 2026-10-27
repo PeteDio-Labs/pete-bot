@@ -11,8 +11,8 @@
  *   on             Every check below passed, and the desk merges.
  *
  * ⚠ A BAD SETTING DISABLES THE DESK, NOT THE BOT. Throwing at startup would also stop
- * Uptime Kuma's alerts, which is the job this process exists for. The gateway follows the
- * same rule (src/gateway/config.ts).
+ * Uptime Kuma's alerts, which is the job this process exists for. The reports follow the
+ * same rule (src/reports/settings.ts).
  */
 import { readFileSync } from 'node:fs';
 

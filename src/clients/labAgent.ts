@@ -3,7 +3,7 @@
  * /v1/ask on 127.0.0.1 with the ask bearer and relays what comes back.
  *
  * ⚠ ONLY THE ASK BEARER CROSSES. lab-agent holds its own read credentials and its own
- * gateway bearer; pete-bot sends a question and nothing else.
+ * model access; pete-bot sends a question and nothing else.
  */
 export interface LabAnswer {
   answer: string;
