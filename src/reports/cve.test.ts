@@ -2,10 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCveReport, buildFindings, buildQueries, compareVersions, cvss3Score, isActionable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, type InventorySnapshot } from './cve.js';
+import { buildCveReport, buildFindings, buildQueries, compareVersions, cvss3Score, isActionable, isFileable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, upgradeHint as upgradeHintText, type InventorySnapshot } from './cve.js';
 import { dueReports } from './schedule.js';
 import { PlaneHttpError } from './plane.js';
-import { upgradeHint as upgradeHintText } from './cve.js';
 import { ReportRunner } from './runner.js';
 import { loadReportSettings } from './settings.js';
 
@@ -65,9 +64,9 @@ describe('severity and fixed versions', () => {
     expect(toAdvisory({ id: 'x', database_specific: { severity: 'low' } }).severity).toBe('LOW');
     expect(toAdvisory({ id: 'y' }).severity).toBe('unrated');
   });
-  it('keeps every distinct fixed version of a package', () => {
-    const a = toAdvisory({ id: 'z', affected: [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: [{ fixed: '1.2' }] }, { events: [{ fixed: '2.4' }] }] }] });
-    expect(a.fixed.get('Debian:12|p')).toEqual(['1.2', '2.4']);
+  it('keeps the bounds of every range of a package', () => {
+    const a = toAdvisory({ id: 'z', affected: [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: [{ introduced: '1.0' }, { fixed: '1.2' }] }, { events: [{ fixed: '2.4' }] }] }] });
+    expect(a.fixed.get('Debian:12|p')).toEqual([{ introduced: '1.0', fixed: '1.2' }, { introduced: '0', fixed: '2.4' }]);
   });
   it('fetches advisories that name a KEV entry first', () => {
     expect(orderForFetch(['DSA-1', 'DEBIAN-CVE-2026-0001', 'A'], new Set(['CVE-2026-0001']))[0]).toBe('DEBIAN-CVE-2026-0001');
@@ -105,18 +104,39 @@ describe('fixed versions', () => {
     expect(compareVersions('1.0~rc1-1', '1.0-1')).toBeLessThan(0);
     expect(compareVersions('1.10-1', '1.9-1')).toBeGreaterThan(0);
     expect(compareVersions('2.0-1', '2.0-1')).toBe(0);
+    expect(compareVersions('1.2', '1.a')).toBeLessThan(0);
+    expect(compareVersions('1.a', '1.2')).toBeGreaterThan(0);
+    // dpkg reads `rc.1` as the revision, and a revision with letters sorts above none.
+    expect(compareVersions('1.2.3-rc.1', '1.2.3')).toBeGreaterThan(0);
+    expect(compareVersions('1.2.3~rc1', '1.2.3')).toBeLessThan(0);
   });
   const q = { ecosystem: 'Debian:12', name: 'p', version: '1', hosts: new Set(['h']), binaries: new Set(['p']) };
-  const adv = (id: string, fixes: string[], cve: string) => toAdvisory({ id, aliases: [cve], affected: fixes.length ? [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: fixes.map((fixed) => ({ fixed })) }] }] : [] });
+  const adv = (id: string, fixes: string[], cve: string) => toAdvisory({ id, aliases: [cve], affected: fixes.length ? [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: [{ introduced: '0' }, ...fixes.map((fixed) => ({ fixed }))] }] }] : [] });
   it('names the highest fix, so installing it closes every fixed advisory', () => {
     const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', ['3.0.9-1'], 'CVE-2026-2')]]), null)[0]!;
     expect(f.fixed).toBe('3.0.9-1');
   });
   it('does not let an unfixed exploited advisory inherit another advisory\'s fix', () => {
     const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', [], 'CVE-2026-2')]]), new Set(['CVE-2026-2']))[0]!;
-    expect(f.kev).toBe(true);
+    expect(f.kev).toBe(false);
+    expect(f.kevUnfixed).toBe(true);
     expect(f.unfixed).toEqual(['B']);
-    expect(upgradeHintText(f)).toContain('does not close 1 advisories with no fix (B)');
+    expect(upgradeHintText(f)).toContain('does not close 1 advisories with no fix (B), one of them exploited');
+    expect(isActionable(f)).toBe(true);
+    expect(isFileable(f)).toBe(false);
+  });
+  it('does not let an unfixed severe advisory raise the severity of a fixable one', () => {
+    const sev = (id: string, fixes: string[], cve: string, score: string) => ({ ...adv(id, fixes, cve), severity: score as 'HIGH' | 'LOW' });
+    const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', sev('A', [], 'CVE-2026-1', 'HIGH')], ['B', sev('B', ['3.0.2-1'], 'CVE-2026-2', 'LOW')]]), null)[0]!;
+    expect(f.severity).toBe('LOW');
+    expect(isActionable(f)).toBe(false);
+  });
+  it('ignores a fix from a range that does not cover the installed version', () => {
+    const a = toAdvisory({ id: 'R', aliases: ['CVE-2026-9'], affected: [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: [{ introduced: '0' }, { fixed: '1.5' }] }, { events: [{ introduced: '2.0' }, { fixed: '2.3' }] }] }] });
+    const at = (version: string) => buildFindings([{ query: { ...q, version }, ids: ['R'] }], new Map([['R', a]]), null)[0]!;
+    expect(at('1.2').fixed).toBe('1.5');
+    expect(at('2.1').fixed).toBe('2.3');
+    expect(at('3.0').fixed).toBeNull();
   });
 });
 
@@ -314,7 +334,7 @@ describe('ReportRunner cve', () => {
     const r = new ReportRunner({ settings: base(file(), true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: flaky });
     await r.run('cve', { markRun: false });
     expect(called).toBe(0);
-    expect(sent.join('\n')).toContain('not filed because some advisories were not read');
+    expect(sent.join('\n')).toContain('not filed because the findings are unreliable');
   });
   it('keeps filing past a 4xx for one finding but stops on a 5xx', async () => {
     const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 3 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl', sourceVersion: `1.${i}` })) }] });

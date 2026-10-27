@@ -115,9 +115,10 @@ export function buildQueries(snap: InventorySnapshot): Query[] {
     const eco = ecosystemOf(h);
     if (eco) {
       // OSV matches a Debian source package by its source version, which differs from the binary version.
-      for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.sourceVersion || p.version, h.name, p.name);
+      for (const p of h.packages) add(eco, (p.source || p.name).split(' ')[0]!, p.sourceVersion || p.version, h.name, p.name);
     }
-    for (const a of h.apps) add(a.ecosystem, a.package, a.version, h.name, a.name);
+    // An app on a host the matcher could not read is not matched either, so the host stays unscanned.
+    if (eco && h.packages.length > 0) for (const a of h.apps) add(a.ecosystem, a.package, a.version, h.name, a.name);
   }
   return [...map.values()];
 }
@@ -167,7 +168,12 @@ interface OsvVuln {
   summary?: string;
   severity?: { type?: string; score?: string }[];
   database_specific?: { severity?: string };
-  affected?: { package?: { name?: string; ecosystem?: string }; ranges?: { events?: { fixed?: string }[] }[] }[];
+  affected?: { package?: { name?: string; ecosystem?: string }; ranges?: { events?: { introduced?: string; fixed?: string }[] }[] }[];
+}
+
+export interface FixRange {
+  introduced: string;
+  fixed: string;
 }
 
 export interface Advisory {
@@ -175,12 +181,12 @@ export interface Advisory {
   cves: string[];
   summary: string;
   severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | 'unrated';
-  /** Every distinct fixed version per `ecosystem|package`. */
-  fixed: Map<string, string[]>;
+  /** The affected ranges per `ecosystem|package`: introduced (inclusive) and fixed (exclusive). */
+  fixed: Map<string, FixRange[]>;
 }
 
 /** The order of one dpkg version part: letters sort before the end of the string, `~` before everything. */
-const order = (c: string | undefined): number => (c === undefined || c === '' ? 0 : c === '~' ? -1 : /[A-Za-z]/.test(c) ? c.charCodeAt(0) : c.charCodeAt(0) + 256);
+const order = (c: string | undefined): number => (c === undefined || c === '' ? 0 : c === '~' ? -1 : /\d/.test(c) ? 0 : /[A-Za-z]/.test(c) ? c.charCodeAt(0) : c.charCodeAt(0) + 256);
 
 function cmpPart(a: string, b: string): number {
   let i = 0;
@@ -263,14 +269,18 @@ function severityOf(v: OsvVuln): Advisory['severity'] {
 }
 
 export function toAdvisory(v: OsvVuln): Advisory {
-  const fixed = new Map<string, string[]>();
+  const fixed = new Map<string, FixRange[]>();
   for (const a of v.affected ?? []) {
     if (!a.package?.name || !a.package.ecosystem) continue;
     const key = `${a.package.ecosystem}|${a.package.name}`;
-    // Matching the installed version to one range needs the ecosystem's version order. Keep every
-    // distinct fixed version of the package instead, and let the report show them all.
-    const fixes = (a.ranges ?? []).flatMap((r) => r.events ?? []).flatMap((e) => (e.fixed ? [e.fixed] : []));
-    if (fixes.length) fixed.set(key, [...new Set([...(fixed.get(key) ?? []), ...fixes])]);
+    // Keep each range's bounds: a branch fixed at 2.3 says nothing about an install at 1.2.
+    for (const r of a.ranges ?? []) {
+      let introduced = '0';
+      for (const e of r.events ?? []) {
+        if (e.introduced !== undefined) introduced = e.introduced;
+        if (e.fixed) fixed.set(key, [...(fixed.get(key) ?? []), { introduced, fixed: e.fixed }]);
+      }
+    }
   }
   return {
     id: v.id,
@@ -328,7 +338,11 @@ export interface Finding {
   binaries: string[];
   advisories: string[];
   cves: string[];
+  /** CISA lists an advisory that has a fix. Set only from fixed advisories, so `fixed` closes it. */
   kev: boolean;
+  /** CISA lists an advisory that has no fix. The `fixed` upgrade does not close it. */
+  kevUnfixed: boolean;
+  /** The highest severity among the advisories that have a fix. */
   severity: Advisory['severity'];
   summary: string;
 }
@@ -365,17 +379,26 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           advisories: [],
           cves: [],
           kev: false,
+          kevUnfixed: false,
           severity: 'unrated',
           summary: '',
         } satisfies Finding);
-      const fixes = adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? [];
-      if (fixes.length === 0) f.unfixed.push(id);
-      for (const v of fixes) if (f.fixed === null || compareVersions(v, f.fixed) > 0) f.fixed = v;
+      // Only the ranges that cover the installed version count: another branch's fix is not this install's.
+      const fixes = (adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? [])
+        .filter((r) => compareVersions(m.query.version, r.introduced) >= 0 && compareVersions(m.query.version, r.fixed) < 0)
+        .map((r) => r.fixed);
       f.advisories.push(id);
       for (const c of adv.cves) if (!f.cves.includes(c)) f.cves.push(c);
-      if (kev && adv.cves.some((c) => kev.has(c))) f.kev = true;
-      if (RANK[adv.severity] > RANK[f.severity]) f.severity = adv.severity;
       if (!f.summary && adv.summary) f.summary = adv.summary;
+      const exploited = kev !== null && adv.cves.some((c) => kev.has(c));
+      if (fixes.length === 0) {
+        f.unfixed.push(id);
+        if (exploited) f.kevUnfixed = true;
+      } else {
+        for (const v of fixes) if (f.fixed === null || compareVersions(v, f.fixed) > 0) f.fixed = v;
+        if (exploited) f.kev = true;
+        if (RANK[adv.severity] > RANK[f.severity]) f.severity = adv.severity;
+      }
       out.set(key, f);
     }
   }
@@ -384,18 +407,24 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
 }
 
 /** What deserves Pedro's eyes: exploited in the wild, or high severity with a fix to apply. */
-export const isActionable = (f: Finding): boolean => f.kev || (f.fixed !== null && RANK[f.severity] >= RANK.HIGH);
+export const isActionable = (f: Finding): boolean => f.kev || f.kevUnfixed || (f.fixed !== null && RANK[f.severity] >= RANK.HIGH);
+
+/** An actionable finding with an upgrade that closes it; these are the ones the filing step may file. */
+export const isFileable = (f: Finding): boolean => f.fixed !== null && (f.kev || RANK[f.severity] >= RANK.HIGH);
 
 export function sortFindings(fs: Finding[]): Finding[] {
   return [...fs].sort(
-    (a, b) => Number(b.kev) - Number(a.kev) || RANK[b.severity] - RANK[a.severity] || b.hosts.length - a.hosts.length || a.package.localeCompare(b.package),
+    (a, b) => Number(b.kev || b.kevUnfixed) - Number(a.kev || a.kevUnfixed) || RANK[b.severity] - RANK[a.severity] || b.hosts.length - a.hosts.length || a.package.localeCompare(b.package),
   );
 }
 
 export function upgradeHint(f: Finding): string {
-  if (!f.fixed) return 'no fixed version published yet';
-  const open = f.unfixed.length ? `; does not close ${f.unfixed.length} advisories with no fix (${f.unfixed.slice(0, 2).join(', ')}${f.unfixed.length > 2 ? ', …' : ''})` : '';
-  if (f.ecosystem.startsWith('Debian')) return `\`apt-get install --only-upgrade ${f.binaries.slice(0, 3).join(' ') || f.package}\` (fixed in ${f.fixed}${open})`;
+  if (!f.fixed) return f.kevUnfixed ? 'exploited, and no fixed version is published: mitigate or isolate the host' : 'no fixed version published yet';
+  const open = f.unfixed.length ? `; does not close ${f.unfixed.length} advisories with no fix (${f.unfixed.slice(0, 2).join(', ')}${f.unfixed.length > 2 ? ', …' : ''})${f.kevUnfixed ? ', one of them exploited' : ''}` : '';
+  // `--only-upgrade` skips a binary a host does not have, so the union across hosts is safe to list.
+  const shown = f.binaries.slice(0, 12);
+  const more = f.binaries.length > shown.length ? `, plus ${f.binaries.length - shown.length} more binaries of source package ${f.package}` : '';
+  if (f.ecosystem.startsWith('Debian')) return `\`apt-get install --only-upgrade ${shown.join(' ') || f.package}\` (fixed in ${f.fixed}${open}${more})`;
   return `pin ${f.package} at ${f.fixed} or later in petedio-iac${open}`;
 }
 
@@ -406,7 +435,10 @@ export interface CveRun {
   queries: number;
   uniqueAdvisories: number;
   advisoriesFetched: number;
+  /** Gaps that make the findings unreliable: filing waits for a run without them. */
   advisoryGaps: string[];
+  /** Gaps that leave something unexamined but do not change what was found. */
+  inventoryGaps: string[];
   kevSize: number | null;
   kevError: string | null;
   truncated: number;
@@ -432,12 +464,13 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   }
   const { byId, failed, skipped } = await fetchAdvisories(f, orderForFetch(ids, kev));
   const advisoryGaps: string[] = [];
+  const inventoryGaps: string[] = [];
   for (const h of readHosts) {
-    const fallback = h.packages.filter((p) => p.source && !p.sourceVersion).length;
+    const fallback = h.packages.filter((p) => p.source !== undefined && !p.sourceVersion).length;
     if (fallback > 0) advisoryGaps.push(`${h.name}: ${fallback} packages had no source version, so the binary version was matched and the result may be wrong`);
   }
-  for (const h of readHosts) if (h.imagesError) advisoryGaps.push(`${h.name}: the image list could not be read (${clip(h.imagesError, 80)})`);
-  for (const h of readHosts) if (h.malformedLines > 0) advisoryGaps.push(`${h.name}: ${h.malformedLines} package lines could not be read, so those packages were not matched`);
+  for (const h of readHosts) if (h.imagesError) inventoryGaps.push(`${h.name}: the image list could not be read (${clip(h.imagesError, 80)})`);
+  for (const h of readHosts) if (h.malformedLines > 0) inventoryGaps.push(`${h.name}: ${h.malformedLines} package lines could not be read, so those packages were not matched`);
   if (failed.length) advisoryGaps.push(`${failed.length} advisories could not be fetched (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ', …' : ''})`);
   if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories whose id names a KEV entry went first)`);
   return {
@@ -453,6 +486,7 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
     uniqueAdvisories: ids.length,
     advisoriesFetched: byId.size,
     advisoryGaps,
+    inventoryGaps,
     kevSize: kev?.size ?? null,
     kevError,
     truncated,
@@ -479,7 +513,7 @@ export function buildCveReport(run: CveRun, day: string, filing: Filing = NO_FIL
   const actionable = run.findings.filter(isActionable);
   const fixable = run.findings.filter((x) => x.fixed !== null && !isActionable(x));
   const unratedFix = fixable.filter((x) => x.severity === 'unrated').length;
-  const gaps = [...run.advisoryGaps, ...filing.gaps];
+  const gaps = [...run.advisoryGaps, ...run.inventoryGaps, ...filing.gaps];
   for (const h of run.hostsUnread) gaps.push(`${h.name} was not scanned: ${clip(h.error, 100)}`);
   if (run.kevError) gaps.push(`${run.kevError}, so nothing is marked as exploited`);
   if (run.truncated) gaps.push(`${run.truncated} OSV answers were paged and only the first page was read`);
@@ -494,7 +528,7 @@ export function buildCveReport(run: CveRun, day: string, filing: Filing = NO_FIL
   ];
   if (actionable.length === 0) lines.push(`- none of the ${run.findings.length} matched findings is exploited or high severity with a fix`);
   for (const x of actionable.slice(0, REPORT_CAP)) {
-    const tag = [x.kev ? 'KEV' : null, x.severity !== 'unrated' ? x.severity : null].filter(Boolean).join(' ');
+    const tag = [x.kev || x.kevUnfixed ? 'KEV' : null, x.severity !== 'unrated' ? x.severity : null].filter(Boolean).join(' ');
     lines.push(`- ${tag ? `**${tag}** ` : ''}\`${x.package}\` ${x.installed} on ${x.hosts.join(', ')}: ${x.cves.slice(0, 3).join(', ') || x.advisories[0]}${x.cves.length > 3 ? ` +${x.cves.length - 3}` : ''}. ${upgradeHint(x)}`);
   }
   if (actionable.length > REPORT_CAP) lines.push(`- … ${actionable.length - REPORT_CAP} more not shown`);

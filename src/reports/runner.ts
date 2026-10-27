@@ -14,7 +14,7 @@ import { collectGithub, type GithubReads } from './collect.js';
 import { buildAudit } from './audit.js';
 import { buildMorning, COMMENT_ITEM_CAP, type CommentMap } from './morning.js';
 import { buildSweep } from './sweep.js';
-import { buildCveReport, FILE_CAP, snapshotFresh, isActionable, NO_FILING, readSnapshot, runCveCheck, upgradeHint, type CveRun, type Filing, type Finding } from './cve.js';
+import { buildCveReport, FILE_CAP, snapshotFresh, isFileable, NO_FILING, readSnapshot, runCveCheck, upgradeHint, type CveRun, type Filing, type Finding } from './cve.js';
 import { PlaneClient, PlaneHttpError, type CycleRead, type PlaneRead } from './plane.js';
 import { dueReports, localTime } from './schedule.js';
 import { REPORT_NAMES, type ReportName, type ReportSettings } from './settings.js';
@@ -204,8 +204,11 @@ export class ReportRunner {
     if (run.kevSize === null) return { ...out, gaps: ['PET items were not filed because the CISA KEV catalog was not read'] };
     if (!snapshotFresh(run.snapshotAgeHours)) return { ...out, gaps: ['PET items were not filed because the inventory snapshot is stale or dated in the future'] };
     // Filed items are deduplicated forever, so degraded data must not file anything (a 409 would hide the later, fuller finding).
-    if (run.advisoryGaps.length > 0 || run.truncated > 0) return { ...out, gaps: ['PET items were not filed because some advisories were not read or OSV answers were paged'] };
-    const want = run.findings.filter((f) => isActionable(f) && f.fixed !== null);
+    if (run.advisoryGaps.length > 0 || run.truncated > 0) {
+      const why = [...run.advisoryGaps.slice(0, 2), ...(run.truncated > 0 ? [`${run.truncated} OSV answers were paged`] : [])].join('; ');
+      return { ...out, gaps: [`PET items were not filed because the findings are unreliable (${why})`] };
+    }
+    const want = run.findings.filter(isFileable);
     for (const [i, f] of want.entries()) {
       if (out.created.length >= FILE_CAP) {
         out.overCap = want.length - i;
