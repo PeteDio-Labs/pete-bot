@@ -35,10 +35,12 @@ const HostSchema = z.object({
   ok: z.boolean(),
   error: z.string().optional(),
   os: z.object({ id: z.string(), version: z.string() }).optional(),
-  packages: z.array(z.object({ name: z.string(), version: z.string(), source: z.string().optional() })).default([]),
+  packages: z.array(z.object({ name: z.string(), version: z.string(), source: z.string().optional(), sourceVersion: z.string().optional() })).default([]),
   images: z.array(z.object({ ref: z.string() })).default([]),
   /** A pinned binary with its OSV identity, e.g. cloudflared as Go `github.com/cloudflare/cloudflared`. */
   apps: z.array(z.object({ name: z.string(), version: z.string(), ecosystem: z.string(), package: z.string() })).default([]),
+  /** Why the image list is empty or partial, when the collector could not read it. */
+  imagesError: z.string().optional(),
   /** dpkg lines the collector could not split. Those packages were not matched. */
   malformedLines: z.number().default(0),
 });
@@ -88,7 +90,11 @@ export interface Query {
 }
 
 const DEBIAN_LIKE = new Set(['debian', 'raspbian']);
-const ecosystemOf = (h: HostInventory): string | null => (h.os && DEBIAN_LIKE.has(h.os.id) ? `Debian:${h.os.version.split('.')[0]}` : null);
+/** `Debian:<major>`, or null when the OS is not Debian-like or its version has no numeric major. */
+const ecosystemOf = (h: HostInventory): string | null => {
+  const major = /^(\d+)/.exec(h.os?.version ?? '')?.[1];
+  return h.os && DEBIAN_LIKE.has(h.os.id) && major ? `Debian:${major}` : null;
+};
 
 /** The OSV queries for the hosts the collector read, deduplicated across hosts. */
 export function buildQueries(snap: InventorySnapshot): Query[] {
@@ -104,7 +110,8 @@ export function buildQueries(snap: InventorySnapshot): Query[] {
     if (!h.ok) continue;
     const eco = ecosystemOf(h);
     if (eco) {
-      for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.version, h.name, p.name);
+      // OSV matches a Debian source package by its source version, which differs from the binary version.
+      for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.sourceVersion ?? p.version, h.name, p.name);
     }
     for (const a of h.apps) add(a.ecosystem, a.package, a.version, h.name, a.name);
   }
@@ -147,6 +154,8 @@ export async function queryOsv(f: Fetch, queries: Query[]): Promise<{ matches: O
 interface OsvVuln {
   id: string;
   aliases?: string[];
+  /** Debian records name the CVEs they derive from here. */
+  upstream?: string[];
   summary?: string;
   severity?: { type?: string; score?: string }[];
   database_specific?: { severity?: string };
@@ -215,7 +224,7 @@ export function toAdvisory(v: OsvVuln): Advisory {
   }
   return {
     id: v.id,
-    cves: [v.id, ...(v.aliases ?? [])].filter((x) => /^CVE-\d{4}-\d+$/.test(x)),
+    cves: [v.id, ...(v.aliases ?? []), ...(v.upstream ?? [])].filter((x) => /^CVE-\d{4}-\d+$/.test(x)),
     summary: v.summary ?? '',
     severity: severityOf(v),
     fixed,
@@ -273,15 +282,19 @@ export interface Finding {
 
 const RANK: Record<Advisory['severity'], number> = { CRITICAL: 4, HIGH: 3, MODERATE: 2, LOW: 1, unrated: 0 };
 
-/** Folds matches into one finding per package, installed version and fix. */
+/**
+ * Folds matches into one finding per package and installed version. The key leaves the fixed
+ * version out on purpose: it is the item's dedup key, and a fixed version that changes between
+ * days must not file the same upgrade twice.
+ */
 export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advisory>, kev: Set<string> | null): Finding[] {
   const out = new Map<string, Finding>();
+  const fixes = new Map<string, Set<string>>();
   for (const m of matches) {
     for (const id of m.ids) {
       const adv = advisories.get(id);
       if (!adv) continue;
-      const fixed = adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`)?.join(' or ') ?? null;
-      const key = `${m.query.ecosystem}|${m.query.name}|${m.query.version}|${fixed ?? 'nofix'}`;
+      const key = `${m.query.ecosystem}|${m.query.name}|${m.query.version}`;
       const f =
         out.get(key) ??
         ({
@@ -289,7 +302,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           ecosystem: m.query.ecosystem,
           package: m.query.name,
           installed: m.query.version,
-          fixed,
+          fixed: null,
           hosts: [...m.query.hosts].sort(),
           binaries: [...m.query.binaries].sort(),
           advisories: [],
@@ -298,6 +311,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           severity: 'unrated',
           summary: '',
         } satisfies Finding);
+      for (const v of adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? []) fixes.set(key, (fixes.get(key) ?? new Set()).add(v));
       f.advisories.push(id);
       for (const c of adv.cves) if (!f.cves.includes(c)) f.cves.push(c);
       if (kev && adv.cves.some((c) => kev.has(c))) f.kev = true;
@@ -305,6 +319,10 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
       if (!f.summary && adv.summary) f.summary = adv.summary;
       out.set(key, f);
     }
+  }
+  for (const [key, f] of out) {
+    const v = fixes.get(key);
+    f.fixed = v?.size ? [...v].join(' or ') : null;
   }
   return [...out.values()];
 }
@@ -357,6 +375,7 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   }
   const { byId, failed, skipped } = await fetchAdvisories(f, orderForFetch(ids, kev));
   const advisoryGaps: string[] = [];
+  for (const h of readHosts) if (h.imagesError) advisoryGaps.push(`${h.name}: the image list could not be read (${clip(h.imagesError, 80)})`);
   for (const h of readHosts) if (h.malformedLines > 0) advisoryGaps.push(`${h.name}: ${h.malformedLines} package lines could not be read, so those packages were not matched`);
   if (failed.length) advisoryGaps.push(`${failed.length} advisories could not be fetched (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ', …' : ''})`);
   if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories naming a KEV entry went first)`);

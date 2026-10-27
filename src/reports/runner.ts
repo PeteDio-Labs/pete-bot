@@ -14,8 +14,8 @@ import { collectGithub, type GithubReads } from './collect.js';
 import { buildAudit } from './audit.js';
 import { buildMorning, COMMENT_ITEM_CAP, type CommentMap } from './morning.js';
 import { buildSweep } from './sweep.js';
-import { buildCveReport, FILE_CAP, isActionable, NO_FILING, readSnapshot, runCveCheck, upgradeHint, type CveRun, type Filing, type Finding } from './cve.js';
-import { PlaneClient, type CycleRead, type PlaneRead } from './plane.js';
+import { buildCveReport, FILE_CAP, STALE_SNAPSHOT_HOURS, isActionable, NO_FILING, readSnapshot, runCveCheck, upgradeHint, type CveRun, type Filing, type Finding } from './cve.js';
+import { PlaneClient, PlaneHttpError, type CycleRead, type PlaneRead } from './plane.js';
 import { dueReports, localTime } from './schedule.js';
 import { REPORT_NAMES, type ReportName, type ReportSettings } from './settings.js';
 import { isOpenItem, type Snapshot } from './snapshot.js';
@@ -200,6 +200,9 @@ export class ReportRunner {
     if (!s.cveFileItems) return NO_FILING;
     const out: Filing = { enabled: true, created: [], existing: 0, overCap: 0, gaps: [] };
     if (!this.d.plane) return { ...out, gaps: ['PET items were not filed because PLANE_API_KEY is empty on this host'] };
+    // Filed items are deduplicated forever, so a finding filed on degraded data keeps its wrong priority.
+    if (run.kevSize === null) return { ...out, gaps: ['PET items were not filed because the CISA KEV catalog was not read'] };
+    if (run.snapshotAgeHours > STALE_SNAPSHOT_HOURS) return { ...out, gaps: ['PET items were not filed because the inventory snapshot is stale'] };
     const want = run.findings.filter((f) => isActionable(f) && f.fixed !== null);
     for (const [i, f] of want.entries()) {
       if (out.created.length >= FILE_CAP) {
@@ -218,9 +221,11 @@ export class ReportRunner {
         if (r.status === 'created') out.created.push(`PET-${r.seq ?? '?'}`);
         else out.existing++;
       } catch (err) {
-        // A Plane outage or a missing label fails every item the same way. Stop after the first.
-        out.gaps.push(`filing stopped at ${f.package}: ${String(err).slice(0, 120)}; ${want.length - i} candidates not tried`);
-        break;
+        // A 4xx belongs to this finding (a bad field), so the next one may still file. Anything
+        // else (a 5xx, a timeout, a missing label) fails every item the same way, so stop.
+        const own = err instanceof PlaneHttpError && err.status >= 400 && err.status < 500 && err.status !== 429;
+        out.gaps.push(`could not file ${f.package}: ${String(err).slice(0, 120)}${own ? '' : `; filing stopped, ${want.length - i - 1} candidates not tried`}`);
+        if (!own) break;
       }
     }
     return out;

@@ -89,6 +89,13 @@ interface Page<T> {
 
 const ref = (v: string | { id: string } | null | undefined): string | null => (typeof v === 'string' ? v : (v?.id ?? null));
 
+/** A Plane answer that was not 2xx. The status lets a caller tell a bad request from an outage. */
+export class PlaneHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 export class PlaneClient {
   private readonly fetchImpl: Fetch;
   private labels: RawLabel[] | null = null;
@@ -165,7 +172,7 @@ export class PlaneClient {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (res.status === 409) return { status: 'exists' };
-    if (!res.ok) throw new Error(`create item: Plane answered HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`.trim());
+    if (!res.ok) throw new PlaneHttpError(`create item: Plane answered HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`.trim(), res.status);
     const body = (await res.json()) as { sequence_id?: number };
     return { status: 'created', seq: body.sequence_id };
   }

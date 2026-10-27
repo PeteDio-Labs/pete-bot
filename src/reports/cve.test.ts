@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildCveReport, buildQueries, cvss3Score, isActionable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, type InventorySnapshot } from './cve.js';
 import { dueReports } from './schedule.js';
+import { PlaneHttpError } from './plane.js';
 import { ReportRunner } from './runner.js';
 import { loadReportSettings } from './settings.js';
 
@@ -69,6 +70,30 @@ describe('severity and fixed versions', () => {
   });
   it('fetches advisories that name a KEV entry first', () => {
     expect(orderForFetch(['DSA-1', 'DEBIAN-CVE-2026-0001', 'A'], new Set(['CVE-2026-0001']))[0]).toBe('DEBIAN-CVE-2026-0001');
+  });
+});
+
+describe('collector fields', () => {
+  it('queries the Debian source version, not the binary version', () => {
+    const h = { ...snap().hosts[0]!, packages: [{ name: 'libssl3', version: '3.0.1-1+b1', source: 'openssl', sourceVersion: '3.0.1-1' }] };
+    expect(buildQueries(snap({ hosts: [h] }))[0]).toMatchObject({ name: 'openssl', version: '3.0.1-1' });
+  });
+  it('treats an empty or non-numeric VERSION_ID as unscanned, not as "Debian:"', async () => {
+    for (const version of ['', 'sid']) {
+      const h = { ...snap().hosts[0]!, os: { id: 'debian', version } };
+      expect(buildQueries(snap({ hosts: [h] }))).toEqual([]);
+    }
+  });
+  it('reads CVE ids from upstream', () => {
+    expect(toAdvisory({ id: 'DEBIAN-CVE-9', upstream: ['CVE-2026-0001'] }).cves).toEqual(['CVE-2026-0001']);
+  });
+  it('reports an image list the collector could not read', async () => {
+    const h = { ...snap().hosts[0]!, imagesError: 'daemon down' };
+    expect(buildCveReport(await runCveCheck(snap({ hosts: [h] }), NOW, feeds()), '2026-10-27')).toContain('the image list could not be read (daemon down)');
+  });
+  it('keys a finding on the installed version, so a changed fix does not file it twice', async () => {
+    const a = (await runCveCheck(snap(), NOW, feeds())).findings[0]!;
+    expect(a.key).toBe('Debian:12|openssl|3.0.1-1');
   });
 });
 
@@ -197,7 +222,7 @@ describe('ReportRunner cve', () => {
     const plane = { createItem: async () => { throw new Error('Plane has no label "lan"'); } } as never;
     const r = new ReportRunner({ settings: base(file(), true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
     await r.run('cve', { markRun: false });
-    expect(sent.join('\n')).toContain('filing stopped at openssl: Error: Plane has no label "lan"');
+    expect(sent.join('\n')).toContain('could not file openssl: Error: Plane has no label "lan"; filing stopped');
     expect(sent.join('\n')).toContain('INCOMPLETE');
   });
   it('retries a failed run in 30 minutes instead of spending the day', async () => {
@@ -219,6 +244,34 @@ describe('ReportRunner cve', () => {
     t = new Date(t.getTime() + 31 * 60_000);
     await r.tick();
     expect(sent.length).toBe(3);
+  });
+  it('does not file while the KEV catalog is missing or the snapshot is stale', async () => {
+    let called = 0;
+    const plane = { createItem: async () => (called++, { status: 'created' as const, seq: 1 }) } as never;
+    const sent: string[] = [];
+    const r = new ReportRunner({ settings: base(file(), true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds({ kevFails: true }) });
+    await r.run('cve', { markRun: false });
+    expect(called).toBe(0);
+    expect(sent.join('\n')).toContain('not filed because the CISA KEV catalog was not read');
+    const old = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
+    writeFileSync(old, JSON.stringify(snap({ generatedAt: '2026-10-20T00:00:00Z' })));
+    const r2 = new ReportRunner({ settings: base(old, true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
+    await r2.run('cve', { markRun: false });
+    expect(called).toBe(0);
+    expect(sent.join('\n')).toContain('inventory snapshot is stale');
+  });
+  it('keeps filing past a 4xx for one finding but stops on a 5xx', async () => {
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 3 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl' })) }] });
+    const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
+    writeFileSync(p, JSON.stringify(many));
+    for (const [status, filed] of [[400, 2], [503, 0]] as const) {
+      let n = 0;
+      const plane = { createItem: async () => { if (++n === 1) throw new PlaneHttpError('x', status); return { status: 'created' as const, seq: 950 + n }; } } as never;
+      const sent: string[] = [];
+      const r = new ReportRunner({ settings: base(p, true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
+      await r.run('cve', { markRun: false });
+      expect((sent.join('\n').match(/PET-95/g) ?? []).length).toBe(filed);
+    }
   });
   it('files nothing when filing is off', async () => {
     let called = false;
