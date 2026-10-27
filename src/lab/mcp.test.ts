@@ -256,9 +256,9 @@ describe('desk_status', () => {
   it("returns the desk's state from pete-bot's /health", async () => {
     const tool = deskStatusTool({
       healthUrl: 'http://127.0.0.1:3015/health',
-      fetch: (async () => json({ ok: true, llm: 'on', uptimeSeconds: 60, desk: { state: 'running', mode: 'on', lastPollPrs: 4 } })) as unknown as typeof fetch,
+      fetch: (async () => json({ ok: true, uptimeSeconds: 60, desk: { state: 'running', mode: 'on', lastPollPrs: 4 } })) as unknown as typeof fetch,
     });
-    expect(data(await callTool(tool, {})).data).toEqual({ desk: { state: 'running', mode: 'on', lastPollPrs: 4 }, llm: 'on', peteBotUptimeSec: 60 });
+    expect(data(await callTool(tool, {})).data).toEqual({ desk: { state: 'running', mode: 'on', lastPollPrs: 4 }, peteBotUptimeSec: 60 });
   });
 
   it('reports pete-bot down or a health answer with no desk as an error', async () => {

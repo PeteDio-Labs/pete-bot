@@ -3,7 +3,7 @@
  *
  *   POST /v1/ask   {"question": "..."} with the ask bearer. pete-bot's /lab command is the
  *                  one caller. Answers {answer, turns, toolCalls, incomplete, usage}.
- *   GET  /health   one flag per dependency: gateway, proxmox, vault clone, kuma. HTTP 503
+ *   GET  /health   one flag per dependency: model, proxmox, vault clone, kuma. HTTP 503
  *                  unless every flag is up, so the deploy's assertion can fail on it.
  *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
  *                  answers with the run's outcome and DMs exactly as the nightly run does.
@@ -13,7 +13,8 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { ask, ASK_DEADLINE_MS, GatewayError, type AskResult, type CallModel } from './agent.js';
+import { ask, ASK_DEADLINE_MS, type AskResult, type CallModel } from './agent.js';
+import { OllamaError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
 import type { LabTool } from './tools/index.js';
 
@@ -108,7 +109,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         log('ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
         return json(result);
       } catch (err) {
-        const message = err instanceof GatewayError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        const message = err instanceof OllamaError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
         log('ask failed', { ms: Date.now() - started, error: message });
         return json({ error: message }, 502);
       } finally {

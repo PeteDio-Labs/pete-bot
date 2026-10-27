@@ -145,9 +145,9 @@ something must exist, returns an error, never an empty success.
 | Route | What it does |
 |---|---|
 | `POST /v1/ask` | Takes `{"question": "..."}` with the ask bearer, runs the agent loop, and answers with the text, the tools it called, and the tokens it used |
-| `GET /health` | One flag per dependency: gateway (an empty probe that proves the bearer and spends nothing), proxmox, vault clone, kuma. HTTP 503 unless all are up |
+| `GET /health` | One flag per dependency: model (Ollama's `/api/tags`, which proves the model is pulled and spends nothing), proxmox, vault clone, kuma. HTTP 503 unless all are up |
 
-The loop calls Haiku through the gateway as the `lab-map` caller, with at most 8 model turns,
+The loop calls the local Qwen model on Ollama (`LAB_OLLAMA_URL`, default model `qwen3:8b`), with at most 8 model turns,
 1,024 output tokens per turn, and an 80-second deadline per answer, inside pete-bot's 120-second
 wait. The last turn offers no tools, so the model answers from what it read. A tool error
 reaches the model marked as an error. An answer that hit a limit, was cut or came back empty
@@ -211,7 +211,7 @@ Phase 1 adds three tools to the library for both doors:
 
 | Tool | Reads |
 |---|---|
-| `desk_status` | pete-bot's `/health`: the merge desk's mode and last poll, and the gateway state |
+| `desk_status` | pete-bot's `/health`: the merge desk's mode and last poll |
 | `systemd_status` | `systemctl show` for `pete-bot.service` and `lab-agent.service` only |
 | `vault_presence` | KV v2 metadata under `kv/metadata/services/`: names, versions and times, never a value or a field name |
 
@@ -281,10 +281,9 @@ Port 3015, separate from the metrics port so app traffic cannot affect a scrape.
 
 | Route | Auth | What it does |
 |-------|------|--------------|
-| `GET /health` | none | Liveness. Carries uptime, the number of open incidents, and the gateway state in `llm` |
+| `GET /health` | none | Liveness. Carries uptime, the number of open incidents, the merge desk and the reports |
 | `POST /v1/alert` | alert bearer | Uptime Kuma webhook → the owner's DM |
 | `POST /v1/notify` | notify bearer | `{from, message}` → one DM to the owner. Records nothing |
-| `POST /v1/llm/v1/messages` | a caller's gateway bearer | The Messages API, proxied with the homelab's key. `/v1/llm/messages` is the same route |
 
 `/v1/alert` takes a **bearer token, not HMAC**, and that is forced rather than chosen:
 Kuma's generic webhook cannot sign a body. Do not "fix" this by adding HMAC and
@@ -299,33 +298,8 @@ whatever the text mentions. A success returns `{ok, action: "sent", channelId, m
 A bad body returns 400, and a Discord failure returns 502. The log holds the sender and the
 message id, never the text.
 
-`/v1/llm/v1/messages` is the Anthropic API gateway (PET-617). The homelab's one Anthropic key
-lives in this process, and no caller holds it. A caller points the official SDK at
-`http://<host>:3015/v1/llm`, with its own gateway token as `apiKey`. Each caller has a
-monthly cap in dollars and a list of models, set in `LLM_GATEWAY_CALLERS`. Every answered
-request goes into a SQLite ledger at `LLM_LEDGER_PATH`, with its tokens and its cost in
-integer nano-dollars, and the cap reads that ledger. The gateway refuses:
-
-- every request with 503 while it is off (no key) or misconfigured, and `/health` says which.
-  A ledger path that cannot be opened makes it misconfigured
-- an unknown token with 401, before the body is read
-- a missing `model` or `max_tokens`, `stream: true`, a body that is not JSON, a code execution
-  tool, or any parameter the gateway cannot price, with 400. `speed`, `inference_geo` and
-  `service_tier` bill above the published rates, so they are refused. Streaming is not
-  written yet
-- a body over 8 MB with 413
-- a model the caller was not given, or a caller at its cap, with 403, which the SDK does not
-  retry
-- a caller's third concurrent request with 429, which the SDK retries
-- every request with 503 after a ledger write fails, until a restart
-
-The cap is checked before a request, so one request can cross it, and at most two can,
-since a caller may have two open. An answer whose `usage` is missing, partial or
-unreadable is charged the rest of the caller's monthly cap, because nothing in a request
-bounds its cost: an image by URL, a web search or a tool's system prompt bills tokens the
-body does not show. The charge is in the ledger, so the caller is refused, across
-restarts, until the month turns over or its cap rises. The log holds the caller, the model, the token counts and the cost, never
-the prompt or the answer.
+The Anthropic API gateway (PET-617) is retired (PET-744). `lab-agent` runs on Ollama, and no route in this process
+holds an Anthropic key. `LAB_PROVIDER=gateway` is refused at lab-agent's startup.
 
 ## Environment variables
 
@@ -343,9 +317,6 @@ the prompt or the answer.
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
-| `ANTHROPIC_API_KEY` | No | — | The key the gateway forwards with. Empty leaves the gateway off |
-| `LLM_GATEWAY_CALLERS` | With a key | — | JSON: caller name to `{token, monthlyCapUsd, models}`. See `.env.example` |
-| `LLM_LEDGER_PATH` | With a key | — | The SQLite spend ledger. It must survive a restart |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
 | `UPDATES_REPO` | No | `PeteDio-Labs/petedio-media-iac` | Repo that holds the update workflow |
 | `UPDATES_WORKFLOW` | No | `media-updates.yml` | The workflow `/update` dispatches |
@@ -377,7 +348,6 @@ been deleted, so a working command and a broken one scraped identically.
 ```
 src/
 ├── clients/      # githubActions — starts and follows the /update run
-├── gateway/      # the Anthropic API gateway: settings, pricing, ledger and route
 ├── lab/          # lab-agent (PET-669): settings, the agent loop and its HTTP surface
 │   └── tools/    # the read-only lab tool library (PET-668)
 ├── commands/     # /status, /update and /lab definitions, and registration

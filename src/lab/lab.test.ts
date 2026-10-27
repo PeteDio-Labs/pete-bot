@@ -1,10 +1,11 @@
 /**
- * lab-agent (PET-669): settings, the agent loop against a stubbed gateway, the HTTP surface,
+ * lab-agent (PET-669): settings, the agent loop against a stubbed model, the HTTP surface,
  * and pete-bot's client and embed for /lab.
  */
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { ask, gatewayCaller, GatewayError, MAX_TOKENS, MAX_TURNS, type CallModel, type ModelResponse } from './agent.js';
+import { OllamaError } from './ollama.js';
+import { ask, MAX_TOKENS, MAX_TURNS, type CallModel, type ModelResponse } from './agent.js';
 import { loadLabConfig } from './config.js';
 import { createLabHandler, runChecks } from './server.js';
 import { LabToolError, type LabTool } from './tools/index.js';
@@ -12,14 +13,12 @@ import { askLab, type LabOutcome } from '../clients/labAgent.js';
 import { labEmbed } from '../events/interactionCreate.js';
 
 const ASK = 'a'.repeat(40);
-const GW = 'g'.repeat(40);
 const CA = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
 
 const KEY = '-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n';
 const read = (p: string) => (p.endsWith('github-app.pem') ? KEY : CA);
 const baseEnv = {
   LAB_ASK_TOKEN: ASK,
-  LAB_GATEWAY_TOKEN: GW,
   LAB_PVE_URL: 'https://192.168.50.10:8006',
   LAB_PVE_TOKEN_ID: 'lab-agent@pve!audit',
   LAB_PVE_TOKEN_SECRET: 'secret-value-123',
@@ -36,8 +35,8 @@ describe('loadLabConfig', () => {
   it('fills the defaults and reads the CA', () => {
     const cfg = loadLabConfig(baseEnv, read);
     expect(cfg.port).toBe(3016);
-    expect(cfg.provider).toBe('gateway');
-    expect(cfg.gateway).toEqual({ url: 'http://127.0.0.1:3015/v1/llm', token: GW, model: 'claude-haiku-4-5' });
+    expect(cfg.model).toBe('qwen3:8b');
+    expect(cfg.ollama).toEqual({ url: 'http://192.168.50.12:11434', numCtx: 8192 });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
     expect(cfg.github).toEqual({ appId: '1234567', installationId: '89012345', privateKeyPem: KEY, vaultRepo: 'petedio-vault' });
@@ -47,14 +46,9 @@ describe('loadLabConfig', () => {
     expect(cfg.drift).toEqual({ notifyUrl: 'http://127.0.0.1:3015/v1/notify', notifyToken: 'n'.repeat(40), at: '11:15' });
   });
 
-  it('runs on Ollama with no gateway bearer, and requires the bearer for the gateway', () => {
-    const { LAB_GATEWAY_TOKEN: _drop, ...noToken } = baseEnv;
-    expect(() => loadLabConfig(noToken, read)).toThrow('LAB_GATEWAY_TOKEN: is required');
-    const cfg = loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama' }, read);
-    expect(cfg.provider).toBe('ollama');
-    expect(cfg.gateway.model).toBe('qwen3:8b');
-    expect(cfg.ollama).toEqual({ url: 'http://192.168.50.12:11434', numCtx: 8192 });
-    expect(loadLabConfig({ ...noToken, LAB_PROVIDER: 'ollama', LAB_MODEL: 'qwen3:4b' }, read).gateway.model).toBe('qwen3:4b');
+  it('defaults to the Ollama lane, takes a model override, and refuses the retired gateway provider', () => {
+    expect(loadLabConfig({ ...baseEnv, LAB_MODEL: 'qwen3:4b' }, read).model).toBe('qwen3:4b');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_PROVIDER: 'gateway' }, read)).toThrow('LAB_PROVIDER');
   });
 
   it('turns plane_item on only with a token, and defaults the rest', () => {
@@ -87,21 +81,19 @@ describe('loadLabConfig', () => {
   it('refuses to start on a missing or short token, and names the field, not the value', () => {
     const err = (() => {
       try {
-        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short', LAB_GATEWAY_TOKEN: '' }, read);
+        loadLabConfig({ ...baseEnv, LAB_ASK_TOKEN: 'short' }, read);
       } catch (e) {
         return (e as Error).message;
       }
       return '';
     })();
     expect(err).toContain('LAB_ASK_TOKEN: must be at least 32 characters');
-    expect(err).toContain('LAB_GATEWAY_TOKEN');
     expect(err).not.toContain('short');
   });
 
   it('refuses plain http to Proxmox, a reused bearer, and an unreadable CA', () => {
     expect(() => loadLabConfig({ ...baseEnv, LAB_PVE_URL: 'http://192.168.50.10:8006' }, read)).toThrow('must be https://');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_GATEWAY_TOKEN: ASK }, read)).toThrow('must differ');
-    expect(() => loadLabConfig({ ...baseEnv, LAB_NOTIFY_TOKEN: GW }, read)).toThrow('LAB_NOTIFY_TOKEN must differ');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_NOTIFY_TOKEN: ASK }, read)).toThrow('LAB_NOTIFY_TOKEN must differ');
     expect(() => loadLabConfig({ ...baseEnv, LAB_DRIFT_AT: '25:00' }, read)).toThrow('must be HH:MM in UTC');
     expect(() =>
       loadLabConfig(baseEnv, () => {
@@ -129,7 +121,7 @@ const hostTool: LabTool = {
 };
 const tools = new Map([guestsTool, hostTool].map((t) => [t.name, t]));
 
-/** A gateway that plays back responses in order and records each request. */
+/** A model that plays back responses in order and records each request. */
 function scripted(responses: ModelResponse[], seen: Array<Record<string, unknown>> = []): CallModel {
   return async (body) => {
     seen.push(JSON.parse(JSON.stringify(body)));
@@ -228,29 +220,10 @@ describe('ask', () => {
   });
 });
 
-describe('gatewayCaller', () => {
-  it('posts to the gateway as the lab-map caller', async () => {
-    let got: { url: string; init?: RequestInit } | null = null;
-    const call = gatewayCaller('http://127.0.0.1:3015/v1/llm', GW, (async (url: string, init?: RequestInit) => {
-      got = { url, init };
-      return new Response(JSON.stringify(final('hi')));
-    }) as unknown as typeof fetch);
-    expect((await call({ model: 'm' })).content[0]!.text).toBe('hi');
-    expect(got!.url).toBe('http://127.0.0.1:3015/v1/llm/v1/messages');
-    expect((got!.init!.headers as Record<string, string>).authorization).toBe(`Bearer ${GW}`);
-  });
-
-  it("passes the gateway's refusal reason on", async () => {
-    const call = gatewayCaller('http://x', GW, (async () =>
-      new Response(JSON.stringify({ error: { message: 'caller lab-map is at its monthly cap' } }), { status: 403 })) as unknown as typeof fetch);
-    await expect(call({})).rejects.toThrow(new GatewayError('gateway answered HTTP 403: caller lab-map is at its monthly cap'));
-  });
-});
-
 describe('lab-agent HTTP surface', () => {
   const up = async () => 'fine';
   const handler = (overrides: Partial<Parameters<typeof createLabHandler>[0]> = {}) =>
-    createLabHandler({ askToken: ASK, tools, callModel: scripted([final('Plane runs on 235.')]), model: 'm', checks: { gateway: up }, ...overrides });
+    createLabHandler({ askToken: ASK, tools, callModel: scripted([final('Plane runs on 235.')]), model: 'm', checks: { model: up }, ...overrides });
   const post = (body: unknown, token = ASK) =>
     new Request('http://127.0.0.1:3016/v1/ask', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 
@@ -284,7 +257,7 @@ describe('lab-agent HTTP surface', () => {
     let calls = 0;
     const hangOnce: CallModel = (_b, signal) =>
       ++calls === 1
-        ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new GatewayError('stopped'))))
+        ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new OllamaError('stopped'))))
         : Promise.resolve(final('second answer'));
     const h = handler({ callModel: hangOnce, deadlineMs: 20 });
     const res = await h(post({ question: 'where does plane run' }));
@@ -295,21 +268,21 @@ describe('lab-agent HTTP surface', () => {
     expect(await second.json()).toMatchObject({ answer: 'second answer' });
   });
 
-  it('turns a gateway refusal into a 502 with its reason', async () => {
-    const h = handler({ callModel: async () => { throw new GatewayError('gateway answered HTTP 403: cap reached'); } });
+  it('turns a model failure into a 502 with its reason', async () => {
+    const h = handler({ callModel: async () => { throw new OllamaError('ollama answered HTTP 500: out of memory'); } });
     const res = await h(post({ question: 'where does plane run' }));
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: 'gateway answered HTTP 403: cap reached' });
+    expect(await res.json()).toEqual({ error: 'ollama answered HTTP 500: out of memory' });
   });
 
   it('reports health per dependency, and 503 when one is down', async () => {
-    const h = handler({ checks: { gateway: up, proxmox: async () => { throw new Error('HTTP 401'); } } });
+    const h = handler({ checks: { model: up, proxmox: async () => { throw new Error('HTTP 401'); } } });
     const res = await h(new Request('http://x/health'));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({
       status: 'degraded',
       ok: false,
-      checks: { gateway: { up: true, detail: 'fine' }, proxmox: { up: false, detail: 'HTTP 401' } },
+      checks: { model: { up: true, detail: 'fine' }, proxmox: { up: false, detail: 'HTTP 401' } },
     });
   });
 

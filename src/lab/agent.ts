@@ -1,9 +1,9 @@
 /**
- * The lab-map agent's loop (PET-669): one question in, one answer out, through the gateway.
+ * The lab-map agent's loop (PET-669): one question in, one answer out, through a CallModel.
  *
  * It sends the question with the lab tools, runs each tool the model asks for through
- * callTool, and returns the model's final text. The model is Haiku on the `lab-map` caller,
- * which has its own monthly cap in the gateway's ledger.
+ * callTool, and returns the model's final text. The model is the local Qwen on Ollama
+ * (PET-742), which spends no API credit.
  *
  * ⚠ HARD LIMITS, NOT SUGGESTIONS. At most MAX_TURNS model calls, MAX_TOKENS output tokens
  * per call, and one deadline for the whole answer. The last turn offers no tools
@@ -12,7 +12,7 @@
  * as a complete answer.
  *
  * ⚠ THE DEADLINE MUST BEAT THE CALLER'S. pete-bot gives up on /lab after LAB_TIMEOUT_MS
- * (120 s). A loop still running after that spends the lab-map cap for an answer nobody reads
+ * (120 s). A loop still running after that spends Ollama's one GPU lane on an answer nobody reads
  * and holds the one-question slot, so the server passes ASK_DEADLINE_MS (80 s) and the
  * request's own abort signal, and each model call gets only the time left. Tool reads run
  * to their own timeouts, so the deadline leaves room for one turn of them.
@@ -22,9 +22,8 @@
  * Otherwise a dead Proxmox token reads to the model as "no guests" and to Pedro as an
  * empty lab.
  *
- * WHY NO SDK. The repo's only Anthropic code is the gateway, a proxy that forwards raw
- * bodies. This loop needs one POST and four response fields, so native fetch keeps the
- * dependency list as it is.
+ * WHY NO SDK. The loop keeps the Messages shape, and ollama.ts translates it. One POST and
+ * four response fields need only native fetch, so the dependency list stays as it is.
  */
 import { callTool, type LabTool } from './tools/index.js';
 import { toolDefinitions } from './tools/index.js';
@@ -34,7 +33,6 @@ export const MAX_TOKENS = 1024;
 // The deadline is checked between turns, and one turn's reads can take about 30 s more
 // (each tool has its own timeout), so it sits well inside pete-bot's 120 s wait.
 export const ASK_DEADLINE_MS = 80_000;
-const GATEWAY_TIMEOUT_MS = 60_000;
 
 export const SYSTEM_PROMPT = `You answer questions about Pedro's homelab: where a service runs, whether it is up, what changed, and which PET work item touched it.
 
@@ -69,45 +67,6 @@ export interface AskResult {
   /** Set when the answer hit a limit, was cut, or came back empty: it is not a full answer. */
   incomplete: boolean;
   usage: { input: number; output: number; cacheRead: number };
-}
-
-export class GatewayError extends Error {
-  override name = 'GatewayError';
-}
-
-/** POST one Messages request to the gateway as the `lab-map` caller. */
-export function gatewayCaller(url: string, token: string, fetchImpl: typeof fetch = fetch): CallModel {
-  return async (body, signal) => {
-    let res: Response;
-    const timeout = AbortSignal.timeout(GATEWAY_TIMEOUT_MS);
-    try {
-      res = await fetchImpl(`${url}/v1/messages`, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify(body),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      });
-    } catch (err) {
-      if (signal?.aborted) throw new GatewayError('stopped: the answer ran past its deadline or the asker went away');
-      throw new GatewayError(`gateway unreachable: ${(err as Error).message}`);
-    }
-    const text = await res.text();
-    if (!res.ok) {
-      // The gateway's refusals carry a reason (cap reached, model refused); pass it on, capped.
-      let reason = text.slice(0, 300);
-      try {
-        reason = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? reason;
-      } catch {
-        /* not JSON: keep the raw text */
-      }
-      throw new GatewayError(`gateway answered HTTP ${res.status}: ${reason}`);
-    }
-    try {
-      return JSON.parse(text) as ModelResponse;
-    } catch {
-      throw new GatewayError('gateway answered with a body that is not JSON');
-    }
-  };
 }
 
 export async function ask(

@@ -1,5 +1,5 @@
 /**
- * The Ollama provider for lab-agent (PET-742): the same CallModel the gateway caller is, so
+ * The Ollama provider for lab-agent (PET-742): the only CallModel, so
  * `ask` does not change. It takes the Anthropic Messages body `ask` builds, sends it to
  * Ollama's native /api/chat, and returns the reply in the Messages shape.
  *
