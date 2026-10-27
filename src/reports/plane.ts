@@ -137,6 +137,33 @@ export class PlaneClient {
     throw new Error(`${what}: more than ${MAX_PAGES} pages, refusing to judge a partial list`);
   }
 
+  /**
+   * Files one item, deduplicated by `external_id` (PET-770). Plane answers 409 when the pair
+   * exists, which this reports as `exists` rather than an error. Labels are resolved by
+   * name; a name Plane does not know is dropped and the item is still filed.
+   */
+  async createItem(item: { name: string; descriptionHtml: string; priority: string; labels: string[]; externalSource: string; externalId: string }): Promise<{ status: 'created' | 'exists'; seq?: number }> {
+    const known = await this.all<RawLabel>('labels', 'labels/');
+    const labelIds = item.labels.map((n) => known.find((l) => l.name === n)?.id).filter((x): x is string => Boolean(x));
+    const res = await this.fetchImpl(this.projectUrl('work-items/'), {
+      method: 'POST',
+      headers: { 'X-API-Key': this.s.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        name: item.name,
+        description_html: item.descriptionHtml,
+        priority: item.priority,
+        labels: labelIds,
+        external_source: item.externalSource,
+        external_id: item.externalId,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (res.status === 409) return { status: 'exists' };
+    if (!res.ok) throw new Error(`create item: Plane answered HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`.trim());
+    const body = (await res.json()) as { sequence_id?: number };
+    return { status: 'created', seq: body.sequence_id };
+  }
+
   async read(): Promise<PlaneRead> {
     try {
       const states = await this.all<RawState>('reading states', 'states/');

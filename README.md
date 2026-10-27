@@ -96,6 +96,14 @@ no Claude quota.
 | `morning` | Mondays and Fridays 07:52 | Open PRs with CI, the Codex verdict on the current head and the next action; Plane items In Review; the newest comment on each `needs-pedro` item; this week's cycle split into Pedro items (`lan`, `mac`, `needs-pedro`) and AI items (`cloud`); the PRs merged this week and last week, by repo and by opener, with an "at least" note when a repo was not read or its closed-PR read hit the cap. On Mondays it also lists what last week's cycle left open and whether next week's cycle exists |
 | `audit` | Mondays 08:44 | Plane against GitHub: Todo items with an open PR, open items whose PRs all merged, In Review items with no PR, closed-unmerged PRs, passed target dates, PRs naming no item, and stale `verified:` dates when `REPORT_VAULT_PATH` is set |
 | `sweep` | Fridays and Sundays 18:47 | Conflicts, red CI, idle PRs, merges over a Codex "Changes requested", and Plane hygiene |
+| `cve` | Every day 07:00, school days included | The homelab's package inventory against OSV and CISA KEV (PET-770). Lists exploited or high-severity findings that have a fix, with the fixed version and the upgrade command |
+
+The `cve` report reads the JSON snapshot at `CVE_SNAPSHOT_PATH`, which `collect-cve-inventory.yml` in
+petedio-iac writes. It joins the default set only when that path is set. The first lines say how many
+hosts, package versions and advisories it examined. A host the collector could not read is listed under
+"Not checked", and an unreachable OSV feed sends a failure DM. Set `CVE_FILE_ITEMS=on` to file one PET
+item per exploited or high-severity finding, at most five a day; the finding's key is the item's
+`external_id`, so a finding is filed once. Container images are listed, not matched.
 
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
@@ -103,7 +111,7 @@ that failed to read is listed under "Not read", and the title says INCOMPLETE. A
 cannot read GitHub or Plane at all sends a failure DM. An empty section therefore means
 "examined and found none".
 
-No scheduled report sends from Tuesday to Thursday, the school days in workspace#169; `/report` still works on those days. The morning queue reads cycles and writes nothing, so the Monday rollover is listed, not performed. A report is due from its time until three hours later, once per local date, so a restart
+No scheduled report except `cve` sends from Tuesday to Thursday, the school days in workspace#169; `/report` still works on those days. The morning queue reads cycles and writes nothing, so the Monday rollover is listed, not performed. A report is due from its time until three hours later, once per local date, so a restart
 neither loses nor repeats one. `/report which:<name>` sends one now. `/health` carries each
 report's last result under `reports`.
 

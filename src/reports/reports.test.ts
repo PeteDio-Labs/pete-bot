@@ -342,7 +342,7 @@ describe('chunk', () => {
 describe('ReportRunner', () => {
   const settings = (statePath: string): ReportSettings => ({
     org: 'o', repos: ['r'], appId: '1', installationId: '2', privateKeyPem: PEM, plane: null,
-    enabled: new Set(['morning', 'audit', 'sweep']), staleDays: 3, statePath, vaultPath: '',
+    enabled: new Set(['morning', 'audit', 'sweep']), staleDays: 3, statePath, vaultPath: '', cveSnapshotPath: '', cveFileItems: false,
   });
   const log = { info() {}, warn() {}, error() {} };
   const dir = () => join(mkdtempSync(join(tmpdir(), 'rep-')), 'state.json');
