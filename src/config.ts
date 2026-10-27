@@ -90,17 +90,6 @@ interface Config {
      */
     notifyToken: string;
   };
-  /**
-   * The Anthropic API gateway (PET-617). src/gateway/config.ts checks these at startup.
-   * An empty key leaves the gateway off and every other route unchanged.
-   */
-  llm: {
-    apiKey: string;
-    /** JSON: caller name to its bearer, monthly cap in dollars, and allowed models. */
-    callersJson: string;
-    /** The SQLite ledger the caps read. Required whenever the key is set. */
-    ledgerPath: string;
-  };
 }
 
 function getEnvVar(name: string, defaultValue?: string): string {
@@ -160,11 +149,6 @@ export const config: Config = {
     port: parseInt(getEnvVar('HTTP_SERVER_PORT', '3015'), 10),
     alertToken: getEnvVar('ALERT_BEARER_TOKEN', ''),
     notifyToken: getEnvVar('NOTIFY_BEARER_TOKEN', ''),
-  },
-  llm: {
-    apiKey: getEnvVar('ANTHROPIC_API_KEY', ''),
-    callersJson: getEnvVar('LLM_GATEWAY_CALLERS', ''),
-    ledgerPath: getEnvVar('LLM_LEDGER_PATH', ''),
   },
 };
 

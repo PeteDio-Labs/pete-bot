@@ -1,8 +1,7 @@
 /**
  * lab-agent's settings (PET-669), checked once at startup.
  *
- * ⚠ A BAD SETTING STOPS lab-agent, AND ONLY lab-agent. Unlike the gateway, which must not
- * take Uptime Kuma's alerts down with it, this process has one job. Starting it with a
+ * ⚠ A BAD SETTING STOPS lab-agent, AND ONLY lab-agent. This process has one job, and starting it with a
  * missing token or clone would answer every /lab with an error that looks like a lab fault,
  * so it refuses to start and systemd shows why.
  *
@@ -17,11 +16,9 @@ const TOKEN = z.string().min(32, 'must be at least 32 characters').regex(/^\S+$/
 const EnvSchema = z.object({
   LAB_PORT: z.coerce.number().int().min(1024).max(65535).default(3016),
   LAB_ASK_TOKEN: TOKEN,
-  LAB_GATEWAY_URL: z.string().url().default('http://127.0.0.1:3015/v1/llm'),
-  // The model provider (PET-742): the Anthropic gateway, or a local Ollama lane. The gateway
-  // bearer is needed only for the gateway.
-  LAB_PROVIDER: z.enum(['gateway', 'ollama']).default('gateway'),
-  LAB_GATEWAY_TOKEN: TOKEN.optional(),
+  // The model backend (PET-742): a local Ollama lane. The Anthropic gateway is retired (PET-744),
+  // so a stale LAB_PROVIDER=gateway is refused at startup instead of quietly running Ollama.
+  LAB_PROVIDER: z.literal('ollama').default('ollama'),
   LAB_OLLAMA_URL: z.string().url().default('http://192.168.50.12:11434'),
   LAB_OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).max(32768).default(8192),
   LAB_MODEL: z.string().min(1).optional(),
@@ -66,18 +63,12 @@ const EnvSchema = z.object({
   LAB_GITHUB_APP_INSTALLATION_ID: z.string().regex(/^\d+$/, 'must be a number'),
   LAB_GITHUB_APP_KEY_FILE: z.string().min(1).default('/etc/lab-agent/github-app.pem'),
   LAB_VAULT_REPO: z.string().regex(/^[\w.-]+$/, 'must be a bare repository name').default('petedio-vault'),
-}).superRefine((e, ctx) => {
-  if (e.LAB_PROVIDER === 'gateway' && !e.LAB_GATEWAY_TOKEN) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['LAB_GATEWAY_TOKEN'], message: 'is required when LAB_PROVIDER is gateway' });
-  }
 });
 
 export interface LabConfig {
   port: number;
   askToken: string;
-  /** Which backend answers: the Anthropic gateway or Ollama. `gateway.model` is the model for either. */
-  provider: 'gateway' | 'ollama';
-  gateway: { url: string; token: string; model: string };
+  model: string;
   ollama: { url: string; numCtx: number };
   proxmox: { baseUrl: string; tokenId: string; tokenSecret: string; caPem: string };
   kuma: { baseUrl: string; slug: string };
@@ -104,9 +95,8 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     throw new Error(`lab-agent settings are invalid: ${issues}`);
   }
   const e = parsed.data;
-  if (e.LAB_ASK_TOKEN === e.LAB_GATEWAY_TOKEN) throw new Error('lab-agent settings are invalid: LAB_ASK_TOKEN must differ from LAB_GATEWAY_TOKEN');
-  if (e.LAB_NOTIFY_TOKEN === e.LAB_ASK_TOKEN || e.LAB_NOTIFY_TOKEN === e.LAB_GATEWAY_TOKEN) {
-    throw new Error('lab-agent settings are invalid: LAB_NOTIFY_TOKEN must differ from LAB_ASK_TOKEN and LAB_GATEWAY_TOKEN');
+  if (e.LAB_NOTIFY_TOKEN === e.LAB_ASK_TOKEN) {
+    throw new Error('lab-agent settings are invalid: LAB_NOTIFY_TOKEN must differ from LAB_ASK_TOKEN');
   }
   const read = (name: string, path: string) => {
     try {
@@ -142,12 +132,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
   return {
     port: e.LAB_PORT,
     askToken: e.LAB_ASK_TOKEN,
-    provider: e.LAB_PROVIDER,
-    gateway: {
-      url: e.LAB_GATEWAY_URL.replace(/\/$/, ''),
-      token: e.LAB_GATEWAY_TOKEN ?? '',
-      model: e.LAB_MODEL ?? (e.LAB_PROVIDER === 'ollama' ? 'qwen3:8b' : 'claude-haiku-4-5'),
-    },
+    model: e.LAB_MODEL ?? 'qwen3:8b',
     ollama: { url: e.LAB_OLLAMA_URL.replace(/\/$/, ''), numCtx: e.LAB_OLLAMA_NUM_CTX },
     proxmox: { baseUrl: e.LAB_PVE_URL, tokenId: e.LAB_PVE_TOKEN_ID, tokenSecret: e.LAB_PVE_TOKEN_SECRET, caPem },
     kuma: { baseUrl: e.LAB_KUMA_URL, slug: e.LAB_KUMA_SLUG },

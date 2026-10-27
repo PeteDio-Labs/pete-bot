@@ -21,12 +21,12 @@ export function deskStatusTool(cfg: DeskConfig): LabTool {
     name: 'desk_status',
     description:
       "The merge desk's state from pete-bot's /health: its mode, the repos it watches, when it last polled, how many " +
-      'PRs that poll read, any poll error, and how many PRs it has merged. Also the gateway state (llm).',
+      'PRs that poll read, any poll error, and how many PRs it has merged.',
     input,
     async run() {
       const res = await fetchWithTimeout(cfg.fetch ?? fetch, cfg.healthUrl, { method: 'GET' }, 5_000, 'pete-bot /health');
       if (!res.ok) throw new LabToolError(`pete-bot /health answered HTTP ${res.status}`);
-      let body: { desk?: unknown; llm?: unknown; uptimeSeconds?: unknown };
+      let body: { desk?: unknown; uptimeSeconds?: unknown };
       try {
         body = (await res.json()) as typeof body;
       } catch {
@@ -35,7 +35,7 @@ export function deskStatusTool(cfg: DeskConfig): LabTool {
       if (!body?.desk) throw new LabToolError('pete-bot /health carries no desk field');
       return {
         source: `pete-bot /health at ${cfg.healthUrl}`,
-        data: { desk: body.desk, llm: body.llm ?? null, peteBotUptimeSec: body.uptimeSeconds ?? null },
+        data: { desk: body.desk, peteBotUptimeSec: body.uptimeSeconds ?? null },
       };
     },
   };
