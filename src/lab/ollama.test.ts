@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { ollamaCaller, toOllamaMessages, OllamaError } from './ollama.js';
+import { ollamaCaller, toOllamaMessages, ModelError } from './ollama.js';
 
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -52,6 +52,6 @@ describe('ollamaCaller', () => {
     const down = ollamaCaller('http://o', 8192, (async () => reply('no model', 404)) as unknown as typeof fetch);
     await expect(down(body)).rejects.toThrow('ollama answered HTTP 404');
     const dead = ollamaCaller('http://o', 8192, (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch);
-    await expect(dead(body)).rejects.toBeInstanceOf(OllamaError);
+    await expect(dead(body)).rejects.toBeInstanceOf(ModelError);
   });
 });
