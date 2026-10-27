@@ -342,6 +342,8 @@ export interface Finding {
   kev: boolean;
   /** CISA lists an advisory that has no fix. The `fixed` upgrade does not close it. */
   kevUnfixed: boolean;
+  /** The CVE ids that CISA lists among this finding's advisories. */
+  kevCves: string[];
   /** The highest severity among the advisories that have a fix. */
   severity: Advisory['severity'];
   summary: string;
@@ -360,6 +362,9 @@ const RANK: Record<Advisory['severity'], number> = { CRITICAL: 4, HIGH: 3, MODER
  */
 export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advisory>, kev: Set<string> | null): Finding[] {
   const out = new Map<string, Finding>();
+  // Unfixed advisories wait here: one whose every CVE another advisory of the same package fixes is not open.
+  const pending = new Map<string, Advisory>();
+  const covered = new Set<string>();
   for (const m of matches) {
     for (const id of m.ids) {
       const adv = advisories.get(id);
@@ -380,6 +385,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           cves: [],
           kev: false,
           kevUnfixed: false,
+          kevCves: [],
           severity: 'unrated',
           summary: '',
         } satisfies Finding);
@@ -390,17 +396,30 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
       f.advisories.push(id);
       for (const c of adv.cves) if (!f.cves.includes(c)) f.cves.push(c);
       if (!f.summary && adv.summary) f.summary = adv.summary;
-      const exploited = kev !== null && adv.cves.some((c) => kev.has(c));
+      const listed = kev === null ? [] : adv.cves.filter((c) => kev.has(c));
+      for (const c of listed) if (!f.kevCves.includes(c)) f.kevCves.push(c);
       if (fixes.length === 0) {
         f.unfixed.push(id);
-        if (exploited) f.kevUnfixed = true;
+        pending.set(id, adv);
       } else {
         for (const v of fixes) if (f.fixed === null || compareVersions(v, f.fixed) > 0) f.fixed = v;
-        if (exploited) f.kev = true;
+        for (const c of adv.cves) covered.add(`${key}\u0000${c}`);
+        if (listed.length > 0) f.kev = true;
         if (RANK[adv.severity] > RANK[f.severity]) f.severity = adv.severity;
       }
       out.set(key, f);
     }
+  }
+  for (const f of out.values()) {
+    f.unfixed = f.unfixed.filter((id) => {
+      const adv = pending.get(id)!;
+      return adv.cves.length === 0 || adv.cves.some((c) => !covered.has(`${f.key}\u0000${c}`));
+    });
+    const open = f.unfixed.map((id) => pending.get(id)!);
+    // An exploited advisory with no fix is open only when a CVE of it no fixed advisory covers.
+    const exploited = (a: Advisory): boolean => a.cves.some((c) => f.kevCves.includes(c) && !covered.has(`${f.key}\u0000${c}`));
+    f.kevUnfixed = open.some(exploited);
+    f.unfixed.sort((a, b) => Number(exploited(pending.get(b)!)) - Number(exploited(pending.get(a)!)));
   }
   for (const f of out.values()) if (f.kev) f.key = `${f.key}|kev`;
   return [...out.values()];
@@ -420,7 +439,10 @@ export function sortFindings(fs: Finding[]): Finding[] {
 
 export function upgradeHint(f: Finding): string {
   if (!f.fixed) return f.kevUnfixed ? 'exploited, and no fixed version is published: mitigate or isolate the host' : 'no fixed version published yet';
-  const open = f.unfixed.length ? `; does not close ${f.unfixed.length} advisories with no fix (${f.unfixed.slice(0, 2).join(', ')}${f.unfixed.length > 2 ? ', …' : ''})${f.kevUnfixed ? ', one of them exploited' : ''}` : '';
+  // The unfixed list puts an exploited advisory first, so the first id names it.
+  const open = f.unfixed.length
+    ? `; does not close ${f.unfixed.length} ${f.unfixed.length === 1 ? 'advisory' : 'advisories'} with no fix (${f.unfixed.slice(0, 2).join(', ')}${f.unfixed.length > 2 ? ', …' : ''})${f.kevUnfixed ? `, exploited: ${f.unfixed[0]}` : ''}`
+    : '';
   // `--only-upgrade` skips a binary a host does not have, so the union across hosts is safe to list.
   const shown = f.binaries.slice(0, 12);
   const more = f.binaries.length > shown.length ? `, plus ${f.binaries.length - shown.length} more binaries of source package ${f.package}` : '';
@@ -466,7 +488,7 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   const advisoryGaps: string[] = [];
   const inventoryGaps: string[] = [];
   for (const h of readHosts) {
-    const fallback = h.packages.filter((p) => p.source !== undefined && !p.sourceVersion).length;
+    const fallback = h.packages.filter((p) => !p.sourceVersion).length;
     if (fallback > 0) advisoryGaps.push(`${h.name}: ${fallback} packages had no source version, so the binary version was matched and the result may be wrong`);
   }
   for (const h of readHosts) if (h.imagesError) inventoryGaps.push(`${h.name}: the image list could not be read (${clip(h.imagesError, 80)})`);
@@ -513,7 +535,8 @@ export function buildCveReport(run: CveRun, day: string, filing: Filing = NO_FIL
   const actionable = run.findings.filter(isActionable);
   const fixable = run.findings.filter((x) => x.fixed !== null && !isActionable(x));
   const unratedFix = fixable.filter((x) => x.severity === 'unrated').length;
-  const gaps = [...run.advisoryGaps, ...run.inventoryGaps, ...filing.gaps];
+  // Filing's gaps come first: they say why nothing was filed, and the cap below drops the tail.
+  const gaps = [...filing.gaps, ...run.advisoryGaps, ...run.inventoryGaps];
   for (const h of run.hostsUnread) gaps.push(`${h.name} was not scanned: ${clip(h.error, 100)}`);
   if (run.kevError) gaps.push(`${run.kevError}, so nothing is marked as exploited`);
   if (run.truncated) gaps.push(`${run.truncated} OSV answers were paged and only the first page was read`);
