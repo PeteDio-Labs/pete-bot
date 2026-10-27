@@ -2,9 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCveReport, buildQueries, cvss3Score, isActionable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, type InventorySnapshot } from './cve.js';
+import { buildCveReport, buildFindings, buildQueries, compareVersions, cvss3Score, isActionable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, type InventorySnapshot } from './cve.js';
 import { dueReports } from './schedule.js';
 import { PlaneHttpError } from './plane.js';
+import { upgradeHint as upgradeHintText } from './cve.js';
 import { ReportRunner } from './runner.js';
 import { loadReportSettings } from './settings.js';
 
@@ -15,7 +16,7 @@ const snap = (over: Partial<InventorySnapshot> = {}): InventorySnapshot => ({
   hosts: [
     {
       name: 'media-237', ok: true, os: { id: 'debian', version: '12' }, images: [{ ref: 'x/y:1' }], apps: [], malformedLines: 0,
-      packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl (3.0.1-1)' }, { name: 'curl', version: '7.88.0-1' }],
+      packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl', sourceVersion: '3.0.1-1' }, { name: 'curl', version: '7.88.0-1' }],
     },
     { name: 'pve02', ok: false, error: 'ssh timeout', packages: [], images: [], apps: [], malformedLines: 0 },
   ],
@@ -93,7 +94,29 @@ describe('collector fields', () => {
   });
   it('keys a finding on the installed version, so a changed fix does not file it twice', async () => {
     const a = (await runCveCheck(snap(), NOW, feeds())).findings[0]!;
-    expect(a.key).toBe('Debian:12|openssl|3.0.1-1');
+    expect(a.key).toBe('Debian:12|openssl|3.0.1-1|kev');
+  });
+});
+
+describe('fixed versions', () => {
+  it('orders versions like dpkg', () => {
+    expect(compareVersions('3.0.9-1', '3.0.2-1')).toBeGreaterThan(0);
+    expect(compareVersions('1:1.0-1', '9.9-1')).toBeGreaterThan(0);
+    expect(compareVersions('1.0~rc1-1', '1.0-1')).toBeLessThan(0);
+    expect(compareVersions('1.10-1', '1.9-1')).toBeGreaterThan(0);
+    expect(compareVersions('2.0-1', '2.0-1')).toBe(0);
+  });
+  const q = { ecosystem: 'Debian:12', name: 'p', version: '1', hosts: new Set(['h']), binaries: new Set(['p']) };
+  const adv = (id: string, fixes: string[], cve: string) => toAdvisory({ id, aliases: [cve], affected: fixes.length ? [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: fixes.map((fixed) => ({ fixed })) }] }] : [] });
+  it('names the highest fix, so installing it closes every fixed advisory', () => {
+    const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', ['3.0.9-1'], 'CVE-2026-2')]]), null)[0]!;
+    expect(f.fixed).toBe('3.0.9-1');
+  });
+  it('does not let an unfixed exploited advisory inherit another advisory\'s fix', () => {
+    const f = buildFindings([{ query: q, ids: ['A', 'B'] }], new Map([['A', adv('A', ['3.0.2-1'], 'CVE-2026-1')], ['B', adv('B', [], 'CVE-2026-2')]]), new Set(['CVE-2026-2']))[0]!;
+    expect(f.kev).toBe(true);
+    expect(f.unfixed).toEqual(['B']);
+    expect(upgradeHintText(f)).toContain('does not close 1 advisories with no fix (B)');
   });
 });
 
@@ -153,6 +176,19 @@ describe('runCveCheck', () => {
     const bad = snap({ hosts: [{ ...snap().hosts[0]!, malformedLines: 3 }] });
     expect(buildCveReport(await runCveCheck(bad, NOW, feeds()), '2026-10-27')).toContain('media-237: 3 package lines could not be read');
   });
+  it('does not count a host with an unusable VERSION_ID as examined just because it lists an app', async () => {
+    const h = { ...snap().hosts[0]!, name: 'odd', os: { id: 'debian', version: '' }, apps: [{ name: 'cloudflared', version: '1.0', ecosystem: 'Go', package: 'github.com/cloudflare/cloudflared' }] };
+    const text = buildCveReport(await runCveCheck(snap({ hosts: [snap().hosts[0]!, h] }), NOW, feeds()), '2026-10-27');
+    expect(text).toContain('Examined 1 of 2 hosts');
+    expect(text).toContain('odd was not scanned');
+  });
+  it('reports packages that fell back to the binary version', async () => {
+    const h = { ...snap().hosts[0]!, packages: [{ name: 'libssl3', version: '3.0.1-1', source: 'openssl' }] };
+    expect(buildCveReport(await runCveCheck(snap({ hosts: [h] }), NOW, feeds()), '2026-10-27')).toContain('1 packages had no source version');
+  });
+  it('flags a snapshot dated in the future', async () => {
+    expect(buildCveReport(await runCveCheck(snap({ generatedAt: '2026-10-29T00:00:00Z' }), NOW, feeds()), '2026-10-27')).toContain('in the future');
+  });
   it('flags a stale inventory', async () => {
     const text = buildCveReport(await runCveCheck(snap({ generatedAt: '2026-10-20T00:00:00Z' }), NOW, feeds()), '2026-10-27');
     expect(text).toContain('hours old');
@@ -201,9 +237,9 @@ describe('ReportRunner cve', () => {
     expect(sent.join('\n')).toContain('PET-801');
   });
   it('skips findings already filed and still files a later one, up to the cap, and reports the counts', async () => {
-    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 8 }, (_, i) => ({ name: `p${i}`, version: '1', source: 'openssl' })) }] });
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 8 }, (_, i) => ({ name: `p${i}`, version: '1', source: 'openssl', sourceVersion: '1' })) }] });
     // Eight versions of one source package give eight distinct findings.
-    many.hosts[0]!.packages = many.hosts[0]!.packages.map((p, i) => ({ ...p, version: `1.${i}` }));
+    many.hosts[0]!.packages = many.hosts[0]!.packages.map((p, i) => ({ ...p, version: `1.${i}`, sourceVersion: `1.${i}` }));
     const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
     writeFileSync(p, JSON.stringify(many));
     let n = 0;
@@ -260,8 +296,28 @@ describe('ReportRunner cve', () => {
     expect(called).toBe(0);
     expect(sent.join('\n')).toContain('inventory snapshot is stale');
   });
+  it('stops filing on a 401, 403 or 404, which hit every item the same way', async () => {
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 3 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl', sourceVersion: `1.${i}` })) }] });
+    const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
+    writeFileSync(p, JSON.stringify(many));
+    let calls = 0;
+    const plane = { createItem: async () => { calls++; throw new PlaneHttpError('x', 401); } } as never;
+    const r = new ReportRunner({ settings: base(p, true), github: gh, plane, sender: { send: async () => {} }, log, now: () => NOW, feedFetch: feeds() });
+    await r.run('cve', { markRun: false });
+    expect(calls).toBe(1);
+  });
+  it('does not file while advisories could not be read', async () => {
+    let called = 0;
+    const plane = { createItem: async () => (called++, { status: 'created' as const, seq: 1 }) } as never;
+    const sent: string[] = [];
+    const flaky = (async (url: string | URL | Request, init?: RequestInit) => (String(url).includes('/v1/vulns/DSA-2') ? new Response('no', { status: 500 }) : feeds()(url, init))) as typeof fetch;
+    const r = new ReportRunner({ settings: base(file(), true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: flaky });
+    await r.run('cve', { markRun: false });
+    expect(called).toBe(0);
+    expect(sent.join('\n')).toContain('not filed because some advisories were not read');
+  });
   it('keeps filing past a 4xx for one finding but stops on a 5xx', async () => {
-    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 3 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl' })) }] });
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 3 }, (_, i) => ({ name: `p${i}`, version: `1.${i}`, source: 'openssl', sourceVersion: `1.${i}` })) }] });
     const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
     writeFileSync(p, JSON.stringify(many));
     for (const [status, filed] of [[400, 2], [503, 0]] as const) {

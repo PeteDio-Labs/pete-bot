@@ -25,6 +25,10 @@ const BATCH = 500;
 const DETAIL_CAP = 400;
 const DETAIL_CONCURRENCY = 8;
 export const STALE_SNAPSHOT_HOURS = 36;
+/** A snapshot dated further ahead than this is not trusted (clock skew or a wrong date). */
+export const FUTURE_SLACK_HOURS = 1;
+/** Whether the snapshot's age is believable enough to file items from it. */
+export const snapshotFresh = (ageHours: number): boolean => ageHours <= STALE_SNAPSHOT_HOURS && ageHours >= -FUTURE_SLACK_HOURS;
 export const REPORT_CAP = 15;
 /** The most PET items one run creates. */
 export const FILE_CAP = 5;
@@ -111,15 +115,19 @@ export function buildQueries(snap: InventorySnapshot): Query[] {
     const eco = ecosystemOf(h);
     if (eco) {
       // OSV matches a Debian source package by its source version, which differs from the binary version.
-      for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.sourceVersion ?? p.version, h.name, p.name);
+      for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.sourceVersion || p.version, h.name, p.name);
     }
     for (const a of h.apps) add(a.ecosystem, a.package, a.version, h.name, a.name);
   }
   return [...map.values()];
 }
 
-/** Hosts that contributed at least one query. Only these count as examined. */
-export const hostsWithQueries = (queries: Query[]): Set<string> => new Set(queries.flatMap((q) => [...q.hosts]));
+/**
+ * Hosts whose OS packages were queried. Only these count as examined: a host with an unusable
+ * VERSION_ID that lists a pinned app would otherwise count as read with its packages skipped.
+ */
+export const examinedHosts = (snap: InventorySnapshot): Set<string> =>
+  new Set(snap.hosts.filter((h) => h.ok && ecosystemOf(h) !== null && h.packages.length > 0).map((h) => h.name));
 
 interface OsvBatchResponse {
   results: { vulns?: { id: string }[]; next_page_token?: string }[];
@@ -169,6 +177,48 @@ export interface Advisory {
   severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | 'unrated';
   /** Every distinct fixed version per `ecosystem|package`. */
   fixed: Map<string, string[]>;
+}
+
+/** The order of one dpkg version part: letters sort before the end of the string, `~` before everything. */
+const order = (c: string | undefined): number => (c === undefined || c === '' ? 0 : c === '~' ? -1 : /[A-Za-z]/.test(c) ? c.charCodeAt(0) : c.charCodeAt(0) + 256);
+
+function cmpPart(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    let diff = 0;
+    while ((i < a.length && !/\d/.test(a[i]!)) || (j < b.length && !/\d/.test(b[j]!))) {
+      const d = order(a[i]) - order(b[j]);
+      if (d !== 0) return d;
+      i++;
+      j++;
+    }
+    while (a[i] === '0') i++;
+    while (b[j] === '0') j++;
+    while (/\d/.test(a[i] ?? '') && /\d/.test(b[j] ?? '')) {
+      if (diff === 0) diff = a.charCodeAt(i) - b.charCodeAt(j);
+      i++;
+      j++;
+    }
+    if (/\d/.test(a[i] ?? '')) return 1;
+    if (/\d/.test(b[j] ?? '')) return -1;
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** Compares two Debian-style versions (epoch, upstream, revision). Other ecosystems use the same order, which is close enough to pick the larger fix. */
+export function compareVersions(a: string, b: string): number {
+  const split = (v: string): [number, string, string] => {
+    const colon = v.indexOf(':');
+    const epoch = colon > 0 ? Number(v.slice(0, colon)) || 0 : 0;
+    const rest = colon > 0 ? v.slice(colon + 1) : v;
+    const dash = rest.lastIndexOf('-');
+    return [epoch, dash > 0 ? rest.slice(0, dash) : rest, dash > 0 ? rest.slice(dash + 1) : ''];
+  };
+  const [ea, ua, ra] = split(a);
+  const [eb, ub, rb] = split(b);
+  return ea - eb || cmpPart(ua, ub) || cmpPart(ra, rb);
 }
 
 const SEVERITIES = new Set(['CRITICAL', 'HIGH', 'MODERATE', 'LOW']);
@@ -270,7 +320,10 @@ export interface Finding {
   ecosystem: string;
   package: string;
   installed: string;
+  /** The highest fixed version across the advisories that have a fix; installing it fixes all of those. */
   fixed: string | null;
+  /** Advisories that have no fix for this package. The `fixed` upgrade does not close them. */
+  unfixed: string[];
   hosts: string[];
   binaries: string[];
   advisories: string[];
@@ -285,11 +338,14 @@ const RANK: Record<Advisory['severity'], number> = { CRITICAL: 4, HIGH: 3, MODER
 /**
  * Folds matches into one finding per package and installed version. The key leaves the fixed
  * version out on purpose: it is the item's dedup key, and a fixed version that changes between
- * days must not file the same upgrade twice.
+ * days must not file the same upgrade twice. An exploited finding keys apart from the same
+ * package unexploited, so a later KEV listing files its own item.
+ *
+ * `fixed` is the highest fixed version among the advisories that have one: installing it fixes
+ * all of them. An advisory with no fix stays in `unfixed`, so it never inherits another's fix.
  */
 export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advisory>, kev: Set<string> | null): Finding[] {
   const out = new Map<string, Finding>();
-  const fixes = new Map<string, Set<string>>();
   for (const m of matches) {
     for (const id of m.ids) {
       const adv = advisories.get(id);
@@ -303,6 +359,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           package: m.query.name,
           installed: m.query.version,
           fixed: null,
+          unfixed: [],
           hosts: [...m.query.hosts].sort(),
           binaries: [...m.query.binaries].sort(),
           advisories: [],
@@ -311,7 +368,9 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
           severity: 'unrated',
           summary: '',
         } satisfies Finding);
-      for (const v of adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? []) fixes.set(key, (fixes.get(key) ?? new Set()).add(v));
+      const fixes = adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? [];
+      if (fixes.length === 0) f.unfixed.push(id);
+      for (const v of fixes) if (f.fixed === null || compareVersions(v, f.fixed) > 0) f.fixed = v;
       f.advisories.push(id);
       for (const c of adv.cves) if (!f.cves.includes(c)) f.cves.push(c);
       if (kev && adv.cves.some((c) => kev.has(c))) f.kev = true;
@@ -320,10 +379,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
       out.set(key, f);
     }
   }
-  for (const [key, f] of out) {
-    const v = fixes.get(key);
-    f.fixed = v?.size ? [...v].join(' or ') : null;
-  }
+  for (const f of out.values()) if (f.kev) f.key = `${f.key}|kev`;
   return [...out.values()];
 }
 
@@ -338,8 +394,9 @@ export function sortFindings(fs: Finding[]): Finding[] {
 
 export function upgradeHint(f: Finding): string {
   if (!f.fixed) return 'no fixed version published yet';
-  if (f.ecosystem.startsWith('Debian')) return `\`apt-get install --only-upgrade ${f.binaries.slice(0, 3).join(' ') || f.package}\` (fixed in ${f.fixed})`;
-  return `pin ${f.package} at ${f.fixed} or later in petedio-iac`;
+  const open = f.unfixed.length ? `; does not close ${f.unfixed.length} advisories with no fix (${f.unfixed.slice(0, 2).join(', ')}${f.unfixed.length > 2 ? ', …' : ''})` : '';
+  if (f.ecosystem.startsWith('Debian')) return `\`apt-get install --only-upgrade ${f.binaries.slice(0, 3).join(' ') || f.package}\` (fixed in ${f.fixed}${open})`;
+  return `pin ${f.package} at ${f.fixed} or later in petedio-iac${open}`;
 }
 
 export interface CveRun {
@@ -361,8 +418,8 @@ export interface CveRun {
 export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fetch = fetch): Promise<CveRun> {
   if (snapshot.hosts.length === 0) throw new Error('the inventory snapshot lists no hosts, so nothing was examined');
   const queries = buildQueries(snapshot);
-  const examined = hostsWithQueries(queries);
-  if (queries.length === 0) throw new Error('no host produced a package that OSV can match (unread hosts, unsupported OS or no packages), so nothing was examined');
+  const examined = examinedHosts(snapshot);
+  if (queries.length === 0 || examined.size === 0) throw new Error('no host produced a package that OSV can match (unread hosts, unsupported OS or no packages), so nothing was examined');
   const readHosts = snapshot.hosts.filter((h) => examined.has(h.name));
   const { matches, truncated } = await queryOsv(f, queries);
   const ids = [...new Set(matches.flatMap((m) => m.ids))];
@@ -375,10 +432,14 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   }
   const { byId, failed, skipped } = await fetchAdvisories(f, orderForFetch(ids, kev));
   const advisoryGaps: string[] = [];
+  for (const h of readHosts) {
+    const fallback = h.packages.filter((p) => p.source && !p.sourceVersion).length;
+    if (fallback > 0) advisoryGaps.push(`${h.name}: ${fallback} packages had no source version, so the binary version was matched and the result may be wrong`);
+  }
   for (const h of readHosts) if (h.imagesError) advisoryGaps.push(`${h.name}: the image list could not be read (${clip(h.imagesError, 80)})`);
   for (const h of readHosts) if (h.malformedLines > 0) advisoryGaps.push(`${h.name}: ${h.malformedLines} package lines could not be read, so those packages were not matched`);
   if (failed.length) advisoryGaps.push(`${failed.length} advisories could not be fetched (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ', …' : ''})`);
-  if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories naming a KEV entry went first)`);
+  if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories whose id names a KEV entry went first)`);
   return {
     snapshot,
     hostsRead: readHosts.length,
@@ -422,6 +483,7 @@ export function buildCveReport(run: CveRun, day: string, filing: Filing = NO_FIL
   for (const h of run.hostsUnread) gaps.push(`${h.name} was not scanned: ${clip(h.error, 100)}`);
   if (run.kevError) gaps.push(`${run.kevError}, so nothing is marked as exploited`);
   if (run.truncated) gaps.push(`${run.truncated} OSV answers were paged and only the first page was read`);
+  if (run.snapshotAgeHours < -FUTURE_SLACK_HOURS) gaps.push(`the inventory is dated ${Math.round(-run.snapshotAgeHours)} hours in the future, so its age cannot be trusted`);
   if (run.snapshotAgeHours > STALE_SNAPSHOT_HOURS) gaps.push(`the inventory is ${Math.round(run.snapshotAgeHours)} hours old, so installed versions may have changed`);
 
   const lines = [
