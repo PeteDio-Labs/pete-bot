@@ -39,6 +39,8 @@ const HostSchema = z.object({
   images: z.array(z.object({ ref: z.string() })).default([]),
   /** A pinned binary with its OSV identity, e.g. cloudflared as Go `github.com/cloudflare/cloudflared`. */
   apps: z.array(z.object({ name: z.string(), version: z.string(), ecosystem: z.string(), package: z.string() })).default([]),
+  /** dpkg lines the collector could not split. Those packages were not matched. */
+  malformedLines: z.number().default(0),
 });
 const SnapshotSchema = z.object({ generatedAt: z.string(), hosts: z.array(HostSchema) });
 export type HostInventory = z.infer<typeof HostSchema>;
@@ -355,6 +357,7 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   }
   const { byId, failed, skipped } = await fetchAdvisories(f, orderForFetch(ids, kev));
   const advisoryGaps: string[] = [];
+  for (const h of readHosts) if (h.malformedLines > 0) advisoryGaps.push(`${h.name}: ${h.malformedLines} package lines could not be read, so those packages were not matched`);
   if (failed.length) advisoryGaps.push(`${failed.length} advisories could not be fetched (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ', …' : ''})`);
   if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories naming a KEV entry went first)`);
   return {

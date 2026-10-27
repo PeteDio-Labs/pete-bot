@@ -124,6 +124,10 @@ describe('runCveCheck', () => {
     expect(text).toContain('noos was not scanned');
     expect(text).toContain('empty was not scanned: it listed no installed packages');
   });
+  it('reports package lines the collector could not read', async () => {
+    const bad = snap({ hosts: [{ ...snap().hosts[0]!, malformedLines: 3 }] });
+    expect(buildCveReport(await runCveCheck(bad, NOW, feeds()), '2026-10-27')).toContain('media-237: 3 package lines could not be read');
+  });
   it('flags a stale inventory', async () => {
     const text = buildCveReport(await runCveCheck(snap({ generatedAt: '2026-10-20T00:00:00Z' }), NOW, feeds()), '2026-10-27');
     expect(text).toContain('hours old');
