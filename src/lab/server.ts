@@ -14,7 +14,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { ask, ASK_DEADLINE_MS, type AskResult, type CallModel } from './agent.js';
-import { OllamaError } from './ollama.js';
+import { ModelError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
 import type { LabTool } from './tools/index.js';
 
@@ -109,7 +109,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         log('ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
         return json(result);
       } catch (err) {
-        const message = err instanceof OllamaError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        const message = err instanceof ModelError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
         log('ask failed', { ms: Date.now() - started, error: message });
         return json({ error: message }, 502);
       } finally {

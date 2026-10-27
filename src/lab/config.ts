@@ -18,7 +18,7 @@ const EnvSchema = z.object({
   LAB_ASK_TOKEN: TOKEN,
   // The model backend (PET-742): a local Ollama lane. The Anthropic gateway is retired (PET-744),
   // so a stale LAB_PROVIDER=gateway is refused at startup instead of quietly running Ollama.
-  LAB_PROVIDER: z.literal('ollama').default('ollama'),
+  LAB_PROVIDER: z.literal('ollama', { errorMap: () => ({ message: 'must be ollama; the Anthropic gateway was retired (PET-744)' }) }).default('ollama'),
   LAB_OLLAMA_URL: z.string().url().default('http://192.168.50.12:11434'),
   LAB_OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).max(32768).default(8192),
   LAB_MODEL: z.string().min(1).optional(),

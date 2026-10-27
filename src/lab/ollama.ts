@@ -17,8 +17,8 @@ import type { CallModel, ContentBlock, ModelResponse } from './agent.js';
 
 const OLLAMA_TIMEOUT_MS = 60_000;
 
-export class OllamaError extends Error {
-  override name = 'OllamaError';
+export class ModelError extends Error {
+  override name = 'ModelError';
 }
 
 interface OllamaMessage {
@@ -93,11 +93,11 @@ export function ollamaCaller(baseUrl: string, numCtx: number, fetchImpl: typeof 
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
     } catch (err) {
-      if (signal?.aborted) throw new OllamaError('stopped: the answer ran past its deadline or the asker went away');
-      throw new OllamaError(`ollama unreachable: ${(err as Error).message}`);
+      if (signal?.aborted) throw new ModelError('stopped: the answer ran past its deadline or the asker went away');
+      throw new ModelError(`ollama unreachable: ${(err as Error).message}`);
     }
     const text = await res.text();
-    if (!res.ok) throw new OllamaError(`ollama answered HTTP ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) throw new ModelError(`ollama answered HTTP ${res.status}: ${text.slice(0, 300)}`);
     let data: {
       message?: { content?: string; tool_calls?: Array<{ function: { name: string; arguments: unknown } }> };
       done_reason?: string;
@@ -107,7 +107,7 @@ export function ollamaCaller(baseUrl: string, numCtx: number, fetchImpl: typeof 
     try {
       data = JSON.parse(text);
     } catch {
-      throw new OllamaError('ollama answered with a body that is not JSON');
+      throw new ModelError('ollama answered with a body that is not JSON');
     }
     const content: ContentBlock[] = [];
     if (data.message?.content) content.push({ type: 'text', text: data.message.content });

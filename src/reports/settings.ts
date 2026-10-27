@@ -5,8 +5,8 @@
  * /health says why. `ready` runs the schedule.
  *
  * ⚠ A BAD SETTING DISABLES THE REPORTS, NOT THE BOT. Throwing at startup would also stop
- * Uptime Kuma's alerts, which is the job this process exists for. The desk and the
- * gateway follow the same rule.
+ * Uptime Kuma's alerts, which is the job this process exists for. The desk follows
+ * the same rule.
  *
  * The reports read GitHub as the merge desk's App (DESK_APP_*), so they work in any desk
  * mode. The App's key is read here and never logged.
