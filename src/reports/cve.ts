@@ -26,6 +26,8 @@ const DETAIL_CAP = 400;
 const DETAIL_CONCURRENCY = 8;
 export const STALE_SNAPSHOT_HOURS = 36;
 export const REPORT_CAP = 15;
+/** The most PET items one run creates. */
+export const FILE_CAP = 5;
 
 const HostSchema = z.object({
   name: z.string().min(1),
@@ -83,6 +85,9 @@ export interface Query {
   binaries: Set<string>;
 }
 
+const DEBIAN_LIKE = new Set(['debian', 'raspbian']);
+const ecosystemOf = (h: HostInventory): string | null => (h.os && DEBIAN_LIKE.has(h.os.id) ? `Debian:${h.os.version.split('.')[0]}` : null);
+
 /** The OSV queries for the hosts the collector read, deduplicated across hosts. */
 export function buildQueries(snap: InventorySnapshot): Query[] {
   const map = new Map<string, Query>();
@@ -95,7 +100,7 @@ export function buildQueries(snap: InventorySnapshot): Query[] {
   };
   for (const h of snap.hosts) {
     if (!h.ok) continue;
-    const eco = h.os?.id === 'debian' ? `Debian:${h.os.version.split('.')[0]}` : null;
+    const eco = ecosystemOf(h);
     if (eco) {
       for (const p of h.packages) add(eco, (p.source ?? p.name).split(' ')[0]!, p.version, h.name, p.name);
     }
@@ -103,6 +108,9 @@ export function buildQueries(snap: InventorySnapshot): Query[] {
   }
   return [...map.values()];
 }
+
+/** Hosts that contributed at least one query. Only these count as examined. */
+export const hostsWithQueries = (queries: Query[]): Set<string> => new Set(queries.flatMap((q) => [...q.hosts]));
 
 interface OsvBatchResponse {
   results: { vulns?: { id: string }[]; next_page_token?: string }[];
@@ -138,6 +146,7 @@ interface OsvVuln {
   id: string;
   aliases?: string[];
   summary?: string;
+  severity?: { type?: string; score?: string }[];
   database_specific?: { severity?: string };
   affected?: { package?: { name?: string; ecosystem?: string }; ranges?: { events?: { fixed?: string }[] }[] }[];
 }
@@ -147,26 +156,76 @@ export interface Advisory {
   cves: string[];
   summary: string;
   severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | 'unrated';
-  /** Fixed version per `ecosystem|package`. */
-  fixed: Map<string, string>;
+  /** Every distinct fixed version per `ecosystem|package`. */
+  fixed: Map<string, string[]>;
 }
 
 const SEVERITIES = new Set(['CRITICAL', 'HIGH', 'MODERATE', 'LOW']);
 
+const roundUp = (x: number): number => Math.ceil(Math.round(x * 100000) / 10000) / 10;
+const AV: Record<string, number> = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };
+const LOW_HIGH: Record<string, number> = { L: 0.77, H: 0.44 };
+const UI: Record<string, number> = { N: 0.85, R: 0.62 };
+const CIA: Record<string, number> = { H: 0.56, L: 0.22, N: 0 };
+
+/** The CVSS v3.x base score of a vector string, or null when it is not a v3 vector this can read. */
+export function cvss3Score(vector: string): number | null {
+  if (!/^CVSS:3\.[01]\//.test(vector)) return null;
+  const m = Object.fromEntries(
+    vector
+      .split('/')
+      .slice(1)
+      .map((p) => p.split(':') as [string, string]),
+  );
+  const changed = m.S === 'C';
+  const pr = changed ? { N: 0.85, L: 0.68, H: 0.5 }[m.PR as 'N'] : { N: 0.85, L: 0.62, H: 0.27 }[m.PR as 'N'];
+  const parts = [AV[m.AV!], LOW_HIGH[m.AC!], pr, UI[m.UI!], CIA[m.C!], CIA[m.I!], CIA[m.A!]];
+  if (parts.some((x) => x === undefined) || (m.S !== 'U' && m.S !== 'C')) return null;
+  const [av, ac, prv, ui, c, i, a] = parts as number[];
+  const iss = 1 - (1 - c!) * (1 - i!) * (1 - a!);
+  const impact = changed ? 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15 : 6.42 * iss;
+  if (impact <= 0) return 0;
+  const expl = 8.22 * av! * ac! * prv! * ui!;
+  return roundUp(Math.min(changed ? 1.08 * (impact + expl) : impact + expl, 10));
+}
+
+export function bandOf(score: number): Advisory['severity'] {
+  return score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MODERATE' : 'LOW';
+}
+
+/** Debian, DSA and DEBIAN-CVE records carry CVSS in the top-level `severity[]`; GHSA records use `database_specific`. */
+function severityOf(v: OsvVuln): Advisory['severity'] {
+  const named = (v.database_specific?.severity ?? '').toUpperCase();
+  if (SEVERITIES.has(named)) return named as Advisory['severity'];
+  const scores = (v.severity ?? []).map((x) => cvss3Score(x.score ?? '')).filter((x): x is number => x !== null);
+  return scores.length ? bandOf(Math.max(...scores)) : 'unrated';
+}
+
 export function toAdvisory(v: OsvVuln): Advisory {
-  const sev = (v.database_specific?.severity ?? '').toUpperCase();
-  const fixed = new Map<string, string>();
+  const fixed = new Map<string, string[]>();
   for (const a of v.affected ?? []) {
-    const fix = a.ranges?.flatMap((r) => r.events ?? []).find((e) => e.fixed)?.fixed;
-    if (fix && a.package?.name && a.package.ecosystem) fixed.set(`${a.package.ecosystem}|${a.package.name}`, fix);
+    if (!a.package?.name || !a.package.ecosystem) continue;
+    const key = `${a.package.ecosystem}|${a.package.name}`;
+    // Matching the installed version to one range needs the ecosystem's version order. Keep every
+    // distinct fixed version of the package instead, and let the report show them all.
+    const fixes = (a.ranges ?? []).flatMap((r) => r.events ?? []).flatMap((e) => (e.fixed ? [e.fixed] : []));
+    if (fixes.length) fixed.set(key, [...new Set([...(fixed.get(key) ?? []), ...fixes])]);
   }
   return {
     id: v.id,
     cves: [v.id, ...(v.aliases ?? [])].filter((x) => /^CVE-\d{4}-\d+$/.test(x)),
     summary: v.summary ?? '',
-    severity: SEVERITIES.has(sev) ? (sev as Advisory['severity']) : 'unrated',
+    severity: severityOf(v),
     fixed,
   };
+}
+
+const cveInId = (id: string): string | null => /CVE-\d{4}-\d+/.exec(id)?.[0] ?? null;
+
+/** Puts the advisories whose id names a KEV entry first, so the fetch cap never drops an exploited one. */
+export function orderForFetch(ids: string[], kev: Set<string> | null): string[] {
+  const hot = (id: string): number => (kev && kev.has(cveInId(id) ?? '') ? 0 : 1);
+  return [...ids].sort((a, b) => hot(a) - hot(b) || a.localeCompare(b));
 }
 
 export async function fetchAdvisories(f: Fetch, ids: string[]): Promise<{ byId: Map<string, Advisory>; failed: string[]; skipped: number }> {
@@ -219,7 +278,7 @@ export function buildFindings(matches: OsvMatch[], advisories: Map<string, Advis
     for (const id of m.ids) {
       const adv = advisories.get(id);
       if (!adv) continue;
-      const fixed = adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`) ?? null;
+      const fixed = adv.fixed.get(`${m.query.ecosystem}|${m.query.name}`)?.join(' or ') ?? null;
       const key = `${m.query.ecosystem}|${m.query.name}|${m.query.version}|${fixed ?? 'nofix'}`;
       const f =
         out.get(key) ??
@@ -281,13 +340,12 @@ export interface CveRun {
 
 export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fetch = fetch): Promise<CveRun> {
   if (snapshot.hosts.length === 0) throw new Error('the inventory snapshot lists no hosts, so nothing was examined');
-  const readHosts = snapshot.hosts.filter((h) => h.ok);
-  if (readHosts.length === 0) throw new Error('the collector read none of the hosts, so nothing was examined');
   const queries = buildQueries(snapshot);
-  if (queries.length === 0) throw new Error('no host produced a package that OSV can match (unsupported OS ids?), so nothing was examined');
+  const examined = hostsWithQueries(queries);
+  if (queries.length === 0) throw new Error('no host produced a package that OSV can match (unread hosts, unsupported OS or no packages), so nothing was examined');
+  const readHosts = snapshot.hosts.filter((h) => examined.has(h.name));
   const { matches, truncated } = await queryOsv(f, queries);
   const ids = [...new Set(matches.flatMap((m) => m.ids))];
-  const { byId, failed, skipped } = await fetchAdvisories(f, ids);
   let kev: Set<string> | null = null;
   let kevError: string | null = null;
   try {
@@ -295,13 +353,19 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   } catch (err) {
     kevError = err instanceof Error ? err.message : String(err);
   }
+  const { byId, failed, skipped } = await fetchAdvisories(f, orderForFetch(ids, kev));
   const advisoryGaps: string[] = [];
   if (failed.length) advisoryGaps.push(`${failed.length} advisories could not be fetched (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ', …' : ''})`);
-  if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP}`);
+  if (skipped) advisoryGaps.push(`${skipped} advisories were not fetched because the daily cap is ${DETAIL_CAP} (advisories naming a KEV entry went first)`);
   return {
     snapshot,
     hostsRead: readHosts.length,
-    hostsUnread: snapshot.hosts.filter((h) => !h.ok).map((h) => ({ name: h.name, error: h.error ?? 'no reason recorded' })),
+    hostsUnread: snapshot.hosts
+      .filter((h) => !readHosts.includes(h))
+      .map((h) => ({
+        name: h.name,
+        error: !h.ok ? (h.error ?? 'no reason recorded') : ecosystemOf(h) === null ? `OS "${h.os?.id ?? 'unknown'}" is not one the matcher supports` : 'it listed no installed packages',
+      })),
     queries: queries.length,
     uniqueAdvisories: ids.length,
     advisoriesFetched: byId.size,
@@ -315,10 +379,24 @@ export async function runCveCheck(snapshot: InventorySnapshot, now: Date, f: Fet
   };
 }
 
-export function buildCveReport(run: CveRun, day: string, filed: string[] = [], fileGaps: string[] = []): string {
+/** What the filing step did, so the DM never hides a dedup, a cap or a failure. */
+export interface Filing {
+  enabled: boolean;
+  created: string[];
+  existing: number;
+  /** Candidates not tried because the daily cap of created items was reached. */
+  overCap: number;
+  gaps: string[];
+}
+
+export const NO_FILING: Filing = { enabled: false, created: [], existing: 0, overCap: 0, gaps: [] };
+const GAP_LINES = 10;
+
+export function buildCveReport(run: CveRun, day: string, filing: Filing = NO_FILING): string {
   const actionable = run.findings.filter(isActionable);
   const fixable = run.findings.filter((x) => x.fixed !== null && !isActionable(x));
-  const gaps = [...run.advisoryGaps, ...fileGaps];
+  const unratedFix = fixable.filter((x) => x.severity === 'unrated').length;
+  const gaps = [...run.advisoryGaps, ...filing.gaps];
   for (const h of run.hostsUnread) gaps.push(`${h.name} was not scanned: ${clip(h.error, 100)}`);
   if (run.kevError) gaps.push(`${run.kevError}, so nothing is marked as exploited`);
   if (run.truncated) gaps.push(`${run.truncated} OSV answers were paged and only the first page was read`);
@@ -326,7 +404,7 @@ export function buildCveReport(run: CveRun, day: string, filed: string[] = [], f
 
   const lines = [
     `${gaps.length ? '⚠ INCOMPLETE ' : ''}**CVE check, ${day}**`,
-    `Examined ${run.hostsRead} of ${run.snapshot.hosts.length} hosts, ${run.queries} package versions, ${run.uniqueAdvisories} advisories (${run.advisoriesFetched} read), ${run.kevSize ?? 'no'} CISA KEV entries. Inventory age ${Math.round(run.snapshotAgeHours)} h. ${run.imageCount} container images are listed but not matched (no image scanner).`,
+    `Examined ${run.hostsRead} of ${run.snapshot.hosts.length} hosts, ${run.queries} package versions, ${run.uniqueAdvisories} advisories (${run.advisoriesFetched} read), ${run.kevSize ?? 'no'} CISA KEV entries. Inventory age ${Math.round(run.snapshotAgeHours)} h. ${run.imageCount} container images are listed but not matched (no image scanner). Filing: ${filing.enabled ? 'on' : 'off'}.`,
     '',
     `**Act on (${actionable.length})**`,
   ];
@@ -336,8 +414,18 @@ export function buildCveReport(run: CveRun, day: string, filed: string[] = [], f
     lines.push(`- ${tag ? `**${tag}** ` : ''}\`${x.package}\` ${x.installed} on ${x.hosts.join(', ')}: ${x.cves.slice(0, 3).join(', ') || x.advisories[0]}${x.cves.length > 3 ? ` +${x.cves.length - 3}` : ''}. ${upgradeHint(x)}`);
   }
   if (actionable.length > REPORT_CAP) lines.push(`- … ${actionable.length - REPORT_CAP} more not shown`);
-  lines.push('', `Fix available, lower severity or unrated: ${fixable.length}. No fix published: ${run.findings.length - actionable.length - fixable.length}.`);
-  if (filed.length) lines.push('', `**Filed** ${filed.join(', ')}`);
-  if (gaps.length) lines.push('', '**Not checked**', ...gaps.slice(0, 10).map((g) => `- ${g}`));
+  lines.push(
+    '',
+    `Fix available, lower severity: ${fixable.length - unratedFix}. Fix available, severity unrated: ${unratedFix}. No fix published: ${run.findings.length - actionable.length - fixable.length}.`,
+  );
+  if (filing.enabled) {
+    const parts = [`filed ${filing.created.length ? filing.created.join(', ') : 'none'}`, `already filed ${filing.existing}`];
+    if (filing.overCap) parts.push(`not tried, daily cap of ${FILE_CAP} reached: ${filing.overCap}`);
+    lines.push('', `**Items:** ${parts.join('; ')}.`);
+  }
+  if (gaps.length) {
+    lines.push('', '**Not checked**', ...gaps.slice(0, GAP_LINES).map((g) => `- ${g}`));
+    if (gaps.length > GAP_LINES) lines.push(`- … ${gaps.length - GAP_LINES} more`);
+  }
   return lines.join('\n');
 }

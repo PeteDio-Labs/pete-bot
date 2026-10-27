@@ -1,6 +1,6 @@
 /**
- * A read-only Plane client for the reports (PET-701). It issues GET requests and nothing
- * else.
+ * The Plane client for the reports (PET-701). It issues GET requests, plus the one POST in
+ * `createItem` that the CVE check uses to file an item (PET-770).
  *
  * ⚠ A PARTIAL LIST IS AN ERROR. The list walks Plane's cursor to the end and compares the
  * count with `total_count` when Plane reports one. An audit that read 100 of 403 items would
@@ -91,6 +91,7 @@ const ref = (v: string | { id: string } | null | undefined): string | null => (t
 
 export class PlaneClient {
   private readonly fetchImpl: Fetch;
+  private labels: RawLabel[] | null = null;
 
   constructor(
     private readonly s: PlaneSettings,
@@ -139,12 +140,17 @@ export class PlaneClient {
 
   /**
    * Files one item, deduplicated by `external_id` (PET-770). Plane answers 409 when the pair
-   * exists, which this reports as `exists` rather than an error. Labels are resolved by
-   * name; a name Plane does not know is dropped and the item is still filed.
+   * exists, which this reports as `exists` rather than an error. Labels are resolved by name,
+   * once per client. A name Plane does not know throws before anything is created, because the
+   * dedup key would otherwise lock a mislabelled item in. This is the one write the reports make.
    */
   async createItem(item: { name: string; descriptionHtml: string; priority: string; labels: string[]; externalSource: string; externalId: string }): Promise<{ status: 'created' | 'exists'; seq?: number }> {
-    const known = await this.all<RawLabel>('labels', 'labels/');
-    const labelIds = item.labels.map((n) => known.find((l) => l.name === n)?.id).filter((x): x is string => Boolean(x));
+    this.labels ??= await this.all<RawLabel>('labels', 'labels/');
+    const labelIds = item.labels.map((n) => {
+      const id = this.labels!.find((l) => l.name === n)?.id;
+      if (!id) throw new Error(`Plane has no label "${n}"`);
+      return id;
+    });
     const res = await this.fetchImpl(this.projectUrl('work-items/'), {
       method: 'POST',
       headers: { 'X-API-Key': this.s.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },

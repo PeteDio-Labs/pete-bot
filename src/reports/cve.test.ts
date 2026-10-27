@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCveReport, buildQueries, isActionable, parseSnapshot, runCveCheck, type InventorySnapshot } from './cve.js';
+import { buildCveReport, buildQueries, cvss3Score, isActionable, orderForFetch, parseSnapshot, runCveCheck, toAdvisory, type InventorySnapshot } from './cve.js';
 import { dueReports } from './schedule.js';
 import { ReportRunner } from './runner.js';
 import { loadReportSettings } from './settings.js';
@@ -23,7 +23,7 @@ const snap = (over: Partial<InventorySnapshot> = {}): InventorySnapshot => ({
 
 const KEV = { vulnerabilities: [{ cveID: 'CVE-2026-0001' }] };
 const VULNS: Record<string, unknown> = {
-  'DSA-1': { id: 'DSA-1', aliases: ['CVE-2026-0001'], summary: 'openssl bug', affected: [{ package: { name: 'openssl', ecosystem: 'Debian:12' }, ranges: [{ events: [{ introduced: '0' }, { fixed: '3.0.2-1' }] }] }] },
+  'DSA-1': { id: 'DSA-1', aliases: ['CVE-2026-0001'], severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }], summary: 'openssl bug', affected: [{ package: { name: 'openssl', ecosystem: 'Debian:12' }, ranges: [{ events: [{ introduced: '0' }, { fixed: '3.0.2-1' }] }] }] },
   'DSA-2': { id: 'DSA-2', aliases: ['CVE-2026-0002'], database_specific: { severity: 'LOW' }, affected: [] },
 };
 
@@ -49,6 +49,29 @@ describe('buildQueries', () => {
   });
 });
 
+describe('severity and fixed versions', () => {
+  it('scores a CVSS v3 vector', () => {
+    expect(cvss3Score('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')).toBe(9.8);
+    expect(cvss3Score('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N')).toBe(7.2);
+    expect(cvss3Score('CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N')).toBe(1.8);
+    expect(cvss3Score('CVSS:4.0/AV:N')).toBeNull();
+    expect(cvss3Score('garbage')).toBeNull();
+  });
+  it('reads Debian severity from the top-level severity array', () => {
+    const a = toAdvisory({ id: 'DEBIAN-CVE-2026-1', severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }] });
+    expect(a.severity).toBe('CRITICAL');
+    expect(toAdvisory({ id: 'x', database_specific: { severity: 'low' } }).severity).toBe('LOW');
+    expect(toAdvisory({ id: 'y' }).severity).toBe('unrated');
+  });
+  it('keeps every distinct fixed version of a package', () => {
+    const a = toAdvisory({ id: 'z', affected: [{ package: { name: 'p', ecosystem: 'Debian:12' }, ranges: [{ events: [{ fixed: '1.2' }] }, { events: [{ fixed: '2.4' }] }] }] });
+    expect(a.fixed.get('Debian:12|p')).toEqual(['1.2', '2.4']);
+  });
+  it('fetches advisories that name a KEV entry first', () => {
+    expect(orderForFetch(['DSA-1', 'DEBIAN-CVE-2026-0001', 'A'], new Set(['CVE-2026-0001']))[0]).toBe('DEBIAN-CVE-2026-0001');
+  });
+});
+
 describe('parseSnapshot', () => {
   it('rejects a snapshot that is not JSON or has the wrong shape', () => {
     expect(() => parseSnapshot('nope')).toThrow('not JSON');
@@ -65,6 +88,8 @@ describe('runCveCheck', () => {
     expect(text).toContain('apt-get install --only-upgrade libssl3');
     expect(text).toContain('Examined 1 of 2 hosts');
     expect(text).toContain('pve02 was not scanned: ssh timeout');
+    expect(text).toContain('**KEV CRITICAL**');
+    expect(text).toContain('Filing: off');
     expect(text).toContain('INCOMPLETE');
   });
   it('says what it examined when it finds nothing, and is not marked incomplete', async () => {
@@ -81,8 +106,23 @@ describe('runCveCheck', () => {
     await expect(runCveCheck(snap(), NOW, feeds({ osvFails: true }))).rejects.toThrow('OSV querybatch: HTTP 500');
   });
   it('throws when no host was read', async () => {
-    await expect(runCveCheck(snap({ hosts: [snap().hosts[1]!] }), NOW, feeds())).rejects.toThrow('read none of the hosts');
+    await expect(runCveCheck(snap({ hosts: [snap().hosts[1]!] }), NOW, feeds())).rejects.toThrow('nothing was examined');
+    const ubuntu = snap({ hosts: [{ ...snap().hosts[0]!, os: { id: 'ubuntu', version: '24.04' } }] });
+    await expect(runCveCheck(ubuntu, NOW, feeds())).rejects.toThrow('nothing was examined');
     await expect(runCveCheck(snap({ hosts: [] }), NOW, feeds())).rejects.toThrow('lists no hosts');
+  });
+  it('lists a host with an unsupported OS as unscanned instead of counting it clean', async () => {
+    const mixed = snap({ hosts: [snap().hosts[0]!, { ...snap().hosts[0]!, name: 'odd', os: { id: 'alpine', version: '3.20' } }] });
+    const text = buildCveReport(await runCveCheck(mixed, NOW, feeds()), '2026-10-27');
+    expect(text).toContain('Examined 1 of 2 hosts');
+    expect(text).toContain('odd was not scanned: OS "alpine"');
+  });
+  it('does not count an ok host with no os or no packages as examined', async () => {
+    const odd = snap({ hosts: [snap().hosts[0]!, { name: 'noos', ok: true, packages: [{ name: 'a', version: '1' }], images: [], apps: [] }, { name: 'empty', ok: true, os: { id: 'debian', version: '12' }, packages: [], images: [], apps: [] }] });
+    const text = buildCveReport(await runCveCheck(odd, NOW, feeds()), '2026-10-27');
+    expect(text).toContain('Examined 1 of 3 hosts');
+    expect(text).toContain('noos was not scanned');
+    expect(text).toContain('empty was not scanned: it listed no installed packages');
   });
   it('flags a stale inventory', async () => {
     const text = buildCveReport(await runCveCheck(snap({ generatedAt: '2026-10-20T00:00:00Z' }), NOW, feeds()), '2026-10-27');
@@ -94,6 +134,13 @@ describe('schedule and settings', () => {
   it('runs the cve report on school days, when the other reports stay quiet', () => {
     const all = new Set(['morning', 'cve'] as const);
     expect(dueReports(new Date('2026-10-21T12:00:00Z'), {}, all)).toEqual(['cve']);
+  });
+  it('rejects a CVE_FILE_ITEMS value it does not know', () => {
+    const base = { REPORTS_MODE: 'on', REPORTS_ENABLED: 'cve', REPORT_REPOS: 'a', CVE_SNAPSHOT_PATH: '/x', DESK_APP_ID: '1', DESK_INSTALLATION_ID: '2', DESK_APP_KEY_PATH: '/k', REPORT_STATE_PATH: '/s' };
+    const key = () => '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----';
+    expect(loadReportSettings({ ...base, CVE_FILE_ITEMS: 'true' }, key).state).toBe('misconfigured');
+    const ok = loadReportSettings({ ...base, CVE_FILE_ITEMS: 'ON' }, key);
+    expect(ok.state === 'ready' && ok.settings.cveFileItems).toBe(true);
   });
   it('refuses to start the cve report with no snapshot path', () => {
     const r = loadReportSettings({ REPORTS_MODE: 'on', REPORTS_ENABLED: 'cve', REPORT_REPOS: 'a' });
@@ -123,6 +170,51 @@ describe('ReportRunner cve', () => {
     expect(created.length).toBe(1);
     expect(created[0]!.externalId).toContain('openssl');
     expect(sent.join('\n')).toContain('PET-801');
+  });
+  it('skips findings already filed and still files a later one, up to the cap, and reports the counts', async () => {
+    const many = snap({ hosts: [{ ...snap().hosts[0]!, packages: Array.from({ length: 8 }, (_, i) => ({ name: `p${i}`, version: '1', source: 'openssl' })) }] });
+    // Eight versions of one source package give eight distinct findings.
+    many.hosts[0]!.packages = many.hosts[0]!.packages.map((p, i) => ({ ...p, version: `1.${i}` }));
+    const p = join(mkdtempSync(join(tmpdir(), 'cve-')), 's.json');
+    writeFileSync(p, JSON.stringify(many));
+    let n = 0;
+    const plane = { createItem: async () => (++n <= 2 ? { status: 'exists' as const } : { status: 'created' as const, seq: 900 + n }) } as never;
+    const sent: string[] = [];
+    const r = new ReportRunner({ settings: base(p, true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
+    await r.run('cve', { markRun: false });
+    const text = sent.join('\n');
+    expect(text).toContain('Filing: on');
+    expect(text).toContain('already filed 2');
+    expect(text).toMatch(/filed PET-\d+/);
+    expect(text).toContain('not tried, daily cap of 5 reached');
+  });
+  it('stops filing at the first Plane error and says how many candidates were not tried', async () => {
+    const sent: string[] = [];
+    const plane = { createItem: async () => { throw new Error('Plane has no label "lan"'); } } as never;
+    const r = new ReportRunner({ settings: base(file(), true), github: gh, plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
+    await r.run('cve', { markRun: false });
+    expect(sent.join('\n')).toContain('filing stopped at openssl: Error: Plane has no label "lan"');
+    expect(sent.join('\n')).toContain('INCOMPLETE');
+  });
+  it('retries a failed run in 30 minutes instead of spending the day', async () => {
+    const sent: string[] = [];
+    let t = new Date('2026-10-27T11:30:00Z');
+    const st = join(mkdtempSync(join(tmpdir(), 'cve-')), 'state.json');
+    const r = new ReportRunner({ settings: { ...base(file(), false), statePath: st }, github: gh, plane: null, sender: { send: async (x) => void sent.push(x) }, log, now: () => t, feedFetch: feeds({ osvFails: true }) });
+    await r.tick();
+    expect(sent.length).toBe(1);
+    t = new Date(t.getTime() + 60_000);
+    await r.tick();
+    expect(sent.length).toBe(1);
+    t = new Date(t.getTime() + 31 * 60_000);
+    await r.tick();
+    expect(sent.length).toBe(2);
+    t = new Date(t.getTime() + 31 * 60_000);
+    await r.tick();
+    expect(sent.length).toBe(3);
+    t = new Date(t.getTime() + 31 * 60_000);
+    await r.tick();
+    expect(sent.length).toBe(3);
   });
   it('files nothing when filing is off', async () => {
     let called = false;

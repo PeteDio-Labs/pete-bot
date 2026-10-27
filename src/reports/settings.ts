@@ -121,6 +121,9 @@ export function loadReportSettings(
 
   if (names.includes('cve') && !(env.CVE_SNAPSHOT_PATH ?? '').trim()) return bad('CVE_SNAPSHOT_PATH is empty, so the cve report has nothing to read');
 
+  const fileItems = (env.CVE_FILE_ITEMS ?? '').trim().toLowerCase();
+  if (!['', 'on', 'off'].includes(fileItems)) return bad(`CVE_FILE_ITEMS must be on or off, not "${env.CVE_FILE_ITEMS}"`);
+
   const apiKey = (env.PLANE_API_KEY ?? '').trim();
   let plane: PlaneSettings | null = null;
   if (apiKey) {
@@ -145,7 +148,7 @@ export function loadReportSettings(
       statePath,
       vaultPath: (env.REPORT_VAULT_PATH ?? '').trim(),
       cveSnapshotPath: (env.CVE_SNAPSHOT_PATH ?? '').trim(),
-      cveFileItems: (env.CVE_FILE_ITEMS ?? '').trim() === 'on',
+      cveFileItems: fileItems === 'on',
     },
   };
 }
