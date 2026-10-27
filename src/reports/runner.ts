@@ -14,11 +14,24 @@ import { collectGithub, type GithubReads } from './collect.js';
 import { buildAudit } from './audit.js';
 import { buildMorning, COMMENT_ITEM_CAP, type CommentMap } from './morning.js';
 import { buildSweep } from './sweep.js';
+import { buildCveReport, FILE_CAP, isActionable, NO_FILING, readSnapshot, runCveCheck, upgradeHint, type CveRun, type Filing, type Finding } from './cve.js';
 import { PlaneClient, type CycleRead, type PlaneRead } from './plane.js';
 import { dueReports, localTime } from './schedule.js';
 import { REPORT_NAMES, type ReportName, type ReportSettings } from './settings.js';
 import { isOpenItem, type Snapshot } from './snapshot.js';
 import { readVault } from './vault.js';
+
+function cveItemHtml(f: Finding): string {
+  const li = (x: string): string => `<li>${x.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)}</li>`;
+  return [
+    `<p>Filed by the daily CVE check (PET-770). ${f.kev ? 'CISA lists at least one of these as exploited in the wild.' : `Highest severity: ${f.severity}.`}</p>`,
+    `<ul>${[`Package: ${f.package} ${f.installed} (${f.ecosystem})`, `Hosts: ${f.hosts.join(', ')}`, `Fixed in: ${f.fixed}`, `Advisories: ${f.advisories.slice(0, 10).join(', ')}`, `Suggested: ${upgradeHint(f).replace(/`/g, '')}`].map(li).join('')}</ul>`,
+    '<p>Apply the upgrade through the node-upgrade role or the iac pin, then the next daily check confirms it.</p>',
+  ].join('');
+}
+
+const CVE_RETRY_MINUTES = 30;
+const CVE_ATTEMPTS = 3;
 
 export interface Sender {
   send(text: string): Promise<void>;
@@ -43,7 +56,7 @@ export interface ReportsStatus {
   last: Partial<Record<ReportName, LastRun>>;
 }
 
-type PlaneReader = Pick<PlaneClient, 'read' | 'lastComment' | 'cycles'>;
+type PlaneReader = Pick<PlaneClient, 'read' | 'lastComment' | 'cycles' | 'createItem'>;
 
 export interface RunnerDeps {
   settings: ReportSettings;
@@ -52,6 +65,8 @@ export interface RunnerDeps {
   sender: Sender;
   log: Logger;
   now?: () => Date;
+  /** Test seam for the OSV and CISA feeds. */
+  feedFetch?: typeof fetch;
 }
 
 /** Splits at line breaks so no DM passes Discord's 2000-character limit. */
@@ -73,6 +88,8 @@ export class ReportRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
   private dates: Partial<Record<ReportName, string>> = {};
+  /** Failed attempts today and the earliest next try, for the reports that retry (cve). */
+  private retries: { date: string; attempts: number; notBefore: number } = { date: '', attempts: 0, notBefore: 0 };
   private lastRuns: Partial<Record<ReportName, LastRun>> = {};
   private readonly now: () => Date;
 
@@ -119,7 +136,9 @@ export class ReportRunner {
     if (this.busy) return;
     this.busy = true;
     try {
-      const due = dueReports(this.now(), this.dates, this.d.settings.enabled);
+      const due = dueReports(this.now(), this.dates, this.d.settings.enabled).filter(
+        (n) => n !== 'cve' || this.now().getTime() >= this.retries.notBefore || this.retries.date !== localTime(this.now()).date,
+      );
       for (const name of due) await this.run(name, { markRun: true });
     } finally {
       this.busy = false;
@@ -152,6 +171,17 @@ export class ReportRunner {
       return false;
     }
     this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok, incomplete, detail };
+    // A transient feed failure must not spend the day (PET-770). The cve report retries every
+    // CVE_RETRY_MINUTES, up to CVE_ATTEMPTS tries, and each failed try still sends its failure DM.
+    if (name === 'cve' && !ok && opts.markRun) {
+      const date = localTime(at).date;
+      const attempts = (this.retries.date === date ? this.retries.attempts : 0) + 1;
+      this.retries = { date, attempts, notBefore: at.getTime() + CVE_RETRY_MINUTES * 60_000 };
+      if (attempts < CVE_ATTEMPTS) {
+        this.d.log.warn(`[Reports] cve failed (attempt ${attempts} of ${CVE_ATTEMPTS}), retrying in ${CVE_RETRY_MINUTES} minutes`);
+        return true;
+      }
+    }
     if (opts.markRun) {
       this.dates[name] = localTime(at).date;
       this.save();
@@ -160,8 +190,48 @@ export class ReportRunner {
     return true;
   }
 
+  /**
+   * One PET item per exploited or high-severity finding with a fix. Every candidate is tried
+   * until FILE_CAP items are created, so findings already filed on an earlier day (Plane's 409)
+   * never crowd out a new one.
+   */
+  private async fileFindings(run: CveRun): Promise<Filing> {
+    const s = this.d.settings;
+    if (!s.cveFileItems) return NO_FILING;
+    const out: Filing = { enabled: true, created: [], existing: 0, overCap: 0, gaps: [] };
+    if (!this.d.plane) return { ...out, gaps: ['PET items were not filed because PLANE_API_KEY is empty on this host'] };
+    const want = run.findings.filter((f) => isActionable(f) && f.fixed !== null);
+    for (const [i, f] of want.entries()) {
+      if (out.created.length >= FILE_CAP) {
+        out.overCap = want.length - i;
+        break;
+      }
+      try {
+        const r = await this.d.plane.createItem({
+          name: `Update ${f.package} on ${f.hosts.slice(0, 3).join(', ')} (${f.kev ? 'exploited, ' : ''}${f.cves[0] ?? f.advisories[0]})`,
+          descriptionHtml: cveItemHtml(f),
+          priority: f.kev || f.severity === 'CRITICAL' ? 'high' : 'medium',
+          labels: ['security', 'lan'],
+          externalSource: 'pete-bot-cve',
+          externalId: f.key,
+        });
+        if (r.status === 'created') out.created.push(`PET-${r.seq ?? '?'}`);
+        else out.existing++;
+      } catch (err) {
+        // A Plane outage or a missing label fails every item the same way. Stop after the first.
+        out.gaps.push(`filing stopped at ${f.package}: ${String(err).slice(0, 120)}; ${want.length - i} candidates not tried`);
+        break;
+      }
+    }
+    return out;
+  }
+
   async build(name: ReportName, at: Date): Promise<string> {
     const s = this.d.settings;
+    if (name === 'cve') {
+      const run = await runCveCheck(readSnapshot(s.cveSnapshotPath), at, this.d.feedFetch ?? fetch);
+      return buildCveReport(run, localTime(at).date, await this.fileFindings(run));
+    }
     const plane: PlaneRead = this.d.plane ? await this.d.plane.read() : { ok: false, error: 'PLANE_API_KEY is empty on this host' };
     const repos = await collectGithub(this.d.github, s.org, s.repos, at);
     if (!repos.some((r) => r.ok) && !plane.ok) throw new Error('neither GitHub nor Plane could be read');

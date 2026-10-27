@@ -34,6 +34,9 @@ export function slotFor(name: ReportName): Slot {
     // Friday and Sunday evenings, ahead of the AI-heavy days.
     case 'sweep':
       return { days: [5, 0], hour: 18, minute: 47 };
+    // Every day. The check uses no Claude or Codex quota, so school days do not skip it (PET-770).
+    case 'cve':
+      return { days: [0, 1, 2, 3, 4, 5, 6], hour: 7, minute: 0 };
   }
 }
 
@@ -72,9 +75,10 @@ export function dueReports(
   enabled: ReadonlySet<ReportName>,
 ): ReportName[] {
   const t = localTime(at);
-  if (SCHOOL_DAYS.includes(t.weekday)) return [];
+  const school = SCHOOL_DAYS.includes(t.weekday);
   const out: ReportName[] = [];
   for (const name of enabled) {
+    if (school && name !== 'cve') continue;
     const slot = slotFor(name);
     if (!slot.days.includes(t.weekday)) continue;
     const start = slot.hour * 60 + slot.minute;

@@ -16,6 +16,7 @@ export const reportCommand = new SlashCommandBuilder()
         { name: 'morning queue', value: 'morning' },
         { name: 'hanging audit', value: 'audit' },
         { name: 'stale PR sweep', value: 'sweep' },
+        { name: 'CVE check', value: 'cve' },
       ),
   )
   .setIntegrationTypes([ApplicationIntegrationType.UserInstall])

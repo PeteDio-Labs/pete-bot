@@ -1,6 +1,6 @@
 /**
- * A read-only Plane client for the reports (PET-701). It issues GET requests and nothing
- * else.
+ * The Plane client for the reports (PET-701). It issues GET requests, plus the one POST in
+ * `createItem` that the CVE check uses to file an item (PET-770).
  *
  * ⚠ A PARTIAL LIST IS AN ERROR. The list walks Plane's cursor to the end and compares the
  * count with `total_count` when Plane reports one. An audit that read 100 of 403 items would
@@ -91,6 +91,7 @@ const ref = (v: string | { id: string } | null | undefined): string | null => (t
 
 export class PlaneClient {
   private readonly fetchImpl: Fetch;
+  private labels: RawLabel[] | null = null;
 
   constructor(
     private readonly s: PlaneSettings,
@@ -135,6 +136,38 @@ export class PlaneClient {
       cursor = body.next_cursor;
     }
     throw new Error(`${what}: more than ${MAX_PAGES} pages, refusing to judge a partial list`);
+  }
+
+  /**
+   * Files one item, deduplicated by `external_id` (PET-770). Plane answers 409 when the pair
+   * exists, which this reports as `exists` rather than an error. Labels are resolved by name,
+   * once per client. A name Plane does not know throws before anything is created, because the
+   * dedup key would otherwise lock a mislabelled item in. This is the one write the reports make.
+   */
+  async createItem(item: { name: string; descriptionHtml: string; priority: string; labels: string[]; externalSource: string; externalId: string }): Promise<{ status: 'created' | 'exists'; seq?: number }> {
+    this.labels ??= await this.all<RawLabel>('labels', 'labels/');
+    const labelIds = item.labels.map((n) => {
+      const id = this.labels!.find((l) => l.name === n)?.id;
+      if (!id) throw new Error(`Plane has no label "${n}"`);
+      return id;
+    });
+    const res = await this.fetchImpl(this.projectUrl('work-items/'), {
+      method: 'POST',
+      headers: { 'X-API-Key': this.s.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        name: item.name,
+        description_html: item.descriptionHtml,
+        priority: item.priority,
+        labels: labelIds,
+        external_source: item.externalSource,
+        external_id: item.externalId,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (res.status === 409) return { status: 'exists' };
+    if (!res.ok) throw new Error(`create item: Plane answered HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`.trim());
+    const body = (await res.json()) as { sequence_id?: number };
+    return { status: 'created', seq: body.sequence_id };
   }
 
   async read(): Promise<PlaneRead> {

@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { REPO_NAME } from '../desk/config.js';
 
-export const REPORT_NAMES = ['morning', 'audit', 'sweep'] as const;
+export const REPORT_NAMES = ['morning', 'audit', 'sweep', 'cve'] as const;
 export type ReportName = (typeof REPORT_NAMES)[number];
 
 export interface PlaneSettings {
@@ -38,6 +38,10 @@ export interface ReportSettings {
   statePath: string;
   /** A read-only checkout of the vault, for the audit's `verified:` dates. Empty skips them. */
   vaultPath: string;
+  /** The inventory snapshot the CVE check reads (PET-770). Empty means `cve` cannot run. */
+  cveSnapshotPath: string;
+  /** File a PET item for each exploited or high-severity finding with a fix (Pedro, 2026-10-27). */
+  cveFileItems: boolean;
 }
 
 export type ReportsState =
@@ -51,6 +55,8 @@ export interface ReportsEnv {
   REPORT_STALE_DAYS?: string;
   REPORT_STATE_PATH?: string;
   REPORT_VAULT_PATH?: string;
+  CVE_SNAPSHOT_PATH?: string;
+  CVE_FILE_ITEMS?: string;
   REPORT_REPOS?: string;
   DESK_ORG?: string;
   DESK_APP_ID?: string;
@@ -86,7 +92,9 @@ export function loadReportSettings(
   if (badRepo) return bad(`REPORT_REPOS holds "${badRepo}", which is not a plain repository name`);
 
   const enabledNames = list(env.REPORTS_ENABLED);
-  const names = enabledNames.length ? enabledNames : [...REPORT_NAMES];
+  // `cve` joins the default set only when its snapshot path is set, so a host that never
+  // configured it keeps the reports it had (PET-770).
+  const names = enabledNames.length ? enabledNames : REPORT_NAMES.filter((n) => n !== 'cve' || (env.CVE_SNAPSHOT_PATH ?? '').trim() !== '');
   const unknown = names.find((n) => !(REPORT_NAMES as readonly string[]).includes(n));
   if (unknown) return bad(`REPORTS_ENABLED holds "${unknown}", which is not one of ${REPORT_NAMES.join(', ')}`);
 
@@ -111,6 +119,11 @@ export function loadReportSettings(
   const staleDays = staleRaw === '' ? 3 : Number(staleRaw);
   if (!Number.isInteger(staleDays) || staleDays < 1) return bad(`REPORT_STALE_DAYS must be an integer of at least 1, not "${staleRaw}"`);
 
+  if (names.includes('cve') && !(env.CVE_SNAPSHOT_PATH ?? '').trim()) return bad('CVE_SNAPSHOT_PATH is empty, so the cve report has nothing to read');
+
+  const fileItems = (env.CVE_FILE_ITEMS ?? '').trim().toLowerCase();
+  if (!['', 'on', 'off'].includes(fileItems)) return bad(`CVE_FILE_ITEMS must be on or off, not "${env.CVE_FILE_ITEMS}"`);
+
   const apiKey = (env.PLANE_API_KEY ?? '').trim();
   let plane: PlaneSettings | null = null;
   if (apiKey) {
@@ -134,6 +147,8 @@ export function loadReportSettings(
       staleDays,
       statePath,
       vaultPath: (env.REPORT_VAULT_PATH ?? '').trim(),
+      cveSnapshotPath: (env.CVE_SNAPSHOT_PATH ?? '').trim(),
+      cveFileItems: fileItems === 'on',
     },
   };
 }
