@@ -14,7 +14,7 @@ import { gitHistoryTool, parseLog } from './history.js';
 import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory, parseInventoryChecked } from './hosts.js';
 import { buildLabTools, toolDefinitions } from './index.js';
 import { kumaStatusTool } from './kuma.js';
-import { PlaneClient, planeItemTool } from './plane.js';
+import { PlaneClient, planeItemTool, planeProjectsTool } from './plane.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool } from './proxmox.js';
 import { makeTestRepo, type TestRepo } from './testGit.js';
 import { callTool, capText, inputJsonSchema, LabToolError, type LabTool, type ToolResult } from './types.js';
@@ -451,54 +451,95 @@ describe('git_history', () => {
   });
 });
 
-describe('plane_item', () => {
+describe('plane_item and plane_projects', () => {
   const PROJECT = '2b962587-cfc8-404d-bbfc-d57c3a60e07f';
-  const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', projectId: PROJECT, token: 'plane_api_secret' };
+  const FOL = '11111111-1111-4111-8111-111111111111';
+  const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', identifiers: ['PET', 'FOL'], token: 'plane_api_secret' };
+  const projects = json(
+    JSON.stringify({ results: [{ id: PROJECT, identifier: 'PET', name: 'PeteDio' }, { id: FOL, identifier: 'FOL', name: 'Folio' }] }),
+  );
   const states = json(JSON.stringify({ results: [{ id: 's1', name: 'In Review' }, { id: 's2', name: 'Done' }] }));
   const item = (name: string, state: string, project = PROJECT) =>
     json(JSON.stringify({ id: 'i1', name, state, project, updated_at: '2026-10-19T07:21:32Z' }));
-  const tool = (routes: Record<string, Route>, seen: Array<{ url: string; init?: RequestInit }> = []) =>
-    planeItemTool(new PlaneClient({ ...cfg, fetch: stubFetch(routes, seen) }));
+  const P = '/projects/?per_page=100';
+  const S = `/projects/${PROJECT}/states/?per_page=100`;
+  const client = (routes: Record<string, Route>, seen: Array<{ url: string; init?: RequestInit }> = []) =>
+    new PlaneClient({ ...cfg, fetch: stubFetch(routes, seen) });
+  const tool = (routes: Record<string, Route>, seen: Array<{ url: string; init?: RequestInit }> = []) => planeItemTool(client(routes, seen));
 
-  it('names each item with its title and state, and sends the token only to Plane', async () => {
+  it('resolves the project from the key, names each item, and sends the token only to Plane', async () => {
     const seen: Array<{ url: string; init?: RequestInit }> = [];
     const out = data(
       await callTool(
         tool(
-          {
-            [`/projects/${PROJECT}/states/?per_page=100`]: states,
-            '/work-items/PET-672/': item('Plane read tool', 's1'),
-            '/work-items/PET-1/': () => new Response('{}', { status: 404 }),
-          },
+          { [P]: projects, [S]: states, '/work-items/PET-672/': item('Plane read tool', 's1'), '/work-items/PET-1/': () => new Response('{}', { status: 404 }) },
           seen,
         ),
         { keys: ['PET-672', 'PET-1', 'PET-672'] },
       ),
     );
-    expect(out.source).toBe('1 of 2 PET items found in Plane');
+    expect(out.source).toBe('1 of 2 items found in Plane');
     expect(out.data.items).toEqual([
       { key: 'PET-672', found: true, title: 'Plane read tool', state: 'In Review', updated: '2026-10-19T07:21:32Z' },
       { key: 'PET-1', found: false },
     ]);
-    // One states call, then one call per distinct key.
-    expect(seen).toHaveLength(3);
+    // One projects call, one states call, then one call per distinct key.
+    expect(seen).toHaveLength(4);
     expect(seen.every((s) => s.url.startsWith('http://plane.test:8080/api/v1/workspaces/petedio/'))).toBe(true);
     expect(seen.every((s) => (s.init?.method ?? 'GET') === 'GET')).toBe(true);
     expect(seen.every((s) => (s.init?.headers as Record<string, string>)['X-API-Key'] === 'plane_api_secret')).toBe(true);
   });
 
+  it('reads items from two projects in one call, each against its own states', async () => {
+    const out = data(
+      await callTool(
+        tool({
+          [P]: projects,
+          [S]: states,
+          [`/projects/${FOL}/states/?per_page=100`]: json(JSON.stringify({ results: [{ id: 'f1', name: 'Backlog' }] })),
+          '/work-items/PET-5/': item('a', 's2'),
+          '/work-items/FOL-2/': item('b', 'f1', FOL),
+        }),
+        { keys: ['PET-5', 'FOL-2'] },
+      ),
+    );
+    expect(out.data.items).toMatchObject([{ key: 'PET-5', state: 'Done' }, { key: 'FOL-2', state: 'Backlog' }]);
+  });
+
+  it('names the identifiers Plane lists when a key names no project', async () => {
+    const t = tool({ [P]: projects });
+    expect(error(await callTool(t, { keys: ['ZZZ-1'] }))).toContain('ZZZ is not readable here; allowed: FOL, PET');
+  });
+
+  it('refuses a project outside the allowlist without asking Plane', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    const t = tool({ [P]: projects }, seen);
+    expect(error(await callTool(t, { keys: ['GOOF-1'] }))).toContain('GOOF is not readable here; allowed: FOL, PET');
+    expect(seen.filter((x) => x.url.includes('work-items'))).toHaveLength(0);
+  });
+
+  it('lists projects with plane_projects, and fails on none', async () => {
+    const out = data(await callTool(planeProjectsTool(client({ [P]: projects })), {}));
+    expect(out.source).toBe('2 projects listed by Plane');
+    expect(out.data.projects).toEqual([
+      { identifier: 'FOL', name: 'Folio', id: FOL },
+      { identifier: 'PET', name: 'PeteDio', id: PROJECT },
+    ]);
+    expect(error(await callTool(planeProjectsTool(client({ [P]: json('{"results":[]}') })), {}))).toContain('none of the allowed projects');
+  });
+
   it('fails on a 200 with a null body, a state Plane does not list, and a redirect', async () => {
-    const nul = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': json('null') });
+    const nul = tool({ [P]: projects, [S]: states, '/work-items/PET-672/': json('null') });
     expect(error(await callTool(nul, { keys: ['PET-672'] }))).toContain('not a work item');
-    const lost = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 'nope') });
+    const lost = tool({ [P]: projects, [S]: states, '/work-items/PET-672/': item('x', 'nope') });
     expect(error(await callTool(lost, { keys: ['PET-672'] }))).toContain('does not list');
     const seen: Array<{ url: string; init?: RequestInit }> = [];
-    await callTool(tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 's1') }, seen), { keys: ['PET-672'] });
+    await callTool(tool({ [P]: projects, [S]: states, '/work-items/PET-672/': item('x', 's1') }, seen), { keys: ['PET-672'] });
     expect(seen.every((s) => s.init?.redirect === 'error')).toBe(true);
   });
 
   it('fails when every key answers 404, since that may be a missing route', async () => {
-    const t = tool({ [`/projects/${PROJECT}/states/?per_page=100`]: states });
+    const t = tool({ [P]: projects, [S]: states });
     expect(error(await callTool(t, { keys: ['PET-1', 'PET-2'] }))).toContain('404 for all 2 key(s)');
   });
 
@@ -509,31 +550,33 @@ describe('plane_item', () => {
       const rows = calls === 1 ? [{ id: 's1', name: 'In Review' }] : [{ id: 's1', name: 'In Review' }, { id: 's3', name: 'Blocked' }];
       return new Response(JSON.stringify({ results: rows }), { status: 200 });
     };
-    const t = tool({ '/states/?per_page=100': growing, '/work-items/PET-672/': item('x', 's3') });
+    const t = tool({ [P]: projects, [S]: growing, '/work-items/PET-672/': item('x', 's3') });
     const out = data(await callTool(t, { keys: ['PET-672'] }));
     expect((out.data.items as Array<{ state: string }>)[0]!.state).toBe('Blocked');
     expect(calls).toBe(2);
   });
 
   it('fails the call when the token is refused, never reporting items as missing', async () => {
-    const denied = tool({ '/states/?per_page=100': () => new Response('no', { status: 401 }) });
+    const denied = tool({ [P]: () => new Response('no', { status: 401 }) });
     expect(error(await callTool(denied, { keys: ['PET-672'] }))).toContain('refused the lab-agent token');
-    const mid = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': () => new Response('x', { status: 502 }) });
+    const mid = tool({ [P]: projects, [S]: states, '/work-items/PET-672/': () => new Response('x', { status: 502 }) });
     expect(error(await callTool(mid, { keys: ['PET-672'] }))).toContain('HTTP 502');
   });
 
   it('fails on no states, a body that is not a work item, and an item from another project', async () => {
-    const none = tool({ '/states/?per_page=100': json('{"results":[]}') });
+    const none = tool({ [P]: projects, [S]: json('{"results":[]}') });
     expect(error(await callTool(none, { keys: ['PET-672'] }))).toContain('0 states');
-    const odd = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': json('{"error":"Page not found."}') });
+    const odd = tool({ [P]: projects, [S]: states, '/work-items/PET-672/': json('{"error":"Page not found."}') });
     expect(error(await callTool(odd, { keys: ['PET-672'] }))).toContain('not a work item');
-    const other = tool({ '/states/?per_page=100': states, '/work-items/PET-672/': item('x', 's1', 'other-project') });
+    const other = tool({ [P]: projects, [S]: states, '/work-items/PET-672/': item('x', 's1', 'other-project') });
     expect(error(await callTool(other, { keys: ['PET-672'] }))).toContain('other than PET');
   });
 
-  it('refuses keys that are not PET keys, and more than ten', async () => {
+  it('refuses malformed keys, and more than ten', async () => {
     const t = tool({});
-    expect(error(await callTool(t, { keys: ['../x'] }))).toContain('must look like PET-123');
+    for (const bad of ['../x', 'pet-1', 'PET-1/../x', 'PET-123456']) {
+      expect(error(await callTool(t, { keys: [bad] }))).toContain('must look like PET-123');
+    }
     expect(error(await callTool(t, { keys: Array.from({ length: 11 }, (_, i) => `PET-${i + 1}`) }))).toContain('invalid input');
     expect(error(await callTool(t, { keys: [] }))).toContain('invalid input');
   });
@@ -555,7 +598,7 @@ describe('buildLabTools', () => {
     expect(defs.map((d) => d.name)).toEqual([
       'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
     ]);
-    // plane_item joins only when a Plane token is configured.
+    // plane_item and plane_projects join only when a Plane token is configured.
     const withPlane = buildLabTools({
       vault: new GitClone('petedio-vault', '/nonexistent'),
       history: [clone],
@@ -563,15 +606,15 @@ describe('buildLabTools', () => {
       kuma: { baseUrl: 'http://x:3001', slug: 'fault-study' },
       secrets: { addr: 'https://x:8200', token: 't', caPem: CA },
       deskHealthUrl: 'http://127.0.0.1:3015/health',
-      plane: { baseUrl: 'http://x:8080', workspace: 'petedio', projectId: 'p', token: 't' },
+      plane: { baseUrl: 'http://x:8080', workspace: 'petedio', identifiers: ['PET'], token: 't' },
       units: ['pete-bot.service', 'lab-agent.service'],
     });
-    expect([...withPlane.keys()].at(-1)).toBe('plane_item');
+    expect([...withPlane.keys()].slice(-2)).toEqual(['plane_item', 'plane_projects']);
     // The schema of every tool, plane_item's array included, must render.
     const planeDef = toolDefinitions(withPlane).find((d) => d.name === 'plane_item')!;
     expect(planeDef.input_schema).toEqual({
       type: 'object',
-      properties: { keys: { type: 'array', items: { type: 'string', pattern: '^PET-\\d{1,5}$' }, minItems: 1, maxItems: 10 } },
+      properties: { keys: { type: 'array', items: { type: 'string', pattern: '^[A-Z][A-Z0-9]{1,9}-\\d{1,5}$' }, minItems: 1, maxItems: 10 } },
       required: ['keys'],
       additionalProperties: false,
     });
