@@ -12,6 +12,7 @@ import { kumaStatusTool, type KumaConfig } from './kuma.js';
 import { deskStatusTool, systemdStatusTool, type SystemctlRunner } from './local.js';
 import { VaultMetadataClient, vaultPresenceTool, type VaultConfig } from './vault.js';
 import { PlaneClient, planeItemTool, planeProjectsTool, type PlaneConfig } from './plane.js';
+import { labOverviewTool } from './overview.js';
 import { searchLabTool, type SearchConfig } from './search.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool, type ProxmoxConfig } from './proxmox.js';
 import { inputJsonSchema, type LabTool } from './types.js';
@@ -58,7 +59,9 @@ export function buildLabTools(cfg: LabToolsConfig): Map<string, LabTool> {
     ...(cfg.plane ? (() => { const c = new PlaneClient(cfg.plane); return [planeItemTool(c), planeProjectsTool(c)]; })() : []),
     ...(cfg.search ? [searchLabTool(cfg.search)] : []),
   ];
-  return new Map(tools.map((t) => [t.name, t]));
+  const map = new Map(tools.map((t) => [t.name, t]));
+  // The overview folds four of the tools above, so it is built from the finished map and listed first.
+  return new Map([['lab_overview', labOverviewTool(map)], ...map]);
 }
 
 /** The tool list in the shape both the Anthropic `tools` array and MCP `tools/list` take. */

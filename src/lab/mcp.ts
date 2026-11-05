@@ -22,7 +22,7 @@ export const MCP_PATH = '/mcp/lab';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const SERVER_INFO = { name: 'petedio-lab', version: '1.0.0' };
 const INSTRUCTIONS =
-  "Read-only tools for Pedro's homelab. Live state (pve_guests, pve_guest, kuma_status, systemd_status, desk_status) " +
+  "Read-only tools for Pedro's homelab. For \"what is wrong right now\", call lab_overview first. Live state (pve_guests, pve_guest, kuma_status, systemd_status, desk_status) " +
   'outranks the knowledge vault (find_host, host_note). Every result names what it read in `source`; a failed read is an error, never an empty result.';
 
 export interface McpDeps {
