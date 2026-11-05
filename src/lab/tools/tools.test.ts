@@ -647,7 +647,8 @@ describe('lab_overview', () => {
     stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-05T01:00:00Z', lastPollError: null } } })),
     stub('systemd_status', () => ({ source: 's', data: { units: [{ unit: 'pete-bot.service', active: 'active', sub: 'running', restarts: 0, result: 'success' }] } })),
   ];
-  const tool = (list: LabTool[]) => labOverviewTool(new Map(list.map((t) => [t.name, t])));
+  const NOW = Date.parse('2026-11-05T01:10:00Z');
+  const tool = (list: LabTool[]) => labOverviewTool(new Map(list.map((t) => [t.name, t])), () => NOW);
 
   it('folds four sources into one attention list and says how much it read', async () => {
     const out = data(await callTool(tool(healthy()), {}));
@@ -673,6 +674,18 @@ describe('lab_overview', () => {
     expect(out.source).toContain('3 of 4 sections read');
     expect(out.data.attention).toEqual(['monitors: could not be read (Uptime Kuma: no answer within 8000 ms)', 'guest 249 forgejo is stopped']);
     expect((out.data.sections as { monitors: { ok: boolean } }).monitors.ok).toBe(false);
+  });
+
+  it('flags a desk that stopped polling without an error, and a source with the wrong shape', async () => {
+    const list = healthy();
+    list[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-04T01:00:00Z', lastPollError: null } } }));
+    list[3] = stub('systemd_status', () => ({ source: 's', data: {} }));
+    const out = data(await callTool(tool(list), {}));
+    expect(out.data.attention).toContain('desk has not polled in the last hour (last poll 2026-11-04T01:00:00Z)');
+    expect(out.data.attention).toContain('services: could not be read (the source answered with no "units" list)');
+    const never = healthy();
+    never[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: null } } }));
+    expect(data(await callTool(tool(never), {})).data.attention).toContain('desk has not polled in the last hour (last poll never)');
   });
 
   it('flags a desk poll error and an inactive unit', async () => {

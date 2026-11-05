@@ -15,16 +15,25 @@
 import { z } from 'zod';
 import { LabToolError, type LabTool } from './types.js';
 
+/** A desk poll older than this is stalled. The poll runs every few minutes, so an hour is far past late. */
+export const DESK_STALE_MS = 60 * 60 * 1000;
+
 export const OVERVIEW_SOURCES = ['kuma_status', 'pve_guests', 'desk_status', 'systemd_status'] as const;
 
 type Section = { ok: true; [k: string]: unknown } | { ok: false; error: string };
 
-export function labOverviewTool(tools: Map<string, LabTool>): LabTool {
+export function labOverviewTool(tools: Map<string, LabTool>, now: () => number = Date.now): LabTool {
   const input = z.object({});
   const call = async (name: string): Promise<{ source: string; data: Record<string, unknown> }> => {
     const tool = tools.get(name);
     if (!tool) throw new LabToolError(`${name} is not offered by this server`);
     return (await tool.run(tool.input.parse({}))) as { source: string; data: Record<string, unknown> };
+  };
+  /** A sibling that answers with another shape is a fault in the read, named here, not a TypeError. */
+  const list = <T>(r: { data: Record<string, unknown> }, field: string): T[] => {
+    const v = r.data[field];
+    if (!Array.isArray(v)) throw new LabToolError(`the source answered with no "${field}" list`);
+    return v as T[];
   };
   const guard = async (name: string, fold: (r: { source: string; data: Record<string, unknown> }) => Section): Promise<Section> => {
     try {
@@ -45,7 +54,7 @@ export function labOverviewTool(tools: Map<string, LabTool>): LabTool {
     async run() {
       const [monitors, guests, desk, services] = await Promise.all([
         guard('kuma_status', (r) => {
-          const all = r.data.monitors as Array<{ name: string; status: string; since: string | null; message: string }>;
+          const all = list<{ name: string; status: string; since: string | null; message: string }>(r, 'monitors');
           return {
             ok: true,
             read: all.length,
@@ -53,7 +62,7 @@ export function labOverviewTool(tools: Map<string, LabTool>): LabTool {
           };
         }),
         guard('pve_guests', (r) => {
-          const all = r.data.guests as Array<{ vmid: number; name: string; node: string; status: string }>;
+          const all = list<{ vmid: number; name: string; node: string; status: string }>(r, 'guests');
           const byNode: Record<string, number> = {};
           for (const g of all) byNode[g.node] = (byNode[g.node] ?? 0) + 1;
           return {
@@ -65,14 +74,18 @@ export function labOverviewTool(tools: Map<string, LabTool>): LabTool {
         }),
         guard('desk_status', (r) => {
           const desk = r.data.desk as { mode?: unknown; lastPollAt?: string | null; lastPollError?: string | null };
-          return { ok: true, mode: desk.mode ?? null, lastPollAt: desk.lastPollAt ?? null, lastPollError: desk.lastPollError ?? null };
+          const at = desk.lastPollAt ?? null;
+          const age = at ? now() - Date.parse(at) : null;
+          // No poll yet, an unreadable time, or an old one: the desk may have stalled with no error.
+          const stalled = age === null || Number.isNaN(age) || age > DESK_STALE_MS;
+          return { ok: true, mode: desk.mode ?? null, lastPollAt: at, lastPollError: desk.lastPollError ?? null, stalled };
         }),
         guard('systemd_status', (r) => {
-          const units = r.data.units as Array<{ unit: string; active: string; sub: string; restarts: number | null; result: string }>;
+          const units = list<{ unit: string; active: string; sub: string; restarts: number | null; result: string }>(r, 'units');
           return {
             ok: true,
             read: units.length,
-            notActive: units.filter((u) => u.active !== 'active' || u.sub !== 'running').map((u) => ({ unit: u.unit, active: u.active, sub: u.sub, restarts: u.restarts, result: u.result })),
+            notActive: units.filter((u) => u.active !== 'active' || (u.unit.endsWith('.service') && u.sub !== 'running')).map((u) => ({ unit: u.unit, active: u.active, sub: u.sub, restarts: u.restarts, result: u.result })),
           };
         }),
       ]);
@@ -87,12 +100,13 @@ export function labOverviewTool(tools: Map<string, LabTool>): LabTool {
       for (const [k, s] of failed) attention.push(`${k}: could not be read (${(s as { error: string }).error})`);
       if (monitors.ok) for (const m of monitors.notUp as Array<{ name: string; status: string }>) attention.push(`monitor ${m.name} is ${m.status}`);
       if (guests.ok) for (const g of guests.notRunning as Array<{ vmid: number; name: string; status: string }>) attention.push(`guest ${g.vmid} ${g.name} is ${g.status}`);
+      if (desk.ok && desk.stalled) attention.push(`desk has not polled in the last hour (last poll ${String(desk.lastPollAt ?? 'never')})`);
       if (desk.ok && desk.lastPollError) attention.push(`desk poll error: ${String(desk.lastPollError).slice(0, 200)}`);
       if (services.ok) for (const u of services.notActive as Array<{ unit: string; active: string; sub: string }>) attention.push(`unit ${u.unit} is ${u.active}/${u.sub}`);
 
-      const read = (s: Section, label: string) => (s.ok ? `${s.read ?? 'desk'} ${label}` : `${label} unread`);
+      const read = (s: Section, label: string) => (s.ok ? `${s.read} ${label}` : `${label} unread`);
       return {
-        source: `${4 - failed.length} of 4 sections read: ${read(monitors, 'monitors')}, ${read(guests, 'guests')}, desk, ${read(services, 'units')}; ${attention.length} to look at`,
+        source: `${4 - failed.length} of 4 sections read: ${read(monitors, 'monitors')}, ${read(guests, 'guests')}, ${desk.ok ? 'desk' : 'desk unread'}, ${read(services, 'units')}; ${attention.length} to look at`,
         data: { allSectionsRead: failed.length === 0, attention, sections },
       };
     },
