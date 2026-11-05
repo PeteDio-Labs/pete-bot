@@ -56,6 +56,7 @@ describe('loadLabConfig', () => {
     expect(cfg.plane).toEqual({
       baseUrl: 'http://192.168.50.235:8080',
       workspace: 'petedio',
+      identifiers: ['PET', 'FOL'],
       token: 'p'.repeat(40),
     });
     expect(() => loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'short' }, read)).toThrow('LAB_PLANE_TOKEN');

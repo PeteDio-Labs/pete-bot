@@ -454,7 +454,7 @@ describe('git_history', () => {
 describe('plane_item and plane_projects', () => {
   const PROJECT = '2b962587-cfc8-404d-bbfc-d57c3a60e07f';
   const FOL = '11111111-1111-4111-8111-111111111111';
-  const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', token: 'plane_api_secret' };
+  const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', identifiers: ['PET', 'FOL'], token: 'plane_api_secret' };
   const projects = json(
     JSON.stringify({ results: [{ id: PROJECT, identifier: 'PET', name: 'PeteDio' }, { id: FOL, identifier: 'FOL', name: 'Folio' }] }),
   );
@@ -508,7 +508,14 @@ describe('plane_item and plane_projects', () => {
 
   it('names the identifiers Plane lists when a key names no project', async () => {
     const t = tool({ [P]: projects });
-    expect(error(await callTool(t, { keys: ['ZZZ-1'] }))).toContain('no project with identifier ZZZ; it lists: FOL, PET');
+    expect(error(await callTool(t, { keys: ['ZZZ-1'] }))).toContain('ZZZ is not readable here; allowed: FOL, PET');
+  });
+
+  it('refuses a project outside the allowlist without asking Plane', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    const t = tool({ [P]: projects }, seen);
+    expect(error(await callTool(t, { keys: ['GOOF-1'] }))).toContain('GOOF is not readable here; allowed: FOL, PET');
+    expect(seen.filter((x) => x.url.includes('work-items'))).toHaveLength(0);
   });
 
   it('lists projects with plane_projects, and fails on none', async () => {
@@ -518,7 +525,7 @@ describe('plane_item and plane_projects', () => {
       { identifier: 'FOL', name: 'Folio', id: FOL },
       { identifier: 'PET', name: 'PeteDio', id: PROJECT },
     ]);
-    expect(error(await callTool(planeProjectsTool(client({ [P]: json('{"results":[]}') })), {}))).toContain('0 projects');
+    expect(error(await callTool(planeProjectsTool(client({ [P]: json('{"results":[]}') })), {}))).toContain('none of the allowed projects');
   });
 
   it('fails on a 200 with a null body, a state Plane does not list, and a redirect', async () => {
@@ -599,7 +606,7 @@ describe('buildLabTools', () => {
       kuma: { baseUrl: 'http://x:3001', slug: 'fault-study' },
       secrets: { addr: 'https://x:8200', token: 't', caPem: CA },
       deskHealthUrl: 'http://127.0.0.1:3015/health',
-      plane: { baseUrl: 'http://x:8080', workspace: 'petedio', token: 't' },
+      plane: { baseUrl: 'http://x:8080', workspace: 'petedio', identifiers: ['PET'], token: 't' },
       units: ['pete-bot.service', 'lab-agent.service'],
     });
     expect([...withPlane.keys()].slice(-2)).toEqual(['plane_item', 'plane_projects']);

@@ -40,6 +40,8 @@ export interface PlaneConfig {
   /** Such as http://192.168.50.235:8080 */
   baseUrl: string;
   workspace: string;
+  /** The project identifiers a caller may read. Any other identifier is refused before Plane is asked. */
+  identifiers: string[];
   token: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -91,14 +93,17 @@ export class PlaneClient {
       | Array<{ id?: string; identifier?: string; name?: string }>;
     const rows = Array.isArray(body) ? body : (body?.results ?? []);
     const map = new Map<string, PlaneProject>();
-    for (const r of rows) if (r.id && r.identifier) map.set(r.identifier, { identifier: r.identifier, name: String(r.name ?? ''), id: r.id });
+    for (const r of rows) if (r.id && r.identifier && this.cfg.identifiers.includes(r.identifier)) map.set(r.identifier, { identifier: r.identifier, name: String(r.name ?? ''), id: r.id });
     // With no projects, every key would read as unknown. That is a failed read.
-    if (map.size === 0) throw new LabToolError('Plane listed 0 projects');
+    if (map.size === 0) throw new LabToolError(`Plane listed none of the allowed projects (${this.cfg.identifiers.join(', ')})`);
     this.projectIds = map;
     return map;
   }
 
   async project(identifier: string): Promise<PlaneProject> {
+    if (!this.cfg.identifiers.includes(identifier)) {
+      throw new LabToolError(`Project ${identifier} is not readable here; allowed: ${[...this.cfg.identifiers].sort().join(', ')}`);
+    }
     const found = (await this.projects()).get(identifier) ?? (await this.projects(true)).get(identifier);
     if (found) return found;
     const known = [...(this.projectIds ?? []).keys()].sort().join(', ');
@@ -121,9 +126,8 @@ export class PlaneClient {
 
   /** Fill the project and state caches once, before the parallel item reads. */
   async warm(keys: string[]): Promise<void> {
-    for (const identifier of new Set(keys.map((k) => k.split('-')[0]!))) {
-      await this.stateNames((await this.project(identifier)).id);
-    }
+    await this.projects();
+    await Promise.all([...new Set(keys.map((k) => k.split('-')[0]!))].map(async (identifier) => this.stateNames((await this.project(identifier)).id)));
   }
 
   async item(key: string): Promise<PlaneItem> {
@@ -189,11 +193,11 @@ export function planeProjectsTool(plane: PlaneClient): LabTool {
   return {
     name: 'plane_projects',
     description:
-      'The Plane projects by identifier (PET, FOL, VET, GOOF), with name and project id. ' +
+      'The Plane projects this server may read, by identifier, with name and project id. ' +
       'Use it to learn which identifiers plane_item accepts.',
     input,
     async run() {
-      const projects = [...(await plane.projects(true)).values()].sort((a, b) => a.identifier.localeCompare(b.identifier));
+      const projects = [...(await plane.projects()).values()].sort((a, b) => a.identifier.localeCompare(b.identifier));
       return { source: `${projects.length} projects listed by Plane`, data: { projects } };
     },
   };

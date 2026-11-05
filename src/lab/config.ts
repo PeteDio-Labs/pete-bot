@@ -50,6 +50,8 @@ const EnvSchema = z.object({
   // runs before the seed still starts.
   LAB_PLANE_URL: z.string().url().default('http://192.168.50.235:8080'),
   LAB_PLANE_WORKSPACE: z.string().min(1).default('petedio'),
+  // Project identifiers plane_item may read (PET-859). GOOF stays out: it is personal.
+  LAB_PLANE_PROJECTS: z.string().regex(/^[A-Z][A-Z0-9]{1,9}(,[A-Z][A-Z0-9]{1,9})*$/, 'must be identifiers such as PET,FOL').default('PET,FOL'),
   LAB_PLANE_TOKEN: TOKEN.optional(),
   // search_lab (PET-745). The tool is offered only when the token is set.
   LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
@@ -76,7 +78,7 @@ export interface LabConfig {
   vault: { addr: string; token: string; caPem: string };
   deskHealthUrl: string;
   /** null while no Plane token is set. */
-  plane: { baseUrl: string; workspace: string; token: string } | null;
+  plane: { baseUrl: string; workspace: string; identifiers: string[]; token: string } | null;
   /** null while no search token is set. */
   search: { baseUrl: string; token: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
@@ -145,7 +147,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     vault: { addr: e.LAB_VAULT_ADDR, token: e.LAB_VAULT_TOKEN, caPem: vaultCa },
     deskHealthUrl: e.LAB_DESK_HEALTH_URL,
     plane: e.LAB_PLANE_TOKEN
-      ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, token: e.LAB_PLANE_TOKEN }
+      ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, identifiers: e.LAB_PLANE_PROJECTS.split(','), token: e.LAB_PLANE_TOKEN }
       : null,
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
