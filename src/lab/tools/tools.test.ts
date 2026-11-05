@@ -14,6 +14,7 @@ import { gitHistoryTool, parseLog } from './history.js';
 import { findHostTool, HostIndex, hostNoteTool, parseFrontmatter, parseInventory, parseInventoryChecked } from './hosts.js';
 import { buildLabTools, toolDefinitions } from './index.js';
 import { kumaStatusTool } from './kuma.js';
+import { labOverviewTool } from './overview.js';
 import { PlaneClient, planeItemTool, planeProjectsTool } from './plane.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool } from './proxmox.js';
 import { makeTestRepo, type TestRepo } from './testGit.js';
@@ -596,7 +597,7 @@ describe('buildLabTools', () => {
     });
     const defs = toolDefinitions(tools);
     expect(defs.map((d) => d.name)).toEqual([
-      'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
+      'lab_overview', 'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
     ]);
     // plane_item and plane_projects join only when a Plane token is configured.
     const withPlane = buildLabTools({
@@ -622,5 +623,85 @@ describe('buildLabTools', () => {
       expect(d.input_schema.type).toBe('object');
       expect(d.description.length).toBeGreaterThan(40);
     }
+  });
+});
+
+describe('lab_overview', () => {
+  const stub = (name: string, out: () => { source: string; data: unknown }): LabTool => ({
+    name,
+    description: 'stub',
+    input: z.object({}),
+    run: async () => out(),
+  });
+  const failing = (name: string, message = 'unreachable'): LabTool => ({
+    name,
+    description: 'stub',
+    input: z.object({}),
+    run: async () => {
+      throw new LabToolError(message);
+    },
+  });
+  const healthy = () => [
+    stub('kuma_status', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }, { name: 'qbit', status: 'down', since: '2026-11-05T01:00:00Z', message: 'timeout' }] } })),
+    stub('pve_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }, { vmid: 249, name: 'forgejo', node: 'pve02', status: 'stopped' }] } })),
+    stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-05T01:00:00Z', lastPollError: null } } })),
+    stub('systemd_status', () => ({ source: 's', data: { units: [{ unit: 'pete-bot.service', active: 'active', sub: 'running', restarts: 0, result: 'success' }] } })),
+  ];
+  const NOW = Date.parse('2026-11-05T01:10:00Z');
+  const tool = (list: LabTool[]) => labOverviewTool(new Map(list.map((t) => [t.name, t])), () => NOW);
+
+  it('folds four sources into one attention list and says how much it read', async () => {
+    const out = data(await callTool(tool(healthy()), {}));
+    expect(out.source).toBe('4 of 4 sections read: 2 monitors, 2 guests, desk, 1 units; 2 to look at');
+    expect(out.data.allSectionsRead).toBe(true);
+    expect(out.data.attention).toEqual(['monitor qbit is down', 'guest 249 forgejo is stopped']);
+  });
+
+  it('reports a quiet lab as nothing to look at, with the counts that back it', async () => {
+    const quiet = healthy();
+    quiet[0] = stub('kuma_status', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }] } }));
+    quiet[1] = stub('pve_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }] } }));
+    const out = data(await callTool(tool(quiet), {}));
+    expect(out.data.attention).toEqual([]);
+    expect(out.source).toContain('1 monitors, 1 guests');
+  });
+
+  it('names a section that failed, and never reads it as healthy', async () => {
+    const list = healthy();
+    list[0] = failing('kuma_status', 'Uptime Kuma: no answer within 8000 ms');
+    const out = data(await callTool(tool(list), {}));
+    expect(out.data.allSectionsRead).toBe(false);
+    expect(out.source).toContain('3 of 4 sections read');
+    expect(out.data.attention).toEqual(['monitors: could not be read (Uptime Kuma: no answer within 8000 ms)', 'guest 249 forgejo is stopped']);
+    expect((out.data.sections as { monitors: { ok: boolean } }).monitors.ok).toBe(false);
+  });
+
+  it('flags a desk that stopped polling without an error, and a source with the wrong shape', async () => {
+    const list = healthy();
+    list[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-04T01:00:00Z', lastPollError: null } } }));
+    list[3] = stub('systemd_status', () => ({ source: 's', data: {} }));
+    const out = data(await callTool(tool(list), {}));
+    expect(out.data.attention).toContain('desk has not polled in the last hour (last poll 2026-11-04T01:00:00Z)');
+    expect(out.data.attention).toContain('services: could not be read (the source answered with no "units" list)');
+    const never = healthy();
+    never[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: null } } }));
+    expect(data(await callTool(tool(never), {})).data.attention).toContain('desk has not polled in the last hour (last poll never)');
+  });
+
+  it('flags a desk poll error and an inactive unit', async () => {
+    const list = healthy();
+    list[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: 'GitHub 502' } } }));
+    list[3] = stub('systemd_status', () => ({ source: 's', data: { units: [{ unit: 'lab-agent.service', active: 'failed', sub: 'failed', restarts: 3, result: 'exit-code' }] } }));
+    const out = data(await callTool(tool(list), {}));
+    expect(out.data.attention).toContain('desk poll error: GitHub 502');
+    expect(out.data.attention).toContain('unit lab-agent.service is failed/failed');
+  });
+
+  it('fails the call when every source fails, and when a source tool is missing', async () => {
+    const all = ['kuma_status', 'pve_guests', 'desk_status', 'systemd_status'].map((n) => failing(n));
+    expect(error(await callTool(tool(all), {}))).toContain('every source failed');
+    const missing = data(await callTool(tool(healthy().slice(1)), {}));
+    expect(missing.data.allSectionsRead).toBe(false);
+    expect(missing.data.attention).toContain('monitors: could not be read (kuma_status is not offered by this server)');
   });
 });
