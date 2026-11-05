@@ -11,7 +11,7 @@ import { gitHistoryTool } from './history.js';
 import { kumaStatusTool, type KumaConfig } from './kuma.js';
 import { deskStatusTool, systemdStatusTool, type SystemctlRunner } from './local.js';
 import { VaultMetadataClient, vaultPresenceTool, type VaultConfig } from './vault.js';
-import { PlaneClient, planeItemTool, type PlaneConfig } from './plane.js';
+import { PlaneClient, planeItemTool, planeProjectsTool, type PlaneConfig } from './plane.js';
 import { searchLabTool, type SearchConfig } from './search.js';
 import { ProxmoxClient, pveGuestsTool, pveGuestTool, type ProxmoxConfig } from './proxmox.js';
 import { inputJsonSchema, type LabTool } from './types.js';
@@ -33,7 +33,7 @@ export interface LabToolsConfig {
   /** HashiCorp Vault, for vault_presence. `vault` above is the knowledge-vault clone. */
   secrets: VaultConfig;
   deskHealthUrl: string;
-  /** Plane, for plane_item (PET-672). Absent until the token is seeded, and then the tool is not offered. */
+  /** Plane, for plane_item and plane_projects (PET-672, PET-859). Absent until the token is seeded, and then the tool is not offered. */
   plane?: PlaneConfig;
   /** petedio-search, for search_lab (PET-745). Absent until the token is seeded, and then the tool is not offered. */
   search?: SearchConfig;
@@ -55,7 +55,7 @@ export function buildLabTools(cfg: LabToolsConfig): Map<string, LabTool> {
     deskStatusTool({ healthUrl: cfg.deskHealthUrl }),
     systemdStatusTool(cfg.units, cfg.systemctl),
     vaultPresenceTool(new VaultMetadataClient(cfg.secrets)),
-    ...(cfg.plane ? [planeItemTool(new PlaneClient(cfg.plane))] : []),
+    ...(cfg.plane ? (() => { const c = new PlaneClient(cfg.plane); return [planeItemTool(c), planeProjectsTool(c)]; })() : []),
     ...(cfg.search ? [searchLabTool(cfg.search)] : []),
   ];
   return new Map(tools.map((t) => [t.name, t]));
