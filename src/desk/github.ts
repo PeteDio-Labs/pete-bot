@@ -233,13 +233,19 @@ export class GitHubApp {
     for (const run of runs.check_runs) {
       out.total++;
       if (run.status !== 'completed') out.pending.push(run.name);
-      else if (run.conclusion === 'success') (out.passed++, out.passedNames!.push(run.name));
+      else if (run.conclusion === 'success') {
+        out.passed++;
+        out.passedNames!.push(run.name);
+      }
       else if (run.conclusion === 'skipped' || run.conclusion === 'neutral') out.skipped.push(`${run.name} (${run.conclusion})`);
       else out.failed.push(`${run.name} (${run.conclusion})`);
     }
     for (const s of statuses.statuses) {
       out.total++;
-      if (s.state === 'success') (out.passed++, out.passedNames!.push(s.context));
+      if (s.state === 'success') {
+        out.passed++;
+        out.passedNames!.push(s.context);
+      }
       else if (s.state === 'pending') out.pending.push(s.context);
       else out.failed.push(`${s.context} (${s.state})`);
     }
