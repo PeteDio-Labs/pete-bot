@@ -22,7 +22,7 @@ import type { CodexQueue, QueueResult } from './codex.js';
 import { codexReviews } from './codex.js';
 import type { ClassifierSource, RunPython } from './classify.js';
 import { classify } from './classify.js';
-import { decide, blockingRounds, MAX_ROUNDS, type Decision, type Facts } from './decide.js';
+import { checkGate, decide, blockingRounds, MAX_ROUNDS, type Decision, type Facts } from './decide.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp } from './github.js';
 import type { DeskStore, Outgoing } from './store.js';
@@ -303,6 +303,7 @@ export class MergeDesk {
       github.checks(repo, pull.headSha),
       github.unresolvedThreads(repo, n),
     ]);
+    const requiredChecks = await github.requiredChecks(repo, defaultBranch);
     let classification = await classify(repo, files, this.classifierSource(), settings.python, this.deps.runPython);
     if (classification.tier < 2) {
       const gap = await this.rulesGap();
@@ -317,6 +318,7 @@ export class MergeDesk {
       classification,
       codex: codexReviews(reviews),
       checks,
+      requiredChecks,
       unresolvedThreads,
       memory: store.get(repo, n),
     };
@@ -390,7 +392,7 @@ export class MergeDesk {
         // A comment, not a DM: Pedro asked for no tap (2026-10-26). Open PR list merges after review.
         store.update(repo, n, { askedSha: d.sha });
         await this.report(repo, n, {
-          comment: `Merge desk: not merging \`${short(d.sha)}\` automatically (${d.why}; tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}). Codex: [${d.review.verdict}](${d.review.url}); checks ${f.checks.passed}/${f.checks.total} passed.`,
+          comment: `Merge desk: not merging \`${short(d.sha)}\` automatically (${d.why}; tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}). Codex: [${d.review.verdict}](${d.review.url}); checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
         });
         return;
       }
@@ -401,7 +403,7 @@ export class MergeDesk {
         if (settings.mode === 'dry-run') {
           if (mem.askedSha === d.sha) return;
           await notifier.dm(
-            `**Merge desk (dry run)** · would merge ${this.link(repo, f)} at \`${short(d.sha)}\`: tier ${f.classification.tier}, Codex [no blocking findings](${d.review.url}), checks ${f.checks.passed}/${f.checks.total} passed.`,
+            `**Merge desk (dry run)** · would merge ${this.link(repo, f)} at \`${short(d.sha)}\`: tier ${f.classification.tier}, Codex [no blocking findings](${d.review.url}), checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
           );
           store.update(repo, n, { askedSha: d.sha });
           return;
@@ -469,7 +471,7 @@ export class MergeDesk {
   private async merge(repo: string, f: Facts, sha: string, how: string): Promise<{ ok: boolean; message: string }> {
     const { github, store } = this.deps;
     const n = f.pull.number;
-    const evidence = `tier ${f.classification.tier}; Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed; 0 open threads`;
+    const evidence = `tier ${f.classification.tier}; Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed${gateNote(f)}; 0 open threads`;
     // The approval satisfies a required review where one exists, and records the evidence
     // where none does.
     const fail = async (why: string) => {
@@ -569,3 +571,10 @@ function describe(d: Decision): string {
   }
 }
 
+
+/** Says which checks the gate examined, and which skipped by workflow condition. Empty when the required list was unreadable. */
+function gateNote(f: Facts): string {
+  const g = checkGate(f);
+  if (!g.examined.length) return '';
+  return ` (required: ${g.examined.join(', ')}${g.ignored.length ? `; not required, skipped by workflow condition: ${g.ignored.join(', ')}` : ''})`;
+}

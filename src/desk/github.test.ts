@@ -75,6 +75,7 @@ describe('GitHubApp', () => {
     expect(await gh.checks('r', 'a'.repeat(40))).toEqual({
       total: 5,
       passed: 1,
+      passedNames: ['ci'],
       pending: ['slow'],
       failed: ['legacy (failure)'],
       skipped: ['skip (skipped)', 'meh (neutral)'],
@@ -108,7 +109,7 @@ describe('GitHubApp', () => {
       return Response.json({ state: 'pending', total_count: 0, statuses: [] });
     });
     const gh = new GitHubApp({ appId: '1', installationId: '2', privateKeyPem: PEM, org: 'o', fetchImpl: f });
-    expect(await gh.checks('r', 'a'.repeat(40))).toEqual({ total: 0, passed: 0, pending: [], failed: [], skipped: [] });
+    expect(await gh.checks('r', 'a'.repeat(40))).toEqual({ total: 0, passed: 0, passedNames: [], pending: [], failed: [], skipped: [] });
   });
 
   it('refuses a partial thread read', async () => {

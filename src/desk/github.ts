@@ -49,6 +49,8 @@ export interface CheckSummary {
   /** Check runs and commit statuses on the head, counted together. */
   total: number;
   passed: number;
+  /** Names of the check runs and statuses that passed. */
+  passedNames?: string[];
   pending: string[];
   failed: string[];
   /** Check runs that finished skipped or neutral. They ran nothing, so they never count as a pass. */
@@ -227,17 +229,23 @@ export class GitHubApp {
     if (statuses.total_count > statuses.statuses.length) {
       throw new Error(`${statuses.total_count} commit statuses on ${sha.slice(0, 7)}, more than one page; refusing a partial read`);
     }
-    const out: CheckSummary = { total: 0, passed: 0, pending: [], failed: [], skipped: [] };
+    const out: CheckSummary = { total: 0, passed: 0, passedNames: [], pending: [], failed: [], skipped: [] };
     for (const run of runs.check_runs) {
       out.total++;
       if (run.status !== 'completed') out.pending.push(run.name);
-      else if (run.conclusion === 'success') out.passed++;
+      else if (run.conclusion === 'success') {
+        out.passed++;
+        out.passedNames!.push(run.name);
+      }
       else if (run.conclusion === 'skipped' || run.conclusion === 'neutral') out.skipped.push(`${run.name} (${run.conclusion})`);
       else out.failed.push(`${run.name} (${run.conclusion})`);
     }
     for (const s of statuses.statuses) {
       out.total++;
-      if (s.state === 'success') out.passed++;
+      if (s.state === 'success') {
+        out.passed++;
+        out.passedNames!.push(s.context);
+      }
       else if (s.state === 'pending') out.pending.push(s.context);
       else out.failed.push(`${s.context} (${s.state})`);
     }
@@ -247,6 +255,24 @@ export class GitHubApp {
       (statuses.state === 'pending' ? out.pending : out.failed).push(`combined status (${statuses.state})`);
     }
     return out;
+  }
+
+  /**
+   * The status checks branch protection requires on `branch`, or null when they cannot be
+   * read (no protection, no permission, any error). Null is "unknown", never "none": the
+   * desk then treats every skipped check as a check that did not run.
+   */
+  async requiredChecks(repo: string, branch: string): Promise<string[] | null> {
+    try {
+      const r = await this.json<{ contexts?: string[]; checks?: { context: string }[] }>(
+        `reading ${repo}'s required checks`,
+        `${this.repoPath(repo)}/branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
+      );
+      const names = new Set([...(r.contexts ?? []), ...(r.checks ?? []).map((c) => c.context)]);
+      return names.size ? [...names] : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Unresolved review threads. A thread on an outdated line still counts until someone resolves it. */
