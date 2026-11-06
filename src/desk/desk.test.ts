@@ -83,6 +83,9 @@ class FakeGitHub {
   async listReviews() {
     return this.reviews;
   }
+  async requiredChecks() {
+    return null;
+  }
   async checks() {
     return { total: 1, passed: 1, pending: [], failed: [], skipped: [] };
   }

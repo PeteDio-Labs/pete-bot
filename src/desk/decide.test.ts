@@ -71,6 +71,44 @@ describe('what goes to Pedro', () => {
     expect(decide(facts({ checks, noCi: true }))).toMatchObject({ kind: 'ask', why: 'checks did not run: validate (skipped)' });
   });
 
+  describe('required checks (PET-862)', () => {
+    const mk = (passedNames: string[], skipped: string[], pending: string[] = []) => ({
+      total: passedNames.length + skipped.length + pending.length,
+      passed: passedNames.length,
+      passedNames,
+      pending,
+      failed: [],
+      skipped,
+    });
+    const required = ['validate', 'gate'];
+
+    it('merges when only non-required checks skipped by workflow condition', () => {
+      const checks = mk(['validate', 'gate'], ['apply (skipped)', 'plan-gate (skipped)', 'full (skipped)', 'nightly (skipped)']);
+      expect(decide(facts({ checks, requiredChecks: required }))).toMatchObject({ kind: 'merge' });
+    });
+
+    it('still asks when a required check skipped', () => {
+      const checks = mk(['gate'], ['validate (skipped)', 'apply (skipped)']);
+      expect(decide(facts({ checks, requiredChecks: required }))).toMatchObject({ kind: 'ask', why: 'checks did not run: validate (skipped)' });
+    });
+
+    it('still asks when a required check never reported', () => {
+      const checks = mk(['validate'], ['apply (skipped)']);
+      expect(decide(facts({ checks, requiredChecks: required }))).toMatchObject({ kind: 'ask', why: 'checks did not run: gate (not reported)' });
+    });
+
+    it('treats every skip as blocking when the required list is unreadable', () => {
+      const checks = mk(['validate', 'gate'], ['apply (skipped)']);
+      expect(decide(facts({ checks, requiredChecks: null }))).toMatchObject({ kind: 'ask', why: 'checks did not run: apply (skipped)' });
+    });
+
+    it('still waits on a failing or pending check', () => {
+      const failed = { ...mk(['validate'], []), failed: ['gate (failure)'] };
+      expect(decide(facts({ checks: failed, requiredChecks: required }))).toMatchObject({ kind: 'wait' });
+      expect(decide(facts({ checks: mk(['validate'], [], ['gate']), requiredChecks: required }))).toMatchObject({ kind: 'wait' });
+    });
+  });
+
   it('asks for a tap when Codex escalates, whatever the tier', () => {
     expect(decide(facts({ codex: [review('escalate')] }))).toMatchObject({ kind: 'ask', why: 'Codex escalated it to you' });
   });

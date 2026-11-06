@@ -13,7 +13,7 @@
  *   2. Did Codex review it?   The review must be of the head SHA. None yet: queue one.
  *                             After two blocking rounds the desk stops and tells Pedro.
  *   3. Can it merge?          No conflict, every check passed, no open review thread.
- *                             A skipped check, or no check at all in a repo not on
+ *                             A skipped required check, or no check at all in a repo not on
  *                             DESK_NO_CI_REPOS, goes to Pedro instead of merging.
  *   4. Who merges?            Tiers 0 and 1 with "No blocking findings" merge here.
  *                             Tier 2, or a Codex "Escalate to Pedro", waits for his tap.
@@ -50,6 +50,8 @@ export interface Facts {
   classification: Classification;
   codex: CodexReview[];
   checks: CheckSummary;
+  /** Branch-protection required checks on the base branch; null or absent when unreadable. */
+  requiredChecks?: string[] | null;
   unresolvedThreads: number;
   memory: PrMemory;
 }
@@ -69,6 +71,26 @@ export function blockingRounds(codex: CodexReview[]): CodexReview[] {
     .filter((r) => r.verdict === 'changes-requested')
     .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt))
     .filter((r) => (seen.has(r.commitId) ? false : (seen.add(r.commitId), true)));
+}
+
+/**
+ * Splits skipped checks into those that block and those that skip by workflow condition.
+ * With a readable required list, a skipped check blocks only if it is required, and a
+ * required check that did not pass and did not report at all blocks too. Without one,
+ * every skip blocks (the old, stricter rule).
+ */
+export function checkGate(f: Facts): { blocking: string[]; ignored: string[]; examined: string[] } {
+  const required = f.requiredChecks;
+  if (!required?.length) return { blocking: f.checks.skipped, ignored: [], examined: [] };
+  const base = (s: string) => s.replace(/ \((skipped|neutral)\)$/, '');
+  const passed = new Set(f.checks.passedNames ?? []);
+  const skippedNames = new Set(f.checks.skipped.map(base));
+  const blocking = [
+    ...f.checks.skipped.filter((s) => required.includes(base(s))),
+    ...required.filter((r) => !passed.has(r) && !skippedNames.has(r) && !f.checks.pending.includes(r)).map((r) => `${r} (not reported)`),
+  ];
+  const ignored = f.checks.skipped.filter((s) => !required.includes(base(s)));
+  return { blocking, ignored, examined: required };
 }
 
 export function decide(f: Facts): Decision {
@@ -117,8 +139,9 @@ export function decide(f: Facts): Decision {
 
   // A check that never ran proves nothing. An empty list is fine only where the repo runs no
   // validation by decision; anywhere else it may be CI that never started.
-  if (f.checks.skipped.length) {
-    return { kind: 'ask', sha, review: onHead, why: `checks did not run: ${f.checks.skipped.join(', ')}` };
+  const gate = checkGate(f);
+  if (gate.blocking.length) {
+    return { kind: 'ask', sha, review: onHead, why: `checks did not run: ${gate.blocking.join(', ')}` };
   }
   if (f.checks.total === 0 && !f.noCi) {
     return { kind: 'ask', sha, review: onHead, why: 'no check ran on the head' };
