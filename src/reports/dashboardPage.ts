@@ -39,7 +39,7 @@ header.top h1{margin:0}
 #menuBtn{flex:none;width:44px;height:44px;display:grid;place-items:center;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;cursor:pointer;padding:0}
 #menuBtn[aria-expanded=true]{border-color:var(--accent)}
 #menuBtn svg{width:22px;height:22px}
-#tabs{position:absolute;left:0;top:56px;width:min(280px,100%);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+#tabs{position:absolute;left:0;top:56px;z-index:6;width:min(280px,100%);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
 #tabs[hidden]{display:none}
 #tabs button{display:block;width:100%;text-align:left;font:inherit;color:var(--ink);background:none;border:0;border-radius:8px;padding:10px 12px;min-height:44px;cursor:pointer}
 #tabs button:hover{background:var(--bg)}
@@ -69,6 +69,7 @@ h1{font-size:18px;margin:4px 0 10px}
 .big{font-size:32px}
 header.top{margin:0 -12px 6px;padding:8px 12px}
 #tabs{left:12px;width:calc(100% - 24px)}
+#trend .c:nth-last-child(even) span{visibility:hidden}
 .cols{gap:4px;height:130px}
 .theme .t1 strong{width:64px}.theme .t2{margin-left:72px}
 select,input{width:100%;min-height:40px;font-size:16px}
@@ -94,8 +95,8 @@ dd{margin-bottom:6px}
 <header class="top">
   <button id="menuBtn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="tabs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   <h1 id="h1">Reports</h1>
+  <nav id="tabs" aria-label="Reports" hidden></nav>
 </header>
-<nav id="tabs" aria-label="Reports" hidden></nav>
 <div id="status" class="card mute">Loading…</div>
 <div id="view" hidden>
   <div class="card">

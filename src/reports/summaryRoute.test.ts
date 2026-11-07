@@ -39,7 +39,7 @@ describe('POST /api/weeks/:week/summary', () => {
       const port = (server.address() as { port: number }).port;
       const headers: Record<string, string> = opts.type === null ? {} : { 'Content-Type': opts.type ?? 'application/json' };
       const res = await fetch(`http://127.0.0.1:${port}/api/weeks/${opts.week ?? WEEK}/summary`, { method: 'POST', headers, body: JSON.stringify(body) });
-      return { status: res.status, json: (await res.json()) as any, seen, saved: store.get(WEEK) };
+      return { status: res.status, json: (await res.json()) as { error?: string }, seen, saved: store.get(WEEK) };
     } finally {
       server.close();
     }
@@ -83,7 +83,7 @@ describe('POST /api/weeks/:week/summary', () => {
     const server = app.listen(0);
     try {
       const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/weeks/${WEEK}/summary`;
-      const ask = async (body: object) => (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json() as Promise<any>;
+      const ask = async (body: object) => (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json() as Promise<{ cached?: boolean }>;
       expect((await ask({})).cached).toBe(false);
       expect((await ask({})).cached).toBe(true);
       expect((await ask({ repo: 'a' })).cached).toBe(false);
@@ -91,6 +91,29 @@ describe('POST /api/weeks/:week/summary', () => {
       expect(calls).toBe(2);
       expect((await ask({ regenerate: true })).cached).toBe(false);
       expect(calls).toBe(3);
+    } finally {
+      server.close();
+    }
+  });
+  it('answers a record that lacks fields instead of hanging, and regenerates a repo summary that covers fewer PRs', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'sum3-'));
+    const store = new WeekStore(dir);
+    store.save({ week: WEEK, generatedAt: 'x', total: 1 } as unknown as WeekRecord);
+    const old = rec();
+    old.week = '2026-10-26';
+    old.repoSummaries = { a: { model: 'm', text: 'old', at: 'x', prs: 5 } };
+    store.save(old);
+    let calls = 0;
+    const app = createDashboardApp({ store, summarize: async () => (calls++, 'new'), verify: async () => ({ ok: true, email: 'p@x.dev' }) });
+    const server = app.listen(0);
+    try {
+      const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/weeks`;
+      const ask = (week: string, body: object) => fetch(`${base}/${week}/summary`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      expect((await ask(WEEK, {})).status).toBe(400);
+      const r = await ask('2026-10-26', { repo: 'a' });
+      expect(r.status).toBe(200);
+      expect(calls).toBe(1);
+      expect(store.get('2026-10-26')?.repoSummaries?.a?.text).toBe('new');
     } finally {
       server.close();
     }

@@ -377,6 +377,8 @@ export class WeeklyRunner {
           return true;
         }
         if (rec.summary.source === 'none' && old.summary.source === 'ollama') rec.summary = old.summary;
+        // Summaries written on request outlive a rebuild; the page shows when each was written.
+        if (old.repoSummaries) rec.repoSummaries = old.repoSummaries;
       }
       this.d.store.save(rec);
       this.last = { at: at.toISOString(), week, ok: true, detail: `${rec.total} merged, summary ${rec.summary.source}` };

@@ -88,41 +88,50 @@ export function createDashboardApp(d: DashboardDeps): Express {
       res.status(404).json({ error: 'not_found' });
       return;
     }
-    const rec = d.store.get(req.params.week);
-    if (!rec) {
-      res.status(404).json({ error: 'no such week' });
-      return;
-    }
-    const repo = (req.body as { repo?: unknown } | undefined)?.repo;
-    if (repo !== undefined && typeof repo !== 'string') {
-      res.status(400).json({ error: 'repo must be a string' });
-      return;
-    }
-    const prs = repo === undefined ? rec.merged : rec.merged.filter((p) => p.repo === repo);
-    if (repo !== undefined && !Object.hasOwn(rec.byRepo, repo)) {
-      res.status(400).json({ error: `no PR from ${repo.slice(0, 60)} in that week` });
-      return;
-    }
-    if (prs.length === 0) {
-      res.status(400).json({ error: 'no merged PR to summarize' });
-      return;
-    }
-    // Asking again for a summary that is stored returns it; only an explicit regenerate writes a new one.
-    const regenerate = (req.body as { regenerate?: unknown } | undefined)?.regenerate === true;
-    const stored = repo === undefined ? (rec.summary.source === 'ollama' && rec.summary.text ? rec.summary : undefined) : rec.repoSummaries?.[repo];
-    if (stored && !regenerate) {
-      res.json({ ...rec, cached: true });
-      return;
-    }
-    if (generating) {
-      res.status(429).json({ error: 'a summary is already being written; try again in a minute' });
-      return;
-    }
-    generating = true;
+    let started = false;
     try {
+      const rec = d.store.get(req.params.week);
+      if (!rec) {
+        res.status(404).json({ error: 'no such week' });
+        return;
+      }
+      const body = (req.body ?? {}) as { repo?: unknown; regenerate?: unknown };
+      const repo = body.repo;
+      if (repo !== undefined && typeof repo !== 'string') {
+        res.status(400).json({ error: 'repo must be a string' });
+        return;
+      }
+      const merged = rec.merged ?? [];
+      if (repo !== undefined && !Object.hasOwn(rec.byRepo ?? {}, repo)) {
+        res.status(400).json({ error: `no PR from ${repo.slice(0, 60)} in that week` });
+        return;
+      }
+      const prs = repo === undefined ? merged : merged.filter((p) => p.repo === repo);
+      if (prs.length === 0) {
+        res.status(400).json({ error: 'no merged PR to summarize' });
+        return;
+      }
+      // Asking again for a summary that is stored returns it; only an explicit regenerate writes a new one.
+      // A repo summary counts as stored only while it covers the same number of PRs.
+      const storedRepo = repo === undefined ? undefined : rec.repoSummaries?.[repo];
+      const stored = repo === undefined ? rec.summary?.source === 'ollama' && !!rec.summary.text : storedRepo?.prs === prs.length;
+      if (stored && body.regenerate !== true) {
+        res.json({ ...rec, cached: true });
+        return;
+      }
+      if (generating) {
+        res.status(429).json({ error: 'a summary is already being written; try again in a minute' });
+        return;
+      }
+      generating = true;
+      started = true;
       const text = await d.summarize(prs, rec.week);
-      // Read again before saving, so a run that finished meanwhile is not overwritten.
-      const fresh = d.store.get(rec.week) ?? rec;
+      // Read again before saving. A rebuild that finished meanwhile describes other PRs, so the text is dropped.
+      const fresh = d.store.get(rec.week);
+      if (!fresh || fresh.generatedAt !== rec.generatedAt) {
+        res.status(409).json({ error: 'the week was rebuilt while the summary was being written; ask again' });
+        return;
+      }
       if (repo === undefined) fresh.summary = { source: 'ollama', model: WEEKLY_MODEL, text };
       else fresh.repoSummaries = { ...(fresh.repoSummaries ?? {}), [repo]: { model: WEEKLY_MODEL, text, at: new Date().toISOString(), prs: prs.length } };
       d.store.save(fresh);
@@ -131,7 +140,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
       d.log?.(`summary failed: ${(err as Error).message.slice(0, 120)}`);
       res.status(502).json({ error: `the summary was not written: ${(err as Error).message.slice(0, 120)}` });
     } finally {
-      generating = false;
+      if (started) generating = false;
     }
   });
 
