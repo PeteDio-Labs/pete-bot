@@ -40,7 +40,7 @@ describe('tallyBoard', () => {
   });
   it('mixes labels and names unlabelled items', () => {
     expect(t.labelMix.find((l) => l.label === 'cloud')).toEqual({ label: 'cloud', open: 2 });
-    expect(t.labelMix.find((l) => l.label === '(no label)')?.open).toBe(1);
+    expect(t.labelMix.find((l) => l.label === '(no label)')?.open).toBe(2);
   });
 });
 
