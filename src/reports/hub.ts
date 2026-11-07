@@ -71,8 +71,9 @@ export class ReportHub {
 
   /** The kinds that have a folder, with how many records each holds. */
   kinds(): KindInfo[] {
-    return readdirSync(this.root)
-      .filter((k) => KIND_RE.test(k))
+    return readdirSync(this.root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && KIND_RE.test(e.name))
+      .map((e) => e.name)
       .sort()
       .map((kind) => {
         const ids = this.ids(kind);
