@@ -258,7 +258,8 @@ export class WeekStore {
 /**
  * The weeks to build now. The week that holds `at` is due from Sunday 22:30 Eastern. Every
  * finished week since FIRST_WEEK is due when it has no file, which covers a week lost to an
- * outage, and again when `stale` says its file is partial (see `needsRebuild`).
+ * outage. The previous week is built again when `stale` says its file is partial (see
+ * `needsRebuild`); an older partial week stays as stored.
  */
 export function dueWeeks(at: Date, has: (week: string) => boolean, stale: (week: string) => boolean = () => false): string[] {
   const t = localTime(at);
@@ -266,8 +267,11 @@ export function dueWeeks(at: Date, has: (week: string) => boolean, stale: (week:
   const due: string[] = [];
   // Every finished week from FIRST_WEEK on, oldest first: a week lost to an outage is built
   // when the bot is next up, and a first deploy fills the weeks before it.
+  const previous = addDays(current, -7);
   for (let w = FIRST_WEEK; w < current; w = addDays(w, 7)) {
-    if (!has(w) || stale(w)) due.push(w);
+    // Only the previous week is repaired when partial: an older week with a repo that never
+    // reads would otherwise cost a full GitHub read every hour for good.
+    if (!has(w) || (w === previous && stale(w))) due.push(w);
   }
   if (t.weekday === WEEKLY_SLOT.weekday && t.minutes >= WEEKLY_SLOT.minutes && !has(current)) due.push(current);
   return due;

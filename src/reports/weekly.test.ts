@@ -126,8 +126,16 @@ describe('dueWeeks', () => {
     expect(dueWeeks(SUN, (w) => w >= '2026-10-19')).toEqual([]);
     expect(dueWeeks(new Date('2026-11-10T15:00:00Z'), (w) => w !== WEEK)).toEqual([WEEK]);
   });
-  it('does not back-fill before the first week, and builds every finished week since it', () => {
+  it('does not back-fill before the first week', () => {
     expect(dueWeeks(new Date('2026-10-21T15:00:00Z'), none)).toEqual([]);
+  });
+});
+
+describe('dueWeeks repair', () => {
+  it('repairs only the previous week when partial, and backfills any missing older week', () => {
+    const at = new Date('2026-11-10T15:00:00Z');
+    expect(dueWeeks(at, () => true, () => true)).toEqual(['2026-11-02']);
+    expect(dueWeeks(at, (w) => w !== '2026-10-26', () => true)).toEqual(['2026-10-26', '2026-11-02']);
   });
 });
 
