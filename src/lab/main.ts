@@ -9,43 +9,23 @@
  *
  * Built as its own binary: `bun run build:lab-binary`.
  */
-import { ollamaCaller } from "./ollama.js";
-import { loadLabConfig, type LabConfig } from "./config.js";
-import { AccessVerifier } from "./access.js";
-import { createMcpHandler } from "./mcp.js";
-import { createLabHandler, type Check } from "./server.js";
-import {
-  buildLabTools,
-  GitClone,
-  LAB_UNITS,
-  secretsHealth,
-  VaultMetadataClient,
-} from "./tools/index.js";
-import { ProxmoxClient } from "./tools/proxmox.js";
-import { HostIndex } from "./tools/hosts.js";
-import {
-  driftHealth,
-  msUntil,
-  notifier,
-  readLab,
-  runDriftCheck,
-  singleFlight,
-  type DriftOutcome,
-} from "./drift.js";
-import { readKuma } from "./tools/kuma.js";
-import { mtraceTools } from "./tools/mtrace.js";
-import {
-  bazarrFindTool,
-  bazarrStatusTool,
-  searchMissing,
-} from "./tools/bazarr.js";
-import { proposeActionTool } from "./tools/propose.js";
-import { gitAuthFromToken, repoReadToken } from "./tools/githubToken.js";
+import { ollamaCaller } from './ollama.js';
+import { loadLabConfig, type LabConfig } from './config.js';
+import { AccessVerifier } from './access.js';
+import { createMcpHandler } from './mcp.js';
+import { createLabHandler, type Check } from './server.js';
+import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
+import { ProxmoxClient } from './tools/proxmox.js';
+import { HostIndex } from './tools/hosts.js';
+import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
+import { readKuma } from './tools/kuma.js';
+import { mtraceTools } from './tools/mtrace.js';
+import { bazarrFindTool, bazarrStatusTool, searchMissing } from './tools/bazarr.js';
+import { proposeActionTool } from './tools/propose.js';
+import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
-  console.log(
-    JSON.stringify({ time: new Date().toISOString(), msg, ...fields }),
-  );
+  console.log(JSON.stringify({ time: new Date().toISOString(), msg, ...fields }));
 }
 
 // One line naming the bad setting, then exit, so systemd's status shows why it stopped.
@@ -53,19 +33,14 @@ let cfg: LabConfig;
 try {
   cfg = loadLabConfig(process.env);
 } catch (err) {
-  log("lab-agent refused to start", { error: (err as Error).message });
+  log('lab-agent refused to start', { error: (err as Error).message });
   process.exit(1);
 }
 
-const vault = new GitClone("petedio-vault", cfg.clones.vault).useAuth(
-  gitAuthFromToken(
-    repoReadToken({ ...cfg.github, repo: cfg.github.vaultRepo }),
-  ),
+const vault = new GitClone('petedio-vault', cfg.clones.vault).useAuth(
+  gitAuthFromToken(repoReadToken({ ...cfg.github, repo: cfg.github.vaultRepo })),
 );
-const history = [
-  new GitClone("petedio-iac", cfg.clones.iac),
-  new GitClone("petedio-media-iac", cfg.clones.mediaIac),
-];
+const history = [new GitClone('petedio-iac', cfg.clones.iac), new GitClone('petedio-media-iac', cfg.clones.mediaIac)];
 const tools = buildLabTools({
   vault,
   history,
@@ -85,10 +60,8 @@ const mediaTools = cfg.mtrace
   ? new Map(
       [
         ...mtraceTools(cfg.mtrace),
-        ...(tools.has("search_lab") ? [tools.get("search_lab")!] : []),
-        ...(bazarrCfg
-          ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)]
-          : []),
+        ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
+        ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
         proposeActionTool(bazarrCfg),
       ].map((t) => [t.name, t] as const),
     )
@@ -105,7 +78,7 @@ async function renew(): Promise<void> {
     lastRenewError = null;
   } catch (err) {
     lastRenewError = (err as Error).message;
-    log("vault token renewal failed", { error: lastRenewError });
+    log('vault token renewal failed', { error: lastRenewError });
   }
 }
 void renew();
@@ -115,17 +88,10 @@ const checks: Record<string, Check> = {
   // The model backend. /api/tags lists the pulled models and spends nothing. A missing model
   // is a fault now, not a surprise at the first question.
   async model() {
-    const res = await fetch(`${cfg.ollama.url}/api/tags`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!res.ok)
-      throw new Error(`ollama answered HTTP ${res.status} to /api/tags`);
-    const names =
-      ((await res.json()) as { models?: Array<{ name: string }> }).models?.map(
-        (m) => m.name,
-      ) ?? [];
-    if (!names.some((n) => n === cfg.model || n === `${cfg.model}:latest`))
-      throw new Error(`ollama has not pulled ${cfg.model}`);
+    const res = await fetch(`${cfg.ollama.url}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) throw new Error(`ollama answered HTTP ${res.status} to /api/tags`);
+    const names = ((await res.json()) as { models?: Array<{ name: string }> }).models?.map((m) => m.name) ?? [];
+    if (!names.some((n) => n === cfg.model || n === `${cfg.model}:latest`)) throw new Error(`ollama has not pulled ${cfg.model}`);
     return `ollama up, ${cfg.model} pulled`;
   },
   async proxmox() {
@@ -135,19 +101,16 @@ const checks: Record<string, Check> = {
     await vault.refresh();
     const s = await vault.state();
     if (s.fetchError) throw new Error(`fetch failed: ${s.fetchError}`);
-    return GitClone.describe("petedio-vault", s);
+    return GitClone.describe('petedio-vault', s);
   },
   // Present only when the media assistant is configured (PET-869). /health is open and touches
   // nothing in the stack, so it proves mtrace answers, not that its backends do.
   ...(cfg.mtrace
     ? {
         async mtrace() {
-          const res = await fetch(`${cfg.mtrace!.baseUrl}/health`, {
-            signal: AbortSignal.timeout(5_000),
-          });
-          if (!res.ok)
-            throw new Error(`mtrace answered HTTP ${res.status} to /health`);
-          return "mtrace up";
+          const res = await fetch(`${cfg.mtrace!.baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+          if (!res.ok) throw new Error(`mtrace answered HTTP ${res.status} to /health`);
+          return 'mtrace up';
         },
       }
     : {}),
@@ -183,13 +146,7 @@ const runDrift = singleFlight(async () => {
         async vault() {
           const index = await hostIndex.load();
           const { fetchError } = await vault.state();
-          return {
-            inventory: index.inventory,
-            notes: index.notes,
-            unparsed: index.unparsed,
-            source: index.source,
-            fetchError: fetchError ?? null,
-          };
+          return { inventory: index.inventory, notes: index.notes, unparsed: index.unparsed, source: index.source, fetchError: fetchError ?? null };
         },
       }),
     notify,
@@ -201,18 +158,10 @@ const runDrift = singleFlight(async () => {
 // still lands once a day at LAB_DRIFT_AT.
 function scheduleDrift(): void {
   const wait = msUntil(cfg.drift.at, new Date());
-  log("drift check scheduled", {
-    at: `${cfg.drift.at}Z`,
-    inMinutes: Math.round(wait / 60_000),
-  });
+  log('drift check scheduled', { at: `${cfg.drift.at}Z`, inMinutes: Math.round(wait / 60_000) });
   setTimeout(() => {
     runDrift()
-      .catch((err) =>
-        log("drift check crashed", {
-          level: "error",
-          error: (err as Error).message,
-        }),
-      )
+      .catch((err) => log('drift check crashed', { level: 'error', error: (err as Error).message }))
       .finally(scheduleDrift);
   }, wait);
 }
@@ -224,9 +173,7 @@ const handler = createLabHandler({
   callModel,
   model: cfg.model,
   mediaTools,
-  actBazarr: bazarrCfg
-    ? (kind, id) => searchMissing(bazarrCfg, kind, id)
-    : undefined,
+  actBazarr: bazarrCfg ? (kind, id) => searchMissing(bazarrCfg, kind, id) : undefined,
   checks,
   log,
   runDrift,
@@ -235,45 +182,20 @@ const handler = createLabHandler({
 // Bun closes an idle connection after 10 s by default. An answer can take 80 s, and a drift
 // run with a failing DM waits through two retries (75 s) after three 15 s tries, so the
 // caller would lose the reply to a run that still sends a DM. 255 s is Bun's maximum.
-const server = Bun.serve({
-  hostname: "127.0.0.1",
-  port: cfg.port,
-  idleTimeout: 255,
-  fetch: handler,
-});
-log("lab-agent listening", {
-  address: `127.0.0.1:${server.port}`,
-  tools: [...tools.keys()],
-  mediaTools: mediaTools
-    ? [...mediaTools.keys()]
-    : "off: LAB_MTRACE_TOKEN is not set",
-  model: cfg.model,
-});
+const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 255, fetch: handler });
+log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], mediaTools: mediaTools ? [...mediaTools.keys()] : 'off: LAB_MTRACE_TOKEN is not set', model: cfg.model });
 
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.
 if (cfg.mcp) {
   const mcpCfg = cfg.mcp;
-  const access = new AccessVerifier({
-    teamDomain: mcpCfg.teamDomain,
-    aud: mcpCfg.aud,
-    emails: mcpCfg.emails,
-  });
-  const mcpHandler = createMcpHandler({
-    tools,
-    allowedPeer: mcpCfg.peer,
-    verify: (jwt) => access.verify(jwt),
-    log,
-  });
+  const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails });
+  const mcpHandler = createMcpHandler({ tools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
   const mcpServer = Bun.serve({
     hostname: mcpCfg.host,
     port: mcpCfg.port,
     fetch: (req, srv) => mcpHandler(req, srv.requestIP(req)?.address),
   });
-  log("lab MCP listening", {
-    address: `${mcpCfg.host}:${mcpServer.port}`,
-    peer: mcpCfg.peer,
-    tools: [...tools.keys()],
-  });
+  log('lab MCP listening', { address: `${mcpCfg.host}:${mcpServer.port}`, peer: mcpCfg.peer, tools: [...tools.keys()] });
 } else {
-  log("lab MCP off: LAB_ACCESS_AUD is not set");
+  log('lab MCP off: LAB_ACCESS_AUD is not set');
 }

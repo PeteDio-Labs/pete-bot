@@ -5,49 +5,24 @@
  *
  * It ships unused: nothing in the pete-bot process imports it.
  */
-import { GitClone } from "./git.js";
-import { findHostTool, HostIndex, hostNoteTool } from "./hosts.js";
-import { gitHistoryTool } from "./history.js";
-import { kumaStatusTool, type KumaConfig } from "./kuma.js";
-import {
-  deskStatusTool,
-  systemdStatusTool,
-  type SystemctlRunner,
-} from "./local.js";
-import {
-  VaultMetadataClient,
-  vaultPresenceTool,
-  type VaultConfig,
-} from "./vault.js";
-import {
-  PlaneClient,
-  planeItemTool,
-  planeProjectsTool,
-  type PlaneConfig,
-} from "./plane.js";
-import { labOverviewTool } from "./overview.js";
-import { searchLabTool, type SearchConfig } from "./search.js";
-import {
-  ProxmoxClient,
-  pveGuestsTool,
-  pveGuestTool,
-  type ProxmoxConfig,
-} from "./proxmox.js";
-import { inputJsonSchema, type LabTool } from "./types.js";
+import { GitClone } from './git.js';
+import { findHostTool, HostIndex, hostNoteTool } from './hosts.js';
+import { gitHistoryTool } from './history.js';
+import { kumaStatusTool, type KumaConfig } from './kuma.js';
+import { deskStatusTool, systemdStatusTool, type SystemctlRunner } from './local.js';
+import { VaultMetadataClient, vaultPresenceTool, type VaultConfig } from './vault.js';
+import { PlaneClient, planeItemTool, planeProjectsTool, type PlaneConfig } from './plane.js';
+import { labOverviewTool } from './overview.js';
+import { searchLabTool, type SearchConfig } from './search.js';
+import { ProxmoxClient, pveGuestsTool, pveGuestTool, type ProxmoxConfig } from './proxmox.js';
+import { inputJsonSchema, type LabTool } from './types.js';
 
-export {
-  callTool,
-  capText,
-  inputJsonSchema,
-  LabToolError,
-  type LabTool,
-  type ToolResult,
-} from "./types.js";
-export { GitClone, runGit, type GitRunner } from "./git.js";
-export { secretsHealth, VaultMetadataClient } from "./vault.js";
+export { callTool, capText, inputJsonSchema, LabToolError, type LabTool, type ToolResult } from './types.js';
+export { GitClone, runGit, type GitRunner } from './git.js';
+export { secretsHealth, VaultMetadataClient } from './vault.js';
 
 /** The units systemd_status reads on 237: the two processes this repo builds. */
-export const LAB_UNITS = ["pete-bot.service", "lab-agent.service"] as const;
+export const LAB_UNITS = ['pete-bot.service', 'lab-agent.service'] as const;
 
 export interface LabToolsConfig {
   /** A read-only clone of petedio-vault. */
@@ -81,30 +56,15 @@ export function buildLabTools(cfg: LabToolsConfig): Map<string, LabTool> {
     deskStatusTool({ healthUrl: cfg.deskHealthUrl }),
     systemdStatusTool(cfg.units, cfg.systemctl),
     vaultPresenceTool(new VaultMetadataClient(cfg.secrets)),
-    ...(cfg.plane
-      ? (() => {
-          const c = new PlaneClient(cfg.plane);
-          return [planeItemTool(c), planeProjectsTool(c)];
-        })()
-      : []),
+    ...(cfg.plane ? (() => { const c = new PlaneClient(cfg.plane); return [planeItemTool(c), planeProjectsTool(c)]; })() : []),
     ...(cfg.search ? [searchLabTool(cfg.search)] : []),
   ];
   const map = new Map(tools.map((t) => [t.name, t]));
   // The overview folds four of the tools above, so it is built from the finished map and listed first.
-  return new Map([["lab_overview", labOverviewTool(map)], ...map]);
+  return new Map([['lab_overview', labOverviewTool(map)], ...map]);
 }
 
 /** The tool list in the shape both the Anthropic `tools` array and MCP `tools/list` take. */
-export function toolDefinitions(
-  tools: Map<string, LabTool>,
-): Array<{
-  name: string;
-  description: string;
-  input_schema: Record<string, unknown>;
-}> {
-  return [...tools.values()].map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: inputJsonSchema(t.input),
-  }));
+export function toolDefinitions(tools: Map<string, LabTool>): Array<{ name: string; description: string; input_schema: Record<string, unknown> }> {
+  return [...tools.values()].map((t) => ({ name: t.name, description: t.description, input_schema: inputJsonSchema(t.input) }));
 }
