@@ -73,7 +73,7 @@ export async function askMedia(
   };
 }
 
-const TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'arr', 'plex-and-arr'];
+const TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'bazarr', 'arr', 'plex-and-arr'];
 
 /**
  * Keeps only proposals whose every field has the exact shape a button can act on. A

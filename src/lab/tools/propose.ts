@@ -15,7 +15,7 @@ import { listItems, matchTitle, type BazarrConfig, type BazarrKind } from './baz
 import { LabToolError, type LabTool } from './types.js';
 
 /** Mirrors UPDATE_TARGETS in src/clients/githubActions.ts. A test keeps the two equal. */
-export const PROPOSE_TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'arr', 'plex-and-arr'] as const;
+export const PROPOSE_TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'bazarr', 'arr', 'plex-and-arr'] as const;
 export const PROPOSE_TOOL = 'propose_action';
 
 export type Proposal =
