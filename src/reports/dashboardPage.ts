@@ -401,14 +401,14 @@ RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{
  (r.headlines||[]).forEach(function(h){var li=el('li',null,{class:'lv-'+h.level}),lv=LV[h.level]||LV.info;li.appendChild(el('span',lv[1]+' '+lv[0],{class:'lvl'}));li.appendChild(el('span',h.text));
   if((h.link&&kinds.some(function(k){return k.kind===h.link}))||h.link==='weekly'){var a=el('button','Open',{type:'button',class:'chip'});a.onclick=function(){userPicked=true;pick(h.link)};li.appendChild(a)}hs.appendChild(li)});
  box.appendChild(hs);
- var up=ku.ok&&r.monitors?r.monitors.filter(function(m){return m.status==='up'}).length:null,dn=ku.ok&&r.monitors?r.monitors.length-up:0;
+ var haveMon=!!(ku.ok&&r.monitors&&r.monitors.length&&ku.monitors),nTot=haveMon?ku.monitors:0,dn=haveMon?r.monitors.filter(function(m){return m.status!=='up'}).length:0,up=haveMon?nTot-dn:null;
  var pulse=el('div',null,{class:'pulse'});
  pulse.appendChild(tile('Merged, 24 h',ac?ac.last24.merged:null,{delta:ac?ac.prev24.merged:null,vs:'vs the 24 h before',spark:ac&&ac.daily.map(function(d){return d.merged}),sparkCls:'blue'}));
  pulse.appendChild(tile('Opened, 24 h',ac?ac.last24.opened:null,{delta:ac?ac.prev24.opened:null,vs:'vs the 24 h before',spark:ac&&ac.daily.map(function(d){return d.opened}),sparkCls:'orange'}));
  pulse.appendChild(tile('Open PRs now',gh.reposRead?gh.openPrs:null,{note:gh.reposRead?'in '+gh.reposRead+' repos':''}));
  pulse.appendChild(tile('Needs you',gh.reposRead||pl.ok?r.needsYouTotal||0:null,{tone:(r.needsYouTotal||0)>0?'warn':'good',note:(r.needsYouTotal||0)>0?'see below':'nothing waiting'}));
  var pd=tr[1];pulse.appendChild(tile('Plane done, this week',pd?pd.now:null,{delta:pd?pd.last:null,vs:'vs last week',spark:ps&&ps.doneWeeks.map(function(w){return w.done}),sparkCls:'blue'}));
- pulse.appendChild(tile('Services up',up==null?null:up+'/'+r.monitors.length,{tone:up==null?'':dn>0?'bad':'good',note:up==null?'':dn>0?dn+' not up':'all up'}));
+ pulse.appendChild(tile('Services up',up==null?null:up+'/'+nTot,{tone:up==null?'':dn>0?'bad':'good',note:up==null?'':dn>0?dn+' not up':'all up'}));
  box.appendChild(pulse);
  if(ac){var c1=card('Merged and opened per day','Last 14 days, Eastern time. Hover or focus a day for the counts.'),ch=el('div',null,{class:'chart',role:'img','aria-label':'Merged and opened PRs per day, last 14 days'});
   c1.appendChild(legend([{cls:'m',text:'Merged'},{cls:'o',text:'Opened'}]));c1.appendChild(ch);pairChart(ch,ac.daily);
@@ -423,10 +423,10 @@ RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{
   chart(cc,ms.map(function(x){var d=new Date(x.week+'T00:00:00Z');return{k:x.week,l:d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}),v:x.total,cur:!!x.partial,t:x.week+': '+x.total+(x.partial?' so far':' merged'),tip:x.partial?'week in progress':x.week}}));
   if(tr[0])c4.appendChild(el('div',tr[0].note,{class:'hint'}))}
  var sys=el('div',null,{class:'two'});
- if(ku.ok&&r.monitors){var c5=card('Services',up+' of '+r.monitors.length+' up'),dots=el('div',null,{class:'dots',role:'img','aria-label':up+' of '+r.monitors.length+' monitors up'});
+ if(haveMon){var c5=card('Services',up+' of '+nTot+' up'+(nTot>r.monitors.length?' (first '+r.monitors.length+' shown)':'')),dots=el('div',null,{class:'dots',role:'img','aria-label':up+' of '+nTot+' monitors up'});
   r.monitors.forEach(function(m){dots.appendChild(el('i',null,{class:m.status==='up'?'ok':'down',title:m.name+': '+m.status}))});c5.appendChild(dots);
   var bad=r.monitors.filter(function(m){return m.status!=='up'});if(bad.length)c5.appendChild(el('ul',bad.map(function(m){return m.name+' is '+m.status}).join(', '),{class:'warn'}));sys.appendChild(c5)}
- if(r.cveNow&&r.cveNow.bySeverity){var c6=card('CVEs by severity','Run '+r.cveNow.id+(r.cveNow.complete?'':', incomplete read')),sv=r.cveNow.bySeverity,order=['CRITICAL','HIGH','MODERATE','LOW'];
+ if(r.cveNow&&r.cveNow.bySeverity){var c6=card('CVEs by severity','Run '+r.cveNow.id+(r.cveNow.complete?'':', incomplete read')),sv=r.cveNow.bySeverity,order=['CRITICAL','HIGH','MODERATE','LOW','unrated'];
   hbars(c6,order.filter(function(k){return sv[k]!=null}).map(function(k){return{l:k.charAt(0)+k.slice(1).toLowerCase(),v:sv[k],tone:k==='CRITICAL'||k==='HIGH'?'bad':'warn'}}));c6.appendChild(el('div',r.cveNow.actionable+' actionable, '+r.cveNow.exploited+' known exploited',{class:'mute'}));sys.appendChild(c6)}
  if(sys.children.length)box.appendChild(sys);
  var cn=card('Needs you ('+(r.needsYouTotal||0)+')');ageRows(cn,r.needsYou||[],r.needsYouTotal||0,'Nothing is waiting on you in the sources read.');box.appendChild(cn);
