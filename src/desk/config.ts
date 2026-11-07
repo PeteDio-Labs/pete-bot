@@ -161,9 +161,12 @@ export function loadDeskSettings(
     if (!/^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(qwenUrl)) return bad('DESK_QWEN_URL must be http(s)://host[:port]');
     const afterMs = int(env.DESK_FALLBACK_AFTER_MS, 2 * 3_600_000, 600_000);
     if (typeof afterMs === 'string') return bad(`DESK_FALLBACK_AFTER_MS ${afterMs}`);
+    // numCtx matches lab-agent's 8192, so both share the one qwen3:8b runner on the 3060 Ti. A larger
+    // context makes Ollama reload the model and add KV cache that 8 GB of VRAM may not hold.
+    // 12,000 characters of diff is about 4,000 tokens, which leaves room for the prompt and the answer.
     fallback = {
       afterMs,
-      qwen: { url: qwenUrl, model: (env.DESK_QWEN_MODEL ?? '').trim() || 'qwen3:8b', numCtx: 16384, maxDiffChars: 16_000, timeoutMs: 5 * 60_000 },
+      qwen: { url: qwenUrl, model: (env.DESK_QWEN_MODEL ?? '').trim() || 'qwen3:8b', numCtx: 8192, maxDiffChars: 12_000, timeoutMs: 5 * 60_000 },
     };
   }
 
