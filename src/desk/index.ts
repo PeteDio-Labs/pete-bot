@@ -10,6 +10,7 @@ import { MergeDesk, type DeskStatus } from './desk.js';
 import { discordNotifier } from './discord.js';
 import { GitHubApp } from './github.js';
 import { DeskStore } from './store.js';
+import { CodexGradeStore } from './codex-grades.js';
 import { logger } from '../utils/index.js';
 
 let desk: MergeDesk | null = null;
@@ -35,12 +36,22 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
     logger.error(`[Desk] The merge desk is off because it is misconfigured: ${deskState.reason}`);
     return;
   }
+  let grades: CodexGradeStore | undefined;
+  if (s.codexGradesPath) {
+    try {
+      grades = new CodexGradeStore(s.codexGradesPath);
+    } catch (err) {
+      // Grading is a measurement. A bad path costs the measurement, not the desk.
+      logger.error(`[Desk] Codex grading is off: DESK_CODEX_GRADES_PATH ${s.codexGradesPath} cannot be opened: ${String(err)}`);
+    }
+  }
   desk = new MergeDesk({
     settings: s,
     github: new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org }),
     codex: new CodexQueue(s.codex),
     qwen: s.fallback ? ollamaReviewer(s.fallback.qwen) : undefined,
     store,
+    grades,
     notifier: discordNotifier(client, ownerUserId),
     log: logger,
   });
