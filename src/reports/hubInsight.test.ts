@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { insightRecord, weekFraction, type InsightInput } from './hubInsight.js';
+import { activityOf, insightRecord, weekFraction, type InsightInput } from './hubInsight.js';
 import { HubJobs } from './hubJobs.js';
 import { ReportHub } from './hub.js';
 import type { OpenPr, RepoRead } from './collect.js';
@@ -98,6 +98,29 @@ describe('insightRecord', () => {
   it('weekFraction grows through the week and stays in range', () => {
     expect(weekFraction(new Date('2026-11-02T05:00:00Z'))).toBeLessThan(0.1);
     expect(weekFraction(new Date('2026-11-08T23:00:00Z'))).toBeGreaterThan(0.95);
+  });
+});
+
+describe('activityOf', () => {
+  const closed = (n: number, createdAt: string, mergedAt: string | null, repoName = 'petedio-iac') => ({ repo: repoName, number: n, title: 't', url: 'u', headSha: 's', headRef: 'b', closedAt: '', createdAt, mergedAt, author: 'x', petKeys: [], codex: null });
+  it('counts the last 24 hours against the 24 before, per day, and per repo', () => {
+    const reads: RepoRead[] = [
+      { repo: 'petedio-iac', ok: true, open: [pr(50, { createdAt: '2026-11-07T10:00:00Z' })], closed: [closed(1, '2026-11-07T01:00:00Z', '2026-11-07T11:00:00Z'), closed(2, '2026-11-05T01:00:00Z', '2026-11-06T09:00:00Z'), closed(3, '2026-11-01T01:00:00Z', null)], closedRead: 3 },
+      { repo: 'pete-bot', ok: true, open: [], closed: [closed(4, '2026-11-07T02:00:00Z', '2026-11-07T03:00:00Z', 'pete-bot')], closedRead: 1 },
+    ];
+    const a = activityOf(reads, AT) as { daily: { date: string; merged: number; opened: number }[]; last24: { merged: number; opened: number }; prev24: { merged: number; opened: number }; byRepo7: { repo: string; merged: number }[] };
+    expect(a.last24).toEqual({ merged: 2, opened: 3 });
+    expect(a.prev24).toEqual({ merged: 1, opened: 0 });
+    expect(a.daily).toHaveLength(14);
+    expect(a.daily[13]).toMatchObject({ date: '2026-11-07', merged: 1, opened: 1 }) // 01:00-03:00Z on Nov 7 is still Nov 6 in Eastern;
+    expect(a.byRepo7).toEqual([{ repo: 'petedio-iac', merged: 2 }, { repo: 'pete-bot', merged: 1 }]);
+  });
+  it('is null when no repo was read, so the page shows "not read" and not zero', () => {
+    expect(activityOf([{ repo: 'x', ok: false, error: 'e' }], AT)).toBeNull();
+  });
+  it('names a repo whose closed list was capped inside the window', () => {
+    const a = activityOf([{ repo: 'petedio-iac', ok: true, open: [], closed: [], closedRead: 200, closedReachBack: '2026-11-05T00:00:00Z' }], AT) as { floor: string[] };
+    expect(a.floor).toEqual(['petedio-iac']);
   });
 });
 
