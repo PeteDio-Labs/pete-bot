@@ -128,7 +128,7 @@ button.col{cursor:pointer}
 #view>*{animation:rise var(--d-normal) var(--ease) backwards}
 #view>*:nth-child(2){animation-delay:50ms}#view>*:nth-child(3){animation-delay:100ms}#view>*:nth-child(4){animation-delay:150ms}
 @media (hover:hover){.btn:hover,button.chip:hover{transform:translateY(-1px)}}
-.btn.primary{background:linear-gradient(#1a7fe8,#0071e3)}
+.btn.primary{background:linear-gradient(#0a7bf0,#0071e3)}
 details.card>summary{cursor:pointer;font-size:15px;font-weight:650;min-height:28px}
 details.card[open]>summary{margin-bottom:var(--s3)}
 .hint{font-size:13px;color:var(--label-2)}
@@ -144,7 +144,6 @@ main{padding:var(--s3);gap:var(--s6)}
 .chart{--h:132px}
 .plot,.x{gap:0}
 .col{padding:0 3px}
-#trend[data-many] .col:nth-child(-n+2),#trend[data-many] .x span:nth-child(-n+2){display:none}
 .stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s3)}
 .stats .stat+.stat{padding-left:var(--s3)}
 header.top{margin:0 calc(-1*var(--s3));padding:var(--s2) var(--s3)}
@@ -238,11 +237,11 @@ function icon(k){var s=document.createElementNS('http://www.w3.org/2000/svg','sv
 function chip(n,prev,badUp){if(prev==null||typeof prev!=='number')return null;var d=n-prev,c=el('span',null,{class:'delta '+(d===0?'flat':((d>0)!==!!badUp)?'good':'bad')});c.appendChild(icon(d));c.appendChild(document.createTextNode(d===0?'Same':(d>0?'+':'−')+Math.abs(d)));return c}
 function setChip(box,n,prev,badUp){clear(box);var c=chip(n,prev,badUp);if(c)box.appendChild(c)}
 function ceilTo(max){for(var k=1;k<=1e9;k*=10)for(var i=0;i<8;i++){var v=[1,2,2.5,4,5,6,8,10][i]*k;if(v>=max&&v>=2&&v%2===0&&v===Math.floor(v))return v}return 2}
-function chart(box,items,onpick){clear(box);if(items.length>6)box.setAttribute("data-many","");else box.removeAttribute("data-many");var max=Math.max.apply(null,items.map(function(x){return x.v}).concat([0])),top=ceilTo(max);
+function chart(box,items,onpick){clear(box);var max=Math.max.apply(null,items.map(function(x){return x.v}).concat([0])),top=ceilTo(max);
  var y=el('div',null,{class:'y','aria-hidden':'true'});[[top,0],[top/2,50],[0,100]].forEach(function(q){var s=el('span',String(q[0]));s.style.top=q[1]+'%';y.appendChild(s)});
  var plot=el('div',null,{class:'plot'}),x=el('div',null,{class:'x','aria-hidden':'true'});
  items.forEach(function(it,i){var c=el(onpick?'button':'div',null,{class:'col','aria-label':it.t});if(onpick)c.setAttribute('type','button');if(it.cur)c.setAttribute('aria-current','true');
-  var b=el('i');b.style.setProperty('--v',(it.v/top*100)+'%');b.style.animationDelay=(i*30)+'ms';c.appendChild(b);
+  var b=el('i');c.style.setProperty('--v',(it.v/top*100)+'%');b.style.animationDelay=(i*30)+'ms';c.appendChild(b);
   if(it.cur)c.appendChild(el('span',String(it.v),{class:'val'}));
   var t=el('span',null,{class:'tip'});t.appendChild(el('b',String(it.v)));t.appendChild(document.createTextNode(it.tip||it.l));c.appendChild(t);
   if(onpick)c.onclick=function(){onpick(it.k)};plot.appendChild(c);
@@ -267,7 +266,7 @@ function themes(box,w){var g={};
  w.merged.forEach(function(p){var ks=p.petKeys&&p.petKeys.length?p.petKeys.map(function(k){return'PET-'+k}):['No PET key'];ks.forEach(function(k){var e=g[k]||(g[k]={n:0,repos:{},title:p.title});e.n++;e.repos[p.repo]=1})});
  var ent=Object.keys(g).map(function(k){return[k,g[k]]}).sort(function(a,b){return b[1].n-a[1].n||a[0].localeCompare(b[0])});
  rankList(box,ent.map(function(p){return{bold:p[0],name:p[1].title,sub:Object.keys(p[1].repos).join(', '),n:p[1].n}}),8)}
-function petCount(w){var tk={};w.merged.forEach(function(p){(p.petKeys||[]).forEach(function(k){tk[k]=1})});return Object.keys(tk).length}
+function petCount(w){var tk={};(w.merged||[]).forEach(function(p){(p.petKeys||[]).forEach(function(k){tk[k]=1})});return Object.keys(tk).length}
 function genOpts(w){var s=$('genRepo'),keep=s.value;clear(s);var o=el('option','Whole week');o.value='';s.appendChild(o);Object.keys(w.byRepo).sort().forEach(function(r){var x=el('option','Repo: '+r);x.value=r;s.appendChild(x)});s.value=keep&&w.byRepo[keep]?keep:''}
 function repoSums(w){var box=$('repoSums'),m=w.repoSummaries||{},ks=Object.keys(m).sort();clear(box);$('repoSumCard').hidden=!ks.length;
  ks.forEach(function(k){var d=el('div');d.style.marginTop='12px';d.appendChild(el('b',k));d.appendChild(el('div',m[k].text));d.appendChild(el('div','Written '+new Date(m[k].at).toLocaleString()+' · '+m[k].model+' · '+m[k].prs+' PR(s)',{class:'hint'}));box.appendChild(d)})}
@@ -277,18 +276,18 @@ function generate(){var w=cur,repo=$('genRepo').value,b=$('gen'),msg=$('genMsg')
  .then(function(j){var cached=j.cached;delete j.cached;for(var i=0;i<data.length;i++)if(data[i].week===j.week)data[i]=j;if(cur.week===j.week)cur=j;render();msg.textContent=cached?'Already written, so nothing was generated again.':'Summary written '+new Date().toLocaleTimeString()+'.';msg.className='mute'})
  .catch(function(e){msg.textContent='Not written: '+e.message;msg.className='warn'}).then(function(){b.disabled=false})}
 function render(){
- var w=cur,pw=prevWeek(w);genOpts(w);repoSums(w);$('total').textContent=String(w.total);$('open').textContent=String(w.openNow);
- $('cTotal').textContent=pw?'vs last week ('+pw.total+')':'No earlier week recorded';setChip($('dTotal'),w.total,pw?pw.total:null,false);
+ var w=cur,pw=prevWeek(w),pbr=pw&&pw.byRepo?pw.byRepo:null;genOpts(w);repoSums(w);$('total').textContent=String(w.total);$('open').textContent=String(w.openNow);
+ $('cTotal').textContent=pw&&typeof pw.total==='number'?'vs last week ('+pw.total+')':'No earlier week recorded';setChip($('dTotal'),w.total,pw?pw.total:null,false);
  setChip($('dOpen'),w.openNow,pw?pw.openNow:null,true);
  var nr=Object.keys(w.byRepo).length,nt=petCount(w);$('nrepos').textContent=String(nr);$('nthemes').textContent=String(nt);
- setChip($('dRepos'),nr,pw?Object.keys(pw.byRepo).length:null,false);setChip($('dThemes'),nt,pw?petCount(pw):null,false);
+ setChip($('dRepos'),nr,pbr?Object.keys(pbr).length:null,false);setChip($('dThemes'),nt,pw&&pw.merged?petCount(pw):null,false);
  var has=!!(w.summary&&w.summary.text);$('focus').hidden=!has;$('emptySum').hidden=has;
  if(has)$('focus').textContent=w.summary.text;else $('emptyWhy').textContent=w.summary&&w.summary.reason?'Reason: '+w.summary.reason+'.':'Choose Generate summary to write one.';
  var c=w.coverage,notes=[];
  if(c.unread.length)notes.push('At least this many: '+c.unread.length+' repo(s) not read ('+c.unread.join(', ')+').');
  if(c.floorRepos.length)notes.push('At least this many: the read of '+c.floorRepos.join(', ')+' stopped inside the week.');
  var cv=$('cover');cv.textContent=notes.join(' ')||('Read '+c.reposRead+' of '+c.reposTotal+' repos. Generated '+new Date(w.generatedAt).toLocaleString()+(w.summary&&w.summary.source==='ollama'?' · summary by '+w.summary.model:'')+'.');cv.className=notes.length?'warn':'hint';
- rankList($('repos'),sortEnt(w.byRepo).map(function(p){return{name:p[0],n:p[1],chip:pw?chip(p[1],pw.byRepo[p[0]]||0,false):null}}),5);
+ rankList($('repos'),sortEnt(w.byRepo).map(function(p){return{name:p[0],n:p[1],chip:pbr?chip(p[1],pbr[p[0]]||0,false):null}}),5);
  rankList($('authors'),sortEnt(w.byAuthor).map(function(p){return{name:p[0],n:p[1]}}),5);themes($('themes'),w);
  var dc=[0,0,0,0,0,0,0];w.merged.forEach(function(p){var i=dayOf(p.mergedAt);if(i>=0)dc[i]++});var best=Math.max.apply(null,dc);
  chart($('days'),DAYS.map(function(d,i){return{k:i,l:d,v:dc[i],cur:best>0&&dc[i]===best&&dc.indexOf(best)===i,t:d+': '+dc[i]+' merged',tip:d}}));
@@ -305,7 +304,7 @@ function render(){
   tr.appendChild(td);tr.appendChild(el('td',p.title,{'data-label':'Title'}));tr.appendChild(el('td',p.author,{'data-label':'Author'}));
   tr.appendChild(el('td',new Date(p.mergedAt).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}),{'data-label':'Merged'}));tb.appendChild(tr)});
  if(!shown){var r=el('tr'),t=el('td',w.merged.length?'No PR matches the filter.':'No merged PRs recorded for this week.',{colspan:'4',class:'mute'});r.appendChild(t);tb.appendChild(r)}
- var rev=data.slice(0,8).reverse();
+ var n=window.innerWidth<=640?6:8,ci=data.indexOf(w),s0=ci<n?0:ci-n+1,rev=data.slice(s0,s0+n).reverse();
  chart($('trend'),rev.map(function(x){var d=new Date(x.week+'T00:00:00Z');return{k:x.week,l:d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}),v:x.total,cur:x.week===w.week,t:fmtWeek(x.week)+': '+x.total+' merged',tip:fmtWeek(x.week)}}),select)}
 function select(week){cur=data.filter(function(x){return x.week===week})[0];repoFilter=null;$('weekSel').value=week;render()}
 
