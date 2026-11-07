@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { openReportDb } from './db.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDashboardApp } from './dashboard.js';
@@ -30,7 +31,7 @@ describe('ReportHub', () => {
     expect(() => hub.save('../x', rec('2026-11-07'))).toThrow('bad report kind');
     expect(() => hub.save('cve', rec('../x'))).toThrow('bad record id');
     hub.save('cve', rec('2026-11-07'));
-    writeFileSync(join(dir, 'reports', 'cve', '2026-11-08.json'), '{bad');
+    openReportDb(dir).query('INSERT INTO hub (kind, id, body) VALUES (?, ?, ?)').run('cve', '2026-11-08', '{bad');
     expect(hub.list('cve')).toEqual({ records: [rec('2026-11-07')], unreadable: ['2026-11-08'] });
   });
   it('does not disturb the weekly store that shares the directory', () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GithubReads } from './collect.js';
@@ -7,6 +7,7 @@ import { createDashboardApp } from './dashboard.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import { buildWeek, cleanSummary, dueWeeks, biggestGroups, groupPrs, lintSummary, summaryPrompt, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekPr, type WeekRecord } from './weekly.js';
 import { loadWeeklySettings } from './weeklySettings.js';
+import { openReportDb } from './db.js';
 
 const pr = (n: number, merged: string | null, extra: Record<string, unknown> = {}) => ({
   number: n, title: `PET-${n} thing`, html_url: `https://github.com/o/r/pull/${n}`, user: { login: 'petedillo' },
@@ -162,7 +163,7 @@ describe('store and runner', () => {
     const s = new WeekStore(dir);
     s.save(rec('2026-11-02'));
     s.save(rec('2026-11-09'));
-    writeFileSync(join(dir, '2026-11-16.json'), '{bad');
+    openReportDb(dir).query('INSERT INTO weeks (week, body) VALUES (?, ?)').run('2026-11-16', '{bad');
     const all = s.all();
     expect(all.weeks.map((w) => w.week)).toEqual(['2026-11-09', '2026-11-02']);
     expect(all.unreadable).toEqual(['2026-11-16']);
