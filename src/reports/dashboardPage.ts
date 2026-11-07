@@ -292,7 +292,8 @@ function render(){
  var ml=w.medianLeadHours,pml=pw?pw.medianLeadHours:null;$('lead').textContent=(typeof ml==='number')?(ml<10?ml.toFixed(1):String(Math.round(ml))):'–';
  var botPct=function(x){return x&&x.total?Math.round(((x.byAuthor&&x.byAuthor['threads bot'])||0)/x.total*100):null};
  var bp=botPct(w);$('bot').textContent=bp===null?'–':String(bp);
- setChip($('dLead'),typeof ml==='number'?ml:null,typeof pml==='number'?pml:null,true);setChip($('dBot'),bp,botPct(pw),false);
+ if(typeof ml==='number')setChip($('dLead'),ml,typeof pml==='number'?pml:null,true);else clear($('dLead'));
+ if(bp!==null)setChip($('dBot'),bp,botPct(pw),false);else clear($('dBot'));
  var nr=Object.keys(w.byRepo).length,nt=petCount(w);$('nrepos').textContent=String(nr);$('nthemes').textContent=String(nt);
  setChip($('dRepos'),nr,pbr?Object.keys(pbr).length:null,false);setChip($('dThemes'),nt,pw&&pw.merged?petCount(pw):null,false);
  var has=!!(w.summary&&w.summary.text);$('focus').hidden=!has;$('emptySum').hidden=has;
