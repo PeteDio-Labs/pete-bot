@@ -38,6 +38,10 @@ export interface PrMemory {
   /** The head Pedro asked Codex to review again, and when. Reviews of it before then don't count. */
   requeueSha?: string;
   requeuedAt?: string;
+  /** When the queue call for queueFailedSha failed (ISO). The automatic retry timer starts here. */
+  queueFailedAt?: string;
+  /** Queue calls made for queuedSha, so a broken queue is retried a few times and not forever. */
+  queueTries?: number;
   /** When the desk queued Codex for queuedSha (ISO). The fallback timer starts here. */
   queuedAt?: string;
   /** The local Qwen pass on one head (PET-751). Reset by any push, because it names its SHA. */
@@ -45,6 +49,9 @@ export interface PrMemory {
 }
 
 /** `clean` is the only verdict that lets a PR through. Every other value holds it. */
+/** A failed Codex queue call is retried after this long, up to QUEUE_MAX_TRIES calls per head. */
+export const QUEUE_RETRY_MS = 15 * 60_000;
+export const QUEUE_MAX_TRIES = 3;
 export const FAILED_GRACE_MS = 30 * 60_000;
 /** Qwen passes the desk will run on one head after an unreadable answer. */
 export const QWEN_MAX_TRIES = 3;
@@ -162,7 +169,13 @@ export function decide(f: Facts): Decision {
     } else {
       if (f.memory.queuedSha === sha) {
         if (f.memory.queueRunning) return { kind: 'wait', reason: 'Codex is reviewing the head' };
-        if (f.memory.queueFailedSha === sha) return { kind: 'wait', reason: 'queueing Codex failed for this head' };
+        if (f.memory.queueFailedSha === sha) {
+          const failedFor = (f.now ?? Date.now()) - (Date.parse(f.memory.queueFailedAt ?? '') || 0);
+          if ((f.memory.queueTries ?? 1) < QUEUE_MAX_TRIES && failedFor >= QUEUE_RETRY_MS) {
+            return { kind: 'queue', sha, effort: effortFor(f.classification.tier) };
+          }
+          return { kind: 'wait', reason: 'queueing Codex failed for this head' };
+        }
         return { kind: 'wait', reason: 'Codex finished but posted no review of the head yet' };
       }
       return { kind: 'queue', sha, effort: effortFor(f.classification.tier) };

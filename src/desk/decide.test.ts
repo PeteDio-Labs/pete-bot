@@ -145,10 +145,21 @@ describe('Codex', () => {
 
   it('queues a head once', () => {
     expect(decide(facts({ codex: [], memory: { queuedSha: HEAD, queueRunning: true } })).kind).toBe('wait');
-    expect(decide(facts({ codex: [], memory: { queuedSha: HEAD, queueFailedSha: HEAD } }))).toEqual({
+    expect(decide(facts({ codex: [], memory: { queuedSha: HEAD, queueFailedSha: HEAD, queueTries: 3 } }))).toEqual({
       kind: 'wait',
       reason: 'queueing Codex failed for this head',
     });
+  });
+
+  it('retries a failed queue call after fifteen minutes, three calls per head', () => {
+    const now = Date.parse('2026-11-07T12:00:00Z');
+    const at = (min: number) => new Date(now - min * 60_000).toISOString();
+    const q = (failedMin: number, tries: number) =>
+      decide(facts({ codex: [], now, memory: { queuedSha: HEAD, queueFailedSha: HEAD, queueFailedAt: at(failedMin), queueTries: tries } })).kind;
+    expect(q(5, 1)).toBe('wait');
+    expect(q(20, 1)).toBe('queue');
+    expect(q(20, 2)).toBe('queue');
+    expect(q(20, 3)).toBe('wait');
   });
 
   it('waits on changes requested', () => {

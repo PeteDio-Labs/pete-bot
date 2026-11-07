@@ -203,6 +203,13 @@ export class MergeDesk {
     const { store, log } = this.deps;
     for (const { repo, n, memory } of store.entries()) {
       if (!memory.queueRunning || !memory.queuedSha) continue;
+      // A restart is not a Codex failure. Queue again on the next poll, a few times per head;
+      // only a head that keeps getting interrupted is reported (PET-751).
+      if ((memory.queueTries ?? 1) < 3) {
+        store.update(repo, n, { queueRunning: false, queueFailedSha: memory.queuedSha, queueFailedAt: new Date(0).toISOString() });
+        log.warn(`merge desk: the Codex queue for ${repo}#${n} at ${short(memory.queuedSha)} was running when pete-bot stopped; queueing again`);
+        continue;
+      }
       store.update(repo, n, { queueRunning: false });
       log.warn(`merge desk: the Codex queue for ${repo}#${n} at ${short(memory.queuedSha)} was running when pete-bot stopped`);
       await this.reportQueueFailure(repo, n, memory.queuedSha, 'pete-bot restarted while it ran', '').catch((err) =>
@@ -361,7 +368,8 @@ export class MergeDesk {
         return;
 
       case 'queue': {
-        store.update(repo, n, { queuedSha: d.sha, queuedAt: new Date().toISOString(), queueRunning: true, queueFailedSha: undefined });
+        const tries = mem.queuedSha === d.sha ? (mem.queueTries ?? 1) + 1 : 1;
+        store.update(repo, n, { queuedSha: d.sha, queuedAt: mem.queuedSha === d.sha && mem.queuedAt ? mem.queuedAt : new Date().toISOString(), queueTries: tries, queueRunning: true, queueFailedSha: undefined, queueFailedAt: undefined });
         log.info(`merge desk: queueing Codex (${d.effort}) for ${repo}#${n} at ${short(d.sha)}`);
         const run = this.deps.codex
           .enqueue(repo, n, d.effort)
@@ -486,7 +494,7 @@ export class MergeDesk {
 
   /** Marks the head's queue failed, then one comment and one DM with a button to queue again. */
   private async reportQueueFailure(repo: string, n: number, sha: string, why: string, tail: string): Promise<void> {
-    this.deps.store.update(repo, n, { queueFailedSha: sha });
+    this.deps.store.update(repo, n, { queueFailedSha: sha, queueFailedAt: new Date().toISOString() });
     const detail = tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : '';
     // A quota refusal fails every open PR the same way until the quota resets. Each PR keeps
     // its comment; Pedro gets one DM per six hours, not one per PR and head.

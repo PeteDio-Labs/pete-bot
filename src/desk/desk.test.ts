@@ -347,10 +347,24 @@ describe('review fixes (Codex round 1)', () => {
     expect(queued).toEqual([`codex-review ${REPO} 5 low`]);
   });
 
-  it('reports a queue the last process left running, and Review again queues it', async () => {
+  it('queues again after a restart interrupted the queue, without a report', async () => {
     gh.reviews = [];
     const store = new DeskStore(':memory:');
-    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true });
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 1 });
+    const desk = makeDesk({}, store);
+    await desk.recoverOrphans();
+    expect(gh.comments).toEqual([]);
+    expect(dms).toEqual([]);
+    await desk.poll();
+    await settle(desk);
+    expect(queued).toHaveLength(1);
+    expect(store.get(REPO, 5).queueTries).toBe(2);
+  });
+
+  it('reports a queue the last process left running after three calls, and Review again queues it', async () => {
+    gh.reviews = [];
+    const store = new DeskStore(':memory:');
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 3 });
     const desk = makeDesk({}, store);
     await desk.recoverOrphans();
     expect(gh.comments[0]).toContain('pete-bot restarted while it ran');
@@ -416,7 +430,7 @@ describe('review fixes (Codex round 2)', () => {
     const desk = makeDesk({}, store);
     await desk.poll();
     // A push queued the next head while the first job still ran.
-    store.update(REPO, 5, { queuedSha: NEXT, queueRunning: true });
+    store.update(REPO, 5, { queuedSha: NEXT, queueRunning: true, queueTries: 3 });
     await settle(desk);
     expect(store.get(REPO, 5)).toMatchObject({ queuedSha: NEXT, queueRunning: true });
     expect(gh.comments).toEqual([]);

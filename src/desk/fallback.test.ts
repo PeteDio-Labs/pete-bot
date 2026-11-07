@@ -33,8 +33,8 @@ function facts(tier: 0 | 1 | 2, memory: PrMemory, over: Partial<Facts> = {}): Fa
 }
 
 const silent: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 3 * HOUR).toISOString() };
-const failed: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 40 * 60_000).toISOString(), queueFailedSha: HEAD };
-const blip: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 5 * 60_000).toISOString(), queueFailedSha: HEAD };
+const failed: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 40 * 60_000).toISOString(), queueFailedSha: HEAD, queueFailedAt: new Date(NOW - 30 * 60_000).toISOString(), queueTries: 3 };
+const blip: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 5 * 60_000).toISOString(), queueFailedSha: HEAD, queueFailedAt: new Date(NOW - 60_000).toISOString() };
 
 describe('Codex-out fallback', () => {
   it('waits for Codex inside the window', () => {
