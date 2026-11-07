@@ -249,6 +249,8 @@ export class WeeklyRunner {
   private readonly now: () => Date;
   /** What the last attempt did, for /health: "never ran" and "ran, failed" must differ. */
   last: { at: string; week: string; ok: boolean; detail: string } | null = null;
+  /** When each week was last tried, so a failing read is retried once an hour, not every tick. */
+  private readonly attempted = new Map<string, number>();
   /** The latest failure, kept after a later success so /health does not hide it. */
   lastFailure: { at: string; week: string; detail: string } | null = null;
 
@@ -268,10 +270,12 @@ export class WeeklyRunner {
     try {
       const at = this.now();
       const stale = (w: string): boolean => {
+        if (at.getTime() - (this.attempted.get(w) ?? 0) < REBUILD_GAP_MS) return false;
         const rec = this.d.store.all().weeks.find((r) => r.week === w);
         return rec ? needsRebuild(rec, at) : true;
       };
-      for (const week of dueWeeks(at, (w) => this.d.store.has(w), stale)) await this.generate(week);
+      const has = (w: string): boolean => this.d.store.has(w) || at.getTime() - (this.attempted.get(w) ?? 0) < REBUILD_GAP_MS;
+      for (const week of dueWeeks(at, has, stale)) await this.generate(week);
     } catch (err) {
       // An unreadable store must not escape as an unhandled rejection from the timer.
       const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
@@ -287,7 +291,18 @@ export class WeeklyRunner {
   async generate(week: string): Promise<boolean> {
     const at = this.now();
     try {
+      this.attempted.set(week, at.getTime());
       const rec = await buildWeek(this.d.gh, this.d.org, this.d.repos, week, at, this.d.summarize);
+      const old = this.d.store.all().weeks.find((r) => r.week === week);
+      if (old) {
+        // A rebuild repairs a record, never degrades it: a worse read keeps the stored one.
+        if (rec.coverage.reposRead < old.coverage.reposRead || rec.total < old.total) {
+          this.d.log.warn(`[Weekly] ${week}: rebuild read less than the stored record (${rec.total} merged, ${rec.coverage.reposRead} repos, was ${old.total}, ${old.coverage.reposRead}), kept the stored one`);
+          this.last = { at: at.toISOString(), week, ok: true, detail: 'rebuild read less than the stored record, kept it' };
+          return true;
+        }
+        if (rec.summary.source === 'none' && old.summary.source === 'ollama') rec.summary = old.summary;
+      }
       this.d.store.save(rec);
       this.last = { at: at.toISOString(), week, ok: true, detail: `${rec.total} merged, summary ${rec.summary.source}` };
       this.d.log.info(`[Weekly] ${week}: ${rec.total} merged, ${rec.coverage.reposRead}/${rec.coverage.reposTotal} repos read, summary ${rec.summary.source}`);

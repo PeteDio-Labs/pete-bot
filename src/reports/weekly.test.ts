@@ -146,6 +146,42 @@ describe('store and runner', () => {
   });
 });
 
+describe('rebuild never degrades a stored week', () => {
+  it('keeps the stored record and its summary when the rebuild reads less', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wk-'));
+    const store = new WeekStore(dir);
+    const log = { info() {}, warn() {}, error() {} };
+    const first = new WeeklyRunner({ gh: fakeGh({ a: [pr(1, '2026-11-04T12:00:00Z')], b: [pr(2, '2026-11-05T12:00:00Z')] }), org: 'o', repos: ['a', 'b'], store, summarize: ok, log, now: () => SUN });
+    await first.generate(WEEK);
+    // Monday: repo b now fails and Qwen is down.
+    const later = new WeeklyRunner({ gh: fakeGh({ a: [pr(1, '2026-11-04T12:00:00Z')], b: new Error('HTTP 502') }), org: 'o', repos: ['a', 'b'], store, summarize: async () => { throw new Error('down'); }, log, now: () => new Date('2026-11-09T15:00:00Z') });
+    await later.generate(WEEK);
+    expect(store.all().weeks[0]).toMatchObject({ total: 2, summary: { source: 'ollama' } });
+    // A rebuild that reads as much but loses only the summary keeps the old summary.
+    const sameRead = new WeeklyRunner({ gh: fakeGh({ a: [pr(1, '2026-11-04T12:00:00Z')], b: [pr(2, '2026-11-05T12:00:00Z')] }), org: 'o', repos: ['a', 'b'], store, summarize: async () => { throw new Error('down'); }, log, now: () => new Date('2026-11-09T16:00:00Z') });
+    await sameRead.generate(WEEK);
+    expect(store.all().weeks[0]).toMatchObject({ total: 2, summary: { source: 'ollama', text: 'Infra and dashboards.' } });
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it('retries a failing week once an hour, not every tick', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wk-'));
+    let calls = 0;
+    const gh = fakeGh({ a: new Error('HTTP 502') });
+    const counting: GithubReads = { ...gh, async get(w, p) { calls++; return gh.get(w, p); } };
+    let t = new Date('2026-11-10T15:00:00Z');
+    const r = new WeeklyRunner({ gh: counting, org: 'o', repos: ['a'], store: new WeekStore(dir), summarize: ok, log: { info() {}, warn() {}, error() {} }, now: () => t });
+    await r.tick();
+    const first = calls;
+    t = new Date('2026-11-10T15:10:00Z');
+    await r.tick();
+    expect(calls).toBe(first);
+    t = new Date('2026-11-10T16:05:00Z');
+    await r.tick();
+    expect(calls).toBeGreaterThan(first);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe('dashboard', () => {
   let dir = '';
   afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
