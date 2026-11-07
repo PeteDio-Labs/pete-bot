@@ -23,7 +23,7 @@ import { codexReviews } from './codex.js';
 import type { ClassifierSource, RunPython } from './classify.js';
 import { classify } from './classify.js';
 import type { QwenReviewer } from './qwen.js';
-import { checkGate, decide, blockingRounds, MAX_ROUNDS, type Decision, type Facts } from './decide.js';
+import { checkGate, decide, blockingRounds, MAX_ROUNDS, QUEUE_MAX_TRIES, type Decision, type Facts } from './decide.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp } from './github.js';
 import type { DeskStore, Outgoing } from './store.js';
@@ -79,6 +79,9 @@ export interface QwenLedger {
   since: string | null;
   recent: { repo: string; pr: number; by: string; verdict: string; merged: boolean; outcome: string | null; at: string }[];
 }
+
+/** A fallback merge with no revert after this long is marked `held`, and the poll stops reading commits for it. */
+const HOLD_AFTER_MS = 14 * 24 * 3_600_000;
 
 export const BUTTON_PREFIX = 'desk';
 
@@ -218,8 +221,9 @@ export class MergeDesk {
       if (!memory.queueRunning || !memory.queuedSha) continue;
       // A restart is not a Codex failure. Queue again on the next poll, a few times per head;
       // only a head that keeps getting interrupted is reported (PET-751).
-      if ((memory.queueTries ?? 1) < 3) {
-        store.update(repo, n, { queueRunning: false, queueFailedSha: memory.queuedSha, queueFailedAt: new Date(0).toISOString() });
+      if ((memory.queueTries ?? 1) < QUEUE_MAX_TRIES) {
+        // queuedAt restarts so a long Codex run cut off by the restart does not look like Codex being out.
+        store.update(repo, n, { queueRunning: false, queuedAt: new Date().toISOString(), queueFailedSha: memory.queuedSha, queueFailedAt: new Date(0).toISOString() });
         log.warn(`merge desk: the Codex queue for ${repo}#${n} at ${short(memory.queuedSha)} was running when pete-bot stopped; queueing again`);
         continue;
       }
@@ -306,7 +310,7 @@ export class MergeDesk {
           }
         }
       }
-      const o = !this.deps.store.ledger().some((r) => r.mergedAt && r.outcome === null) ? null : await this.checkLedgerOutcomes().catch((err) => {
+      const o = this.deps.store.ledgerOpen().length === 0 ? null : await this.checkLedgerOutcomes().catch((err) => {
         errors.push(`ledger outcomes: ${String(err)}`);
         return null;
       });
@@ -387,7 +391,7 @@ export class MergeDesk {
 
       case 'queue': {
         const tries = mem.queuedSha === d.sha ? (mem.queueTries ?? 1) + 1 : 1;
-        store.update(repo, n, { queuedSha: d.sha, queuedAt: mem.queuedSha === d.sha && mem.queuedAt ? mem.queuedAt : new Date().toISOString(), queueTries: tries, queueRunning: true, queueFailedSha: undefined, queueFailedAt: undefined });
+        store.update(repo, n, { queuedSha: d.sha, queuedAt: new Date().toISOString(), queueTries: tries, queueRunning: true, queueFailedSha: undefined, queueFailedAt: undefined });
         log.info(`merge desk: queueing Codex (${d.effort}) for ${repo}#${n} at ${short(d.sha)}`);
         const run = this.deps.codex
           .enqueue(repo, n, d.effort)
@@ -470,7 +474,7 @@ export class MergeDesk {
    */
   async checkLedgerOutcomes(): Promise<{ checked: number; reverted: number; read: number }> {
     const { store, github } = this.deps;
-    const open = store.ledger().filter((r) => r.mergedAt && r.outcome === null);
+    const open = store.ledgerOpen();
     let reverted = 0;
     let read = 0;
     const subjects = new Map<string, string[]>();
@@ -483,6 +487,9 @@ export class MergeDesk {
       if (hit) {
         store.ledgerOutcome(row.id, 'reverted');
         reverted++;
+      } else if (Date.now() - Date.parse(row.mergedAt!) > HOLD_AFTER_MS) {
+        // Two weeks on main with no revert naming it. This says nothing about bugs fixed by a normal commit.
+        store.ledgerOutcome(row.id, 'held');
       }
     }
     return { checked: open.length, reverted, read };
@@ -559,6 +566,12 @@ export class MergeDesk {
   /** Marks the head's queue failed, then one comment and one DM with a button to queue again. */
   private async reportQueueFailure(repo: string, n: number, sha: string, why: string, tail: string): Promise<void> {
     this.deps.store.update(repo, n, { queueFailedSha: sha, queueFailedAt: new Date().toISOString() });
+    // The desk retries a failed call itself. Report the first failure and the last, not the ones between.
+    const tries = this.deps.store.get(repo, n).queueTries ?? 1;
+    if (tries > 1 && tries < QUEUE_MAX_TRIES) {
+      this.deps.log.warn(`merge desk: Codex queue call ${tries} of ${QUEUE_MAX_TRIES} for ${repo}#${n} failed (${why}); retrying`);
+      return;
+    }
     const detail = tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : '';
     // A quota refusal fails every open PR the same way until the quota resets. Each PR keeps
     // its comment; Pedro gets one DM per six hours, not one per PR and head.
@@ -615,7 +628,14 @@ export class MergeDesk {
     }
     const where = landed ? `on \`${f.defaultBranch}\`` : `but I could not confirm it is on \`${f.defaultBranch}\``;
     store.update(repo, n, { mergedSha: result.sha });
-    if (by !== 'codex') store.ledgerMerged({ repo, pr: n, sha, tier: f.classification.tier, by, mergedSha: result.sha });
+    if (by !== 'codex') {
+      try {
+        store.ledgerMerged({ repo, pr: n, sha, tier: f.classification.tier, by, mergedSha: result.sha });
+      } catch (err) {
+        // The PR is merged. A ledger write that fails must not skip the report below.
+        this.deps.log.error(`merge desk: the ledger write for ${repo}#${n} failed: ${String(err)}`);
+      }
+    }
     this.state.merged++;
     await this.report(repo, n, {
       comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,

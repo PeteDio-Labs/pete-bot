@@ -367,9 +367,11 @@ describe('review fixes (Codex round 1)', () => {
   it('queues again after a restart interrupted the queue, without a report', async () => {
     gh.reviews = [];
     const store = new DeskStore(':memory:');
-    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 1 });
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 1, queuedAt: '2026-01-01T00:00:00Z' });
     const desk = makeDesk({}, store);
     await desk.recoverOrphans();
+    // The fallback clock restarts, so a long Codex run cut off by the restart is not read as Codex being out.
+    expect(Date.now() - Date.parse(store.get(REPO, 5).queuedAt!)).toBeLessThan(10_000);
     expect(gh.comments).toEqual([]);
     expect(dms).toEqual([]);
     await desk.poll();

@@ -48,7 +48,6 @@ export interface PrMemory {
   qwen?: { sha: string; verdict: QwenVerdict | 'running'; at: string; tries?: number };
 }
 
-/** `clean` is the only verdict that lets a PR through. Every other value holds it. */
 /** A failed Codex queue call is retried after this long, up to QUEUE_MAX_TRIES calls per head. */
 export const QUEUE_RETRY_MS = 15 * 60_000;
 export const QUEUE_MAX_TRIES = 3;
@@ -56,6 +55,7 @@ export const FAILED_GRACE_MS = 30 * 60_000;
 /** Qwen passes the desk will run on one head after an unreadable answer. */
 export const QWEN_MAX_TRIES = 3;
 
+/** `clean` is the only verdict that lets a PR through. Every other value holds it. */
 export type QwenVerdict = 'clean' | 'block' | 'unreadable' | 'too-large';
 
 /** How long a `running` Qwen pass counts before the desk assumes pete-bot restarted and runs it again. */

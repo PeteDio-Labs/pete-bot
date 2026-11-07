@@ -126,12 +126,17 @@ export class DeskStore {
       .run(row.repo, row.pr, row.sha, row.tier, row.by, row.by === 'ci' ? 'none' : 'clean', now, row.mergedSha, now);
   }
 
+  /** Fallback merges not yet judged by a later outcome. A query, so the poll never loads the whole table. */
+  ledgerOpen(): LedgerRow[] {
+    return this.ledger('WHERE merged_at IS NOT NULL AND outcome IS NULL');
+  }
+
   ledgerOutcome(id: number, outcome: 'reverted' | 'held'): void {
     this.db.query('UPDATE qwen_ledger SET outcome = ? WHERE id = ?').run(outcome, id);
   }
 
-  ledger(): LedgerRow[] {
-    const rows = this.db.query('SELECT * FROM qwen_ledger ORDER BY id DESC').all() as Record<string, unknown>[];
+  ledger(where = ''): LedgerRow[] {
+    const rows = this.db.query(`SELECT * FROM qwen_ledger ${where} ORDER BY id DESC`).all() as Record<string, unknown>[];
     return rows.map((r) => ({
       id: r.id as number,
       repo: r.repo as string,
