@@ -377,6 +377,19 @@ describe('review fixes (Codex round 1)', () => {
     expect(desk.codexGrades()).toMatchObject({ graded: 1, agree: 0, disagree: 1, missed: 1 });
   });
 
+  it('grades against the latest Codex review of a head', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    const grades = new CodexGradeStore(':memory:');
+    gh.reviews = [
+      codexReview('Changes requested', HEAD, '2026-10-16T01:00:00Z'),
+      codexReview('No blocking findings', HEAD, '2026-10-16T02:00:00Z'),
+    ];
+    const desk = makeDesk({}, store, grades);
+    await desk.poll();
+    expect(desk.codexGrades()).toMatchObject({ graded: 1, agree: 1, disagree: 0 });
+  });
+
   it('grades nothing when no grade store is set', async () => {
     const store = new DeskStore(':memory:');
     store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });

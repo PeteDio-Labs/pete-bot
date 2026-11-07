@@ -507,9 +507,12 @@ export class MergeDesk {
     const { grades, store, log } = this.deps;
     if (!grades || f.codex.length === 0) return;
     try {
-      const judged = store.ledger().filter((r) => r.by === 'qwen' && r.repo === repo && r.pr === n);
+      // A row made by the merge alone (judged_at equals merged_at) holds a placeholder word, not a Qwen verdict.
+      const judged = store.ledgerForPr(repo, n).filter((r) => r.judgedAt !== r.mergedAt);
       for (const row of judged) {
-        const review = f.codex.find((r) => r.commitId === row.sha);
+        const review = f.codex
+          .filter((r) => r.commitId === row.sha)
+          .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
         if (review && grades.record({ repo, pr: n, sha: row.sha, qwen: row.verdict, codex: review.verdict, codexUrl: review.url })) {
           log.info(`merge desk: Codex graded the Qwen verdict on ${repo}#${n} at ${short(row.sha)}`);
         }
