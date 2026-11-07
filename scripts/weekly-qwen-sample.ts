@@ -7,13 +7,13 @@
  *
  * Needs `gh` signed in (the Mac has it) and a route to the Ollama host. Each week is summarized
  * `--runs` times, because the question is whether the answer is stable as well as correct.
- * The report lists the PR titles the model saw, so a reader can judge the summary against them.
+ * The report lists the PR titles behind it, so a reader can judge the summary against them.
  *
  * ⚠ A SAMPLE SAYS WHAT IT READ. The report header gives how many PRs each week fed the model.
  * A week with no PR prints "no PRs read" and no summary; GitHub failing exits non-zero.
  */
 import { weekStart } from '../src/reports/merged.js';
-import { lintSummary, ollamaSummarizer, WEEKLY_MODEL, type WeekPr } from '../src/reports/weekly.js';
+import { lintSummary, ollamaSummarizer, summaryPrompt, WEEKLY_MODEL, type WeekPr } from '../src/reports/weekly.js';
 
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -73,7 +73,7 @@ for (const week of weeks) {
       lines.push(`**Run ${r}** failed after ${((Date.now() - t0) / 1000).toFixed(1)} s: ${(err as Error).message}`, '');
     }
   }
-  lines.push('<details><summary>PR titles the model saw</summary>', '', ...prs.slice(0, 120).map((p) => `- ${p.repo}#${p.number}: ${p.title}`), '', '</details>', '');
+  lines.push('<details><summary>What the model saw</summary>', '', summaryPrompt(prs, week).user, '', '</details>', '');
 }
 console.log(lines.join('\n'));
 if (failures > 0) process.exit(1);
