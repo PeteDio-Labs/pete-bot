@@ -26,6 +26,8 @@ export interface OpenPr {
   headSha: string;
   headRef: string;
   updatedAt: string;
+  /** When the PR was opened. Absent on records built before the activity charts. */
+  createdAt?: string;
   mergeable: boolean | null;
   petKeys: number[];
   checks: CheckSummary | null;
@@ -44,6 +46,8 @@ export interface ClosedPr {
   /** When the PR was opened. */
   createdAt?: string;
   closedAt: string;
+  /** When the PR was opened. */
+  createdAt?: string;
   mergedAt: string | null;
   /** The login that opened the PR. */
   author: string;
@@ -126,6 +130,7 @@ export async function collectRepo(
         headSha: r.head.sha,
         headRef: r.head.ref,
         updatedAt: r.updated_at,
+        createdAt: r.created_at,
         mergeable: detail ? detail.mergeable : null,
         petKeys: petKeys(r.title, r.head.ref),
         checks,
@@ -152,6 +157,7 @@ export async function collectRepo(
         headRef: r.head.ref,
         createdAt: r.created_at,
         closedAt: r.closed_at ?? '',
+        createdAt: r.created_at,
         mergedAt: r.merged_at ?? null,
         author: r.user?.login ?? '',
         petKeys: petKeys(r.title, r.head.ref),

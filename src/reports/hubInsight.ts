@@ -237,6 +237,88 @@ function openTrend(openNow: number | null, planeHistory: HubRecord[]): Trend {
   };
 }
 
+const HOUR_MS = 3_600_000;
+const DAYS_SHOWN = 14;
+const REPOS_SHOWN = 8;
+
+export interface DayBar {
+  date: string;
+  merged: number;
+  opened: number;
+}
+
+/**
+ * PR flow for the charts: merged and opened per Eastern day for 14 days, the last 24 hours against
+ * the 24 hours before, and merged per repo over 7 days. Opened PRs come from the open list and the
+ * closed list the report reads, so `floor` names repos whose closed list was capped inside the
+ * window: their counts are a floor, never a total.
+ */
+export function activityOf(reads: RepoRead[], at: Date): Record<string, unknown> | null {
+  const read = reads.filter((r) => r.ok);
+  if (read.length === 0) return null;
+  const today = localTime(at).date;
+  const dates = [...Array(DAYS_SHOWN)].map((_, k) => new Date(Date.parse(`${today}T12:00:00Z`) - (DAYS_SHOWN - 1 - k) * DAY_MS).toISOString().slice(0, 10));
+  const days = new Map<string, DayBar>(dates.map((d) => [d, { date: d, merged: 0, opened: 0 }]));
+  const now = at.getTime();
+  const win = (iso: string | null | undefined, from: number, to: number): boolean => {
+    const t = iso ? Date.parse(iso) : NaN;
+    return Number.isFinite(t) && t > now - from * HOUR_MS && t <= now - to * HOUR_MS;
+  };
+  const last = { merged: 0, opened: 0 };
+  const prev = { merged: 0, opened: 0 };
+  const byRepo = new Map<string, number>();
+  const floor: string[] = [];
+  const seenOpened = new Set<string>();
+  const countOpened = (repoName: string, n: number, iso: string | undefined): void => {
+    if (!iso || seenOpened.has(`${repoName}#${n}`)) return;
+    seenOpened.add(`${repoName}#${n}`);
+    const d = days.get(localTime(new Date(iso)).date);
+    if (d) d.opened++;
+    if (win(iso, 24, 0)) last.opened++;
+    else if (win(iso, 48, 24)) prev.opened++;
+  };
+  for (const r of read) {
+    if (!r.ok) continue;
+    if (r.closedReachBack && localTime(new Date(r.closedReachBack)).date > dates[0]!) floor.push(r.repo);
+    for (const p of r.open) countOpened(r.repo, p.number, p.createdAt);
+    for (const p of r.closed) {
+      countOpened(r.repo, p.number, p.createdAt);
+      if (!p.mergedAt) continue;
+      const d = days.get(localTime(new Date(p.mergedAt)).date);
+      if (d) d.merged++;
+      if (win(p.mergedAt, 24, 0)) last.merged++;
+      else if (win(p.mergedAt, 48, 24)) prev.merged++;
+      if (win(p.mergedAt, 168, 0)) byRepo.set(r.repo, (byRepo.get(r.repo) ?? 0) + 1);
+    }
+  }
+  return {
+    daily: [...days.values()],
+    last24: last,
+    prev24: prev,
+    byRepo7: [...byRepo].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, REPOS_SHOWN).map(([repo, merged]) => ({ repo, merged })),
+    byRepo7Total: byRepo.size,
+    floor,
+  };
+}
+
+/** Plane for the charts: open items by state, and items done per week for 8 weeks. */
+export function planeShape(items: PlaneItem[], at: Date): Record<string, unknown> {
+  const states = new Map<string, number>();
+  for (const i of items.filter(isOpenItem)) states.set(i.stateName, (states.get(i.stateName) ?? 0) + 1);
+  const done = new Map<string, number>();
+  for (const i of items) {
+    if (isOpenItem(i) || i.stateGroup === 'cancelled') continue;
+    const t = Date.parse(i.updatedAt);
+    if (Number.isFinite(t)) done.set(weekStart(new Date(t)), (done.get(weekStart(new Date(t))) ?? 0) + 1);
+  }
+  const thisWeek = weekStart(at);
+  const weeks = [...Array(8)].map((_, k) => weekStart(new Date(Date.parse(`${thisWeek}T12:00:00Z`) - (7 - k) * 7 * DAY_MS)));
+  return {
+    openByState: [...states].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([state, n]) => ({ state, n })),
+    doneWeeks: weeks.map((week) => ({ week, done: done.get(week) ?? 0, partial: week === thisWeek })),
+  };
+}
+
 function brokeList(i: InsightInput): Broke[] {
   const out: Broke[] = [];
   if (i.kuma.ok) {
@@ -324,6 +406,10 @@ export function insightRecord(i: InsightInput): HubRecord {
     stuckTotal: stuck.length,
     trends,
     /** Merged PRs per week, oldest first; the last entry is the week in progress (partial). */
+    activity: activityOf(i.reads, at),
+    planeShape: i.pet.ok ? planeShape(i.pet.items, at) : null,
+    monitors: i.kuma.ok ? [...i.kuma.monitors].sort((a, b) => Number(a.status === 'up') - Number(b.status === 'up') || a.name.localeCompare(b.name)).slice(0, 60).map((m) => ({ name: clip(m.name, 40), status: m.status })) : null,
+    cveNow: i.cve[0] ? { id: i.cve[0].id, actionable: i.cve[0].actionable, exploited: i.cve[0].exploited, bySeverity: i.cve[0].bySeverity ?? null, complete: i.cve[0].complete === true } : null,
     mergedSeries: [
       ...i.weeks.filter((w) => w.week < weekStart(at)).slice(0, 7).reverse().map((w) => ({ week: w.week, total: w.total, partial: false })),
       ...(trends[0]!.now == null ? [] : [{ week: weekStart(at), total: trends[0]!.now, partial: true }]),

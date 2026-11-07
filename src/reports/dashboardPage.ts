@@ -125,6 +125,34 @@ button.col{cursor:pointer}
 .heads .lv-good{border-left-color:var(--green)}.heads .lv-good .lvl{color:var(--green)}
 .heads .chip{margin-left:auto;flex:none;font-size:12px;padding:2px var(--s3);border-radius:var(--r-capsule)}
 .tiles{display:grid;gap:var(--s4);grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
+.ins{display:flex;flex-direction:column;gap:var(--s4)}
+.pulse{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}
+.tile{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:var(--s1);min-height:118px;padding:var(--s4);border-radius:var(--r-card);background:rgba(28,28,30,.72);border:1px solid var(--glass-line)}
+.tile .stat-value{font-size:34px}
+.tile.t-bad{border-color:rgba(255,69,58,.5)}.tile.t-warn{border-color:rgba(255,159,10,.5)}.tile.t-good .stat-value{color:var(--green)}.tile.t-bad .stat-value{color:#ff7a70}.tile.t-warn .stat-value{color:var(--orange)}
+.spark{position:absolute;left:0;right:0;bottom:0;width:100%;height:34px;opacity:.95;pointer-events:none}
+.spark .sa{fill:rgba(10,132,255,.18);stroke:none}.spark .sl{fill:none;stroke:#0a84ff;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.spark.orange .sa{fill:rgba(217,119,6,.2)}.spark.orange .sl{stroke:#d97706}
+.tile .stat-foot{margin-bottom:34px}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);font-size:12px;color:var(--label-2)}
+.lg{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px}
+.sw.m,.bar.m,.b1{background:#0a84ff}.sw.o,.bar.o{background:#d97706}
+.b2{background:rgba(235,235,245,.62)}.b3{background:rgba(235,235,245,.46)}.b4{background:rgba(235,235,245,.34)}.b5{background:rgba(235,235,245,.24)}.b6{background:rgba(235,235,245,.16)}
+.sw.b1,.sw.b2,.sw.b3,.sw.b4,.sw.b5,.sw.b6{border-radius:3px}
+.grp{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;justify-content:center;gap:2px;border-radius:6px}
+.grp:focus-visible,.grp:hover{background:rgba(255,255,255,.06);outline:none}
+.bar{display:block;flex:1;max-width:16px;height:var(--v);min-height:2px;border-radius:4px 4px 1px 1px;transform-origin:bottom;animation:grow 500ms var(--ease) backwards}
+.two{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))}
+.seg{display:flex;gap:2px;height:22px;border-radius:8px;overflow:hidden}.seg i{display:block;min-width:4px;height:100%}
+.dots{display:flex;flex-wrap:wrap;gap:6px}.dots i{width:14px;height:14px;border-radius:50%;background:var(--green)}.dots i.down{background:var(--red);outline:2px solid rgba(255,69,58,.35)}
+.rank .track i.b-bad{background:var(--red)}.rank .track i.b-warn,.ages .track i.b-warn{background:var(--orange)}
+.rank li:first-child .track i.b-warn{background:var(--orange)}
+.ages{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s4)}
+.ages li{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ages .ahead{display:flex;justify-content:space-between;gap:var(--s3);font-size:13px;font-weight:650}
+.ages .name{font-size:13px;overflow-wrap:anywhere}.ages .sub{font-size:12px;color:var(--label-2)}
+.ages .track{height:6px;border-radius:var(--r-capsule);background:rgba(255,255,255,.06);overflow:hidden;margin-top:4px}.ages .track i{display:block;height:100%;border-radius:inherit}
 .empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--s2);padding:var(--s4);border:1px dashed var(--glass-line);border-radius:var(--r-group)}
 .empty p{margin:0}.empty .what{font-size:15px;font-weight:600}.empty .why{font-size:13px;color:var(--label-2)}
 .sk{display:block;border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.06) 30%,rgba(255,255,255,.12) 50%,rgba(255,255,255,.06) 70%) 0 0/300% 100%;animation:shimmer 1.4s linear infinite}
@@ -343,37 +371,73 @@ RENDER.cycle=function(box,r){var c=r.cycle;
  box.appendChild(el('div','done · '+r.open+' open, '+r.inProgress+' in progress, '+r.needsPedro+' need Pedro · '+c.start+' to '+c.end,{class:'mute'}));
  var br=r.byRoute||{};box.appendChild(el('p',['pedro','ai','other'].map(function(k){var t=br[k]||{total:0,done:0};return k+' '+t.done+'/'+t.total}).join(' · ')+(r.lost?' · '+r.lost+' cycle item(s) not on the board read':''),{class:'mute'}));
  if((r.openItems||[]).length)box.appendChild(rtable(['Item','Title','State','Labels'],r.openItems.map(function(i){return['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')]})))};
-RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{},ku=rd.kuma||{},cv=rd.cve||{};
- var when=new Date(r.generatedAt);if(!isNaN(when)&&Date.now()-when.getTime()>8*36e5)box.appendChild(el('p','This record is '+Math.round((Date.now()-when.getTime())/36e5)+' hours old. The rebuild runs every 3 hours, so a read has been failing: do not treat it as current.',{class:'warn'}));box.appendChild(el('div','Updated '+(isNaN(when)?r.generatedAt:when.toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' ET'),{class:'mute'}));
+function spark(vals,cls){var n=vals.length,mx=Math.max.apply(null,vals.concat([1])),W=100,H=30,pts=vals.map(function(v,i){return[n<2?W/2:i*(W/(n-1)),H-2-(v/mx)*(H-6)]}),ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg');
+ s.setAttribute('viewBox','0 0 '+W+' '+H);s.setAttribute('preserveAspectRatio','none');s.setAttribute('class','spark '+(cls||''));s.setAttribute('aria-hidden','true');
+ var a=document.createElementNS(ns,'path'),d='M'+pts.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1)}).join(' L');a.setAttribute('d',d+' L'+W+','+H+' L0,'+H+' Z');a.setAttribute('class','sa');s.appendChild(a);
+ var l=document.createElementNS(ns,'path');l.setAttribute('d',d);l.setAttribute('class','sl');l.setAttribute('vector-effect','non-scaling-stroke');s.appendChild(l);return s}
+function tile(label,val,opts){opts=opts||{};var c=el('div',null,{class:'tile'+(opts.tone?' t-'+opts.tone:'')});c.appendChild(el('div',label,{class:'stat-label'}));
+ c.appendChild(el('div',val==null?'not read':String(val),{class:'stat-value'}));var f=el('div',null,{class:'stat-foot'});
+ if(opts.delta!=null&&val!=null){var ch=chip(val,opts.delta,opts.badUp);if(ch)f.appendChild(ch);f.appendChild(el('span',opts.vs||'before',{class:'cmp'}))}
+ if(opts.note)f.appendChild(el('span',opts.note,{class:'cmp'}));c.appendChild(f);if(opts.spark&&opts.spark.length>1)c.appendChild(spark(opts.spark,opts.sparkCls));return c}
+function card(title,hint){var c=el('div',null,{class:'card'});c.appendChild(el('div',title,{class:'title'}));if(hint)c.appendChild(el('div',hint,{class:'hint'}));return c}
+function legend(items){var l=el('div',null,{class:'legend'});items.forEach(function(i){var k=el('span',null,{class:'lg'}),sw=el('i',null,{class:'sw '+i.cls});k.appendChild(sw);k.appendChild(document.createTextNode(i.text));l.appendChild(k)});return l}
+function pairChart(box,days){var mx=Math.max.apply(null,days.map(function(d){return Math.max(d.merged,d.opened)}).concat([1])),top=ceilTo(mx);clear(box);
+ var y=el('div',null,{class:'y','aria-hidden':'true'});[[top,0],[top/2,50],[0,100]].forEach(function(q){var s=el('span',String(q[0]));s.style.top=q[1]+'%';y.appendChild(s)});
+ var plot=el('div',null,{class:'plot'}),x=el('div',null,{class:'x','aria-hidden':'true'});
+ days.forEach(function(d,i){var g=el('div',null,{class:'grp',tabindex:'0','aria-label':d.date+': '+d.merged+' merged, '+d.opened+' opened',title:d.date+': '+d.merged+' merged, '+d.opened+' opened'});
+  [['m',d.merged],['o',d.opened]].forEach(function(p){var b=el('i',null,{class:'bar '+p[0]});b.style.setProperty('--v',(p[1]/top*100)+'%');b.style.animationDelay=(i*25)+'ms';g.appendChild(b)});plot.appendChild(g);
+  var dt=new Date(d.date+'T12:00:00Z'),lab=el('span',i%2===0||days.length<8?dt.toLocaleDateString('en-US',{month:'numeric',day:'numeric',timeZone:'UTC'}):'');x.appendChild(lab)});
+ box.appendChild(y);box.appendChild(plot);box.appendChild(x)}
+function hbars(box,rows,fmt){var mx=Math.max.apply(null,rows.map(function(r){return r.v}).concat([1]));var ul=el('ul',null,{class:'rank'});
+ rows.forEach(function(r,i){var li=el('li'),nm=el('div',null,{class:'name'});nm.appendChild(el('b',r.l));li.appendChild(nm);li.appendChild(el('span',fmt?fmt(r.v):String(r.v),{class:'num'}));
+  var t=el('div',null,{class:'track'}),b=el('i');b.style.width=(r.v/mx*100)+'%';b.style.animationDelay=(i*30)+'ms';if(r.tone)b.className='b-'+r.tone;t.appendChild(b);li.appendChild(t);ul.appendChild(li)});box.appendChild(ul)}
+function ageRows(card,rows,total,empty){
+ if(!rows.length){card.appendChild(el('p',empty,{class:'mute'}));return}
+ var mx=Math.max.apply(null,rows.map(function(r){return r.days}).concat([1])),ul=el('ul',null,{class:'ages'});
+ rows.forEach(function(x){var li=el('li'),u=safeUrl(x.url),top=el('div',null,{class:'ahead'}),k=u?el('a',x.key,{href:u,rel:'noopener noreferrer',target:'_blank'}):el('span',x.key);
+  top.appendChild(k);top.appendChild(el('span',x.days<0?'age unknown':x.days+(x.days===1?' day':' days'),{class:'num'}));li.appendChild(top);
+  li.appendChild(el('div',x.title,{class:'name'}));li.appendChild(el('div',x.why,{class:'sub'}));
+  var t=el('div',null,{class:'track'}),b=el('i',null,{class:'b-warn'});b.style.width=(Math.max(x.days,0)/mx*100)+'%';t.appendChild(b);li.appendChild(t);ul.appendChild(li)});
+ card.appendChild(ul);if(total>rows.length)card.appendChild(el('p','and '+(total-rows.length)+' more',{class:'hint'}))}
+RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{},ku=rd.kuma||{},cv=rd.cve||{},ac=r.activity,ps=r.planeShape,tr=r.trends||[],when=new Date(r.generatedAt);
+ box.classList.add('ins');
+ var hr=isNaN(when)?0:(Date.now()-when.getTime())/36e5;
+ box.appendChild(el('div','Snapshot from '+(isNaN(when)?r.generatedAt:when.toLocaleString('en-US',{timeZone:'America/New_York',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' ET'),{class:'mute'}));
+ if(hr>8)box.appendChild(el('p','This snapshot is '+Math.round(hr)+' hours old. The rebuild runs every 3 hours, so a read has been failing: do not treat it as current.',{class:'warn'}));
  var hs=el('ul',null,{class:'heads'});var LV={bad:['Act','!'],warn:['Watch','!'],info:['Note','i'],good:['OK','✓']};
- (r.headlines||[]).forEach(function(h){var li=el('li',null,{class:'lv-'+h.level}),lv=LV[h.level]||LV.info;li.appendChild(el('span',lv[1]+' '+lv[0],{class:'lvl'}));var t=el('span',h.text);li.appendChild(t);
-  if(h.link&&kinds.some(function(k){return k.kind===h.link})||h.link==='weekly'){var a=el('button','Open',{type:'button',class:'chip'});a.onclick=function(){pick(h.link)};li.appendChild(a)}hs.appendChild(li)});
- box.appendChild(el('h3','What matters'));box.appendChild(hs);
- box.appendChild(el('h3','Against last week'));
- var st=el('div',null,{class:'tiles'});(r.trends||[]).forEach(function(t){var c=el('div',null,{class:'stat'});c.appendChild(el('div',t.label,{class:'stat-label'}));
-  c.appendChild(el('div',t.now==null?'not read':String(t.now),{class:'stat-value'}));var f=el('div',null,{class:'stat-foot'});
-  if(t.now!=null&&t.last!=null){var ch=chip(t.now,t.last,t.badUp);if(ch)f.appendChild(ch);f.appendChild(el('span','vs '+t.last+' before',{class:'cmp'}))}
-  if(t.verdict&&t.verdict!=='unknown')f.appendChild(el('span',t.verdict==='usual'?'Usual pace':t.verdict==='higher'?'Above usual':'Below usual',{class:'cmp'}));
-  c.appendChild(f);c.appendChild(el('div',t.note,{class:'hint'}));st.appendChild(c)});box.appendChild(st);
- var ms=r.mergedSeries||[];if(ms.length){box.appendChild(el('h3','Merged PRs per week'));var ch=el('div',null,{class:'chart',role:'img','aria-label':'Merged PRs per week; the last bar is the week in progress'});box.appendChild(ch);
-  chart(ch,ms.map(function(x){var d=new Date(x.week+'T00:00:00Z');return{k:x.week,l:d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}),v:x.total,cur:!!x.partial,t:x.week+': '+x.total+(x.partial?' so far':' merged'),tip:x.partial?'week in progress':x.week}}))}
- function list(title,rows,total,empty){box.appendChild(el('h3',title+' ('+total+')'));
-  if(!rows.length){box.appendChild(el('p',empty,{class:'mute'}));return}
-  var t=el('table',null,{class:'rt'}),th=el('thead'),h=el('tr');['Item','Title','Why','Days'].forEach(function(x){h.appendChild(el('th',x))});th.appendChild(h);t.appendChild(th);var tb=el('tbody');
-  rows.forEach(function(x){var tr=el('tr'),u=safeUrl(x.url),k=u?el('a',x.key,{href:u,rel:'noopener noreferrer',target:'_blank'}):el('span',x.key),td=el('td',null,{'data-label':'Item'});td.appendChild(k);tr.appendChild(td);
-   [x.title,x.why,x.days<0?'?':String(x.days)].forEach(function(v,i){tr.appendChild(el('td',v,{'data-label':['Title','Why','Days'][i]}))});tb.appendChild(tr)});t.appendChild(tb);box.appendChild(t);
-  if(total>rows.length)box.appendChild(el('p','and '+(total-rows.length)+' more',{class:'hint'}))}
- list('Needs you',r.needsYou||[],r.needsYouTotal||0,'Nothing is waiting on you in the sources read.');
- list('Stuck or failing',r.stuck||[],r.stuckTotal||0,'No PR is failing and nothing has sat '+r.stuckAfterDays+'+ days in the sources read.');
- var q=r.qwen;box.appendChild(el('h3','Qwen as reviewer'));
- if(!q)box.appendChild(el('p','The merge desk is not reporting here, so the Qwen record is missing.',{class:'warn'}));
- else if(!q.judged&&!q.mergedByCiOnly)box.appendChild(el('p','No head has fallen back to Qwen yet. Codex has reviewed everything the desk saw.',{class:'mute'}));
- else{box.appendChild(el('p',q.judged+' heads judged since '+(q.since?q.since.slice(0,10):'the start')+': '+q.clean+' clean, '+q.block+' block, '+q.unreadable+' unreadable, '+q.tooLarge+' too large. Merged on Qwen: '+q.mergedByQwen+'. Merged on CI alone (tier 0): '+q.mergedByCiOnly+'. Reverted afterwards: '+q.reverted+'.',{class:q.reverted?'warn':'mute'}));
-  box.appendChild(rtable(['PR','Lane','Verdict','Merged','Outcome'],(q.recent||[]).map(function(x){return[x.repo+'#'+x.pr,x.by,x.verdict,x.merged?'yes':'no',x.outcome||'none seen']})));
-  box.appendChild(el('p','Outcome checks read the newest 100 commits on each repo for a revert that names the PR. They find reverts only. A bug fixed by a later commit is not seen.',{class:'hint'}))}
- box.appendChild(el('h3','Broke or drifted'));
- if(!(r.broke||[]).length)box.appendChild(el('p','Nothing down or exploited in the sources read.',{class:'mute'}));
- else box.appendChild(rtable(['What','Detail'],r.broke.map(function(b){return[b.what,b.detail]})));
+ (r.headlines||[]).forEach(function(h){var li=el('li',null,{class:'lv-'+h.level}),lv=LV[h.level]||LV.info;li.appendChild(el('span',lv[1]+' '+lv[0],{class:'lvl'}));li.appendChild(el('span',h.text));
+  if((h.link&&kinds.some(function(k){return k.kind===h.link}))||h.link==='weekly'){var a=el('button','Open',{type:'button',class:'chip'});a.onclick=function(){userPicked=true;pick(h.link)};li.appendChild(a)}hs.appendChild(li)});
+ box.appendChild(hs);
+ var haveMon=!!(ku.ok&&r.monitors&&r.monitors.length&&ku.monitors),nTot=haveMon?ku.monitors:0,dn=haveMon?r.monitors.filter(function(m){return m.status!=='up'}).length:0,up=haveMon?nTot-dn:null;
+ var pulse=el('div',null,{class:'pulse'});
+ pulse.appendChild(tile('Merged, 24 h',ac?ac.last24.merged:null,{delta:ac?ac.prev24.merged:null,vs:'vs the 24 h before',spark:ac&&ac.daily.map(function(d){return d.merged}),sparkCls:'blue'}));
+ pulse.appendChild(tile('Opened, 24 h',ac?ac.last24.opened:null,{delta:ac?ac.prev24.opened:null,vs:'vs the 24 h before',spark:ac&&ac.daily.map(function(d){return d.opened}),sparkCls:'orange'}));
+ pulse.appendChild(tile('Open PRs now',gh.reposRead?gh.openPrs:null,{note:gh.reposRead?'in '+gh.reposRead+' repos':''}));
+ pulse.appendChild(tile('Needs you',gh.reposRead||pl.ok?r.needsYouTotal||0:null,{tone:(r.needsYouTotal||0)>0?'warn':'good',note:(r.needsYouTotal||0)>0?'see below':'nothing waiting'}));
+ var pd=tr[1];pulse.appendChild(tile('Plane done, this week',pd?pd.now:null,{delta:pd?pd.last:null,vs:'vs last week',spark:ps&&ps.doneWeeks.map(function(w){return w.done}),sparkCls:'blue'}));
+ pulse.appendChild(tile('Services up',up==null?null:up+'/'+nTot,{tone:up==null?'':dn>0?'bad':'good',note:up==null?'':dn>0?dn+' not up':'all up'}));
+ box.appendChild(pulse);
+ if(ac){var c1=card('Merged and opened per day','Last 14 days, Eastern time. Hover or focus a day for the counts.'),ch=el('div',null,{class:'chart',role:'img','aria-label':'Merged and opened PRs per day, last 14 days'});
+  c1.appendChild(legend([{cls:'m',text:'Merged'},{cls:'o',text:'Opened'}]));c1.appendChild(ch);pairChart(ch,ac.daily);
+  if((ac.floor||[]).length)c1.appendChild(el('p','Counts are a floor for '+ac.floor.join(', ')+': the closed-PR read hit its cap inside this window.',{class:'warn'}));box.appendChild(c1)}
+ var row=el('div',null,{class:'two'});
+ if(ac&&ac.byRepo7.length){var c2=card('Merged by repo','Last 7 days'+(ac.byRepo7Total>ac.byRepo7.length?', top '+ac.byRepo7.length+' of '+ac.byRepo7Total:''));hbars(c2,ac.byRepo7.map(function(x){return{l:x.repo,v:x.merged}}));row.appendChild(c2)}
+ if(ps&&ps.openByState.length){var c3=card('Plane open work by state',(pl.med||'')+'');var tot=ps.openByState.reduce(function(n,s){return n+s.n},0),seg=el('div',null,{class:'seg',role:'img','aria-label':'Open Plane items by state'}),shades=['b1','b2','b3','b4','b5','b6'];
+  ps.openByState.forEach(function(s,i){var p=el('i',null,{class:shades[Math.min(i,5)],title:s.state+': '+s.n});p.style.flexGrow=String(s.n);seg.appendChild(p)});c3.appendChild(seg);
+  c3.appendChild(legend(ps.openByState.slice(0,6).map(function(s,i){return{cls:shades[i],text:s.state+' '+s.n}})));c3.appendChild(el('div',tot+' open items',{class:'mute'}));row.appendChild(c3)}
+ if(row.children.length)box.appendChild(row);
+ var ms=r.mergedSeries||[];if(ms.length>1){var c4=card('Merged PRs per week','The last bar is the week in progress.'),cc=el('div',null,{class:'chart',role:'img','aria-label':'Merged PRs per week'});c4.appendChild(cc);box.appendChild(c4);
+  chart(cc,ms.map(function(x){var d=new Date(x.week+'T00:00:00Z');return{k:x.week,l:d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}),v:x.total,cur:!!x.partial,t:x.week+': '+x.total+(x.partial?' so far':' merged'),tip:x.partial?'week in progress':x.week}}));
+  if(tr[0])c4.appendChild(el('div',tr[0].note,{class:'hint'}))}
+ var sys=el('div',null,{class:'two'});
+ if(haveMon){var c5=card('Services',up+' of '+nTot+' up'+(nTot>r.monitors.length?' (first '+r.monitors.length+' shown)':'')),dots=el('div',null,{class:'dots',role:'img','aria-label':up+' of '+nTot+' monitors up'});
+  r.monitors.forEach(function(m){dots.appendChild(el('i',null,{class:m.status==='up'?'ok':'down',title:m.name+': '+m.status}))});c5.appendChild(dots);
+  var bad=r.monitors.filter(function(m){return m.status!=='up'});if(bad.length)c5.appendChild(el('ul',bad.map(function(m){return m.name+' is '+m.status}).join(', '),{class:'warn'}));sys.appendChild(c5)}
+ if(r.cveNow&&r.cveNow.bySeverity){var c6=card('CVEs by severity','Run '+r.cveNow.id+(r.cveNow.complete?'':', incomplete read')),sv=r.cveNow.bySeverity,order=['CRITICAL','HIGH','MODERATE','LOW','unrated'];
+  hbars(c6,order.filter(function(k){return sv[k]!=null}).map(function(k){return{l:k.charAt(0)+k.slice(1).toLowerCase(),v:sv[k],tone:k==='CRITICAL'||k==='HIGH'?'bad':'warn'}}));c6.appendChild(el('div',r.cveNow.actionable+' actionable, '+r.cveNow.exploited+' known exploited',{class:'mute'}));sys.appendChild(c6)}
+ if(sys.children.length)box.appendChild(sys);
+ var cn=card('Needs you ('+(r.needsYouTotal||0)+')');ageRows(cn,r.needsYou||[],r.needsYouTotal||0,'Nothing is waiting on you in the sources read.');box.appendChild(cn);
+ var cs=card('Stuck or failing ('+(r.stuckTotal||0)+')','Failing CI, a conflict, or no update for '+r.stuckAfterDays+'+ days.');ageRows(cs,r.stuck||[],r.stuckTotal||0,'No PR is failing and nothing has sat that long in the sources read.');box.appendChild(cs);
  if((r.gaps||[]).length)box.appendChild(el('p','Not read: '+r.gaps.join('; ')+'.',{class:'warn'}));
  if((r.notes||[]).length)box.appendChild(el('p','Note: '+r.notes.join('; ')+'.',{class:'hint'}));
  box.appendChild(el('p','Read: '+(gh.reposRead==null?'GitHub not read':gh.reposRead+' of '+gh.reposTotal+' repos, '+gh.openPrs+' open PRs')+'; '+(pl.ok?'Plane '+pl.items+' items ('+pl.open+' open, '+pl.med+')':'Plane not read')+'; '+(ku.ok?'Kuma '+ku.monitors+' monitors':'Kuma not read')+'; '+(cv.newest?'CVE run '+cv.newest:'no CVE run')+'; '+rd.weeks+' weekly reports.',{class:'hint'}))};
