@@ -105,6 +105,13 @@ describe('the media loop', () => {
   });
 });
 
+describe('the media prompt', () => {
+  it('tells the model there is no recently-added tool and bans the queue as a stand-in', () => {
+    expect(MEDIA_SYSTEM_PROMPT).toContain('No tool lists recently added titles');
+    expect(MEDIA_SYSTEM_PROMPT).toContain('never answer it with the download queue');
+  });
+});
+
 describe('POST /v1/media/ask', () => {
   const lab: LabTool = { name: 'pve_guests', description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) };
   const media: LabTool = { name: 'list_queue', description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) };
