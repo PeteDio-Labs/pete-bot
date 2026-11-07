@@ -59,7 +59,7 @@ describe('the final decision by tier', () => {
   it('hands the tier-2 ask the Codex review it rests on', () => {
     const d = decide(facts(2, { codex: [review('no-blocking', OLD, '2026-10-15T00:00:00Z'), review('no-blocking')] }));
     expect(d.kind).toBe('ask');
-    if (d.kind === 'ask') expect(d.review.commitId).toBe(HEAD);
+    if (d.kind === 'ask') expect(d.review?.commitId).toBe(HEAD);
   });
 
   it.each(TIERS)('an escalation goes to Pedro at tier %i', (tier) => {
