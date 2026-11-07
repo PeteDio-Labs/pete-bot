@@ -26,7 +26,7 @@ import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
 import { size as openIncidents, heldCount } from './alertStore.js';
 import { deskHealth } from '../desk/index.js';
-import { reportsHealth } from '../reports/index.js';
+import { reportsHealth, weeklyHealth } from '../reports/index.js';
 
 let server: Server | null = null;
 
@@ -56,6 +56,8 @@ export function createApp(client: Client): Express {
       desk: deskHealth(),
       // off, misconfigured, starting or running (PET-701). Running names each report's last result.
       reports: reportsHealth(),
+      // off, misconfigured, starting or running (PET-868).
+      weekly: weeklyHealth(),
       timestamp: new Date().toISOString(),
     });
   });
