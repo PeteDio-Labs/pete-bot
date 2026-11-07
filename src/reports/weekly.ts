@@ -288,7 +288,7 @@ export function needsRebuild(rec: WeekRecord, now: Date): boolean {
 }
 
 /** The first week the report exists for. Earlier weeks are not back-filled. */
-export const FIRST_WEEK = '2026-11-02';
+export const FIRST_WEEK = '2026-10-26';
 
 export interface WeeklyDeps {
   gh: GithubReads;

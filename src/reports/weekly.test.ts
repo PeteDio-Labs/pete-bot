@@ -119,15 +119,15 @@ describe('lintSummary', () => {
 describe('dueWeeks', () => {
   const none = () => false;
   it('is due on Sunday after 22:30 Eastern, not before', () => {
-    expect(dueWeeks(SUN, none)).toEqual(['2026-10-26', WEEK].filter((w) => w >= '2026-11-02'));
-    expect(dueWeeks(new Date('2026-11-09T03:00:00Z'), none)).toEqual([]);
+    expect(dueWeeks(SUN, none)).toEqual(['2026-10-26', WEEK]);
+    expect(dueWeeks(new Date('2026-11-09T03:00:00Z'), none)).toEqual(['2026-10-26']);
   });
   it('is not due when the file exists, and catches up last week on a Monday', () => {
-    expect(dueWeeks(SUN, (w) => w === WEEK)).toEqual([]);
+    expect(dueWeeks(SUN, (w) => w === WEEK || w === '2026-10-26')).toEqual([]);
     expect(dueWeeks(new Date('2026-11-10T15:00:00Z'), none)).toEqual([WEEK]);
   });
   it('does not back-fill before the first week', () => {
-    expect(dueWeeks(new Date('2026-11-03T15:00:00Z'), none)).toEqual([]);
+    expect(dueWeeks(new Date('2026-10-28T15:00:00Z'), none)).toEqual([]);
   });
 });
 
@@ -167,7 +167,7 @@ describe('store and runner', () => {
     const good = new WeeklyRunner({ gh: fakeGh({ a: [pr(1, '2026-11-04T12:00:00Z')] }), org: 'o', repos: ['a'], store, summarize: ok, log, now: () => SUN });
     await good.tick();
     await good.tick();
-    expect(store.weeks()).toEqual([WEEK]);
+    expect(store.weeks()).toEqual([WEEK, '2026-10-26']);
     expect(good.last?.ok).toBe(true);
     const dir2 = mkdtempSync(join(tmpdir(), 'wk-'));
     const bad = new WeeklyRunner({ gh: fakeGh({ a: new Error('HTTP 401') }), org: 'o', repos: ['a'], store: new WeekStore(dir2), summarize: ok, log, now: () => SUN });
