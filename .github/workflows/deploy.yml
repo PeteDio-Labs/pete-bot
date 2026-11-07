@@ -251,6 +251,26 @@ jobs:
             kv/data/services/lab-agent-plane token | LAB_PLANE_TOKEN ;
             kv/data/services/lab-agent-search token | LAB_SEARCH_TOKEN
 
+      # The media assistant's mtrace token and Bazarr key (PET-869). Absent path allowed,
+      # as above. The play refuses a deploy that would drop an installed token, so once
+      # scripts/seed-lab-agent-media.sh has run, this read is what keeps deploy-on-merge
+      # from failing closed. pete-bot-cd needs the policy from apply-vault-config.sh first:
+      # a denied path fails the whole step.
+      - name: Vault — the lab-agent media tokens, an absent path is allowed
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/lab-agent-media mtrace_token | LAB_MTRACE_TOKEN ;
+            kv/data/services/lab-agent-media bazarr_key | LAB_BAZARR_KEY
+
       - name: Stage the secrets as files, never as arguments
         run: |
           umask 077
@@ -291,6 +311,9 @@ jobs:
               # .get for the same reason. Empty keeps plane_item and search_lab off.
               "lab_agent_plane_token":      os.environ.get("LAB_PLANE_TOKEN", ""),
               "lab_agent_search_token":     os.environ.get("LAB_SEARCH_TOKEN", ""),
+              # .get for the same reason. Empty keeps the media assistant off (PET-869).
+              "lab_agent_mtrace_token":     os.environ.get("LAB_MTRACE_TOKEN", ""),
+              "lab_agent_bazarr_key":       os.environ.get("LAB_BAZARR_KEY", ""),
               # The public half of the key above. The play authorizes it for root on 237 and
               # drops any older pete-bot-cd key (PET-724).
               "pete_bot_cd_public_key":       os.environ["PB_CD_PUBLIC_KEY"],
