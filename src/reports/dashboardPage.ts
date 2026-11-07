@@ -309,7 +309,7 @@ function render(){
 function select(week){cur=data.filter(function(x){return x.week===week})[0];repoFilter=null;$('weekSel').value=week;render()}
 
 var kinds=[],tab='weekly',kindData={},seq=0;
-var TITLES={cve:'Daily CVE',cycle:'Plane cycle'};
+var TITLES={cve:'Daily CVE',cycle:'Plane cycle',plane:'Plane board'};
 var title=function(k){return k==='weekly'?'Weekly PRs':(TITLES[k]||k)};
 function plain(v){if(v==null)return'none';if(typeof v==='object')return JSON.stringify(v);return String(v)}
 function recDefault(box,rec){var dl=el('dl');Object.keys(rec).forEach(function(k){dl.appendChild(el('dt',k));dl.appendChild(el('dd',plain(rec[k])))});box.appendChild(dl)}
@@ -328,6 +328,14 @@ RENDER.cycle=function(box,r){var c=r.cycle;
  box.appendChild(el('div','done · '+r.open+' open, '+r.inProgress+' in progress, '+r.needsPedro+' need Pedro · '+c.start+' to '+c.end,{class:'mute'}));
  var br=r.byRoute||{};box.appendChild(el('p',['pedro','ai','other'].map(function(k){var t=br[k]||{total:0,done:0};return k+' '+t.done+'/'+t.total}).join(' · ')+(r.lost?' · '+r.lost+' cycle item(s) not on the board read':''),{class:'mute'}));
  if((r.openItems||[]).length)box.appendChild(rtable(['Item','Title','State','Labels'],r.openItems.map(function(i){return['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')]})))};
+RENDER.plane=function(box,r){
+ [['PET','pet'],['MED','med']].forEach(function(p){var b=r[p[1]];box.appendChild(el('h3',p[0]+' board'));
+  if(!b||!b.ok){box.appendChild(el('p','Not read: '+((b&&b.unread)||'no data')+'.',{class:'warn'}));return}
+  box.appendChild(el('div',String(b.open),{class:'big'}));
+  box.appendChild(el('div','open of '+b.items+' items read · '+b.inReview+' in review, '+b.stuckTotal+' waiting '+r.stuckAfterDays+'+ days',{class:'mute'}));
+  box.appendChild(el('div','Done per week (by last update): '+b.doneByWeek.map(function(w){return w.week.slice(5)+' '+w.done}).join(' · '),{class:'mute'}));
+  box.appendChild(el('p','Open by label: '+b.labelMix.map(function(l){return l.label+' '+l.open}).join(' · '),{class:'mute'}));
+  if(b.stuck.length)box.appendChild(rtable(['Item','Title','State','Days'],b.stuck.map(function(i){return[i.key,i.name,i.state,String(i.days)]})))})};
 function showRec(kind,id){var box=$('recBody');clear(box);var rec=(kindData[kind]||[]).filter(function(r){return r.id===id})[0];if(!rec){box.appendChild(el('p','No record.',{class:'mute'}));return}
  (RENDER[kind]||recDefault)(box,rec)}
 function showKind(kind,bad){var sel=$('recSel');clear(sel);var rs=kindData[kind]||[];

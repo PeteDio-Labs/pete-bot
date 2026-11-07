@@ -14,6 +14,9 @@ import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySe
 import { ReportHub } from './hub.js';
 import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
 import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
+import { PLANE_KIND, planeRecord } from './hubPlane.js';
+import { HubJobs } from './hubJobs.js';
+import { localTime } from './schedule.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './backup.js';
 import { openReportDb } from './db.js';
@@ -67,7 +70,7 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     },
   });
   runner.start();
-  void startWeekly(s, env as WeeklyEnv & BackupEnv);
+  void startWeekly(s, env as WeeklyEnv & BackupEnv & ReportsEnv);
   logger.info(`[Reports] Scheduled ${[...s.enabled].join(', ')} for ${s.repos.join(', ')}${s.plane ? '' : ' (Plane key absent: Plane will be reported as not read)'}`);
 }
 
@@ -85,6 +88,7 @@ export function reportsHealth(): { state: string; reason?: string } & Partial<Re
 let weekly: WeeklyState = { state: 'off' };
 let weeklyRunner: WeeklyRunner | null = null;
 let hub: ReportHub | null = null;
+let hubJobs: HubJobs | null = null;
 let backup: ReportBackup | null = null;
 let backupConfig: ReturnType<typeof loadBackupConfig> = { state: 'off' };
 
@@ -94,7 +98,7 @@ export function getHub(): ReportHub | null {
 }
 
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
-async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv): Promise<void> {
+async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & ReportsEnv): Promise<void> {
   weekly = loadWeeklySettings(env);
   if (weekly.state !== 'ready' && loadBackupConfig(env).state !== 'off') logger.warn('[Backup] REPORT_BACKUP_* is set but the weekly report is not running, so no reports are stored and nothing is copied.');
   if (weekly.state === 'off') return;
@@ -116,6 +120,28 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv): Promi
       w.port,
     );
     weeklyRunner.start();
+    if (s.plane) {
+      const petClient = new PlaneClient(s.plane);
+      const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();
+      const medClient = medId ? new PlaneClient({ ...s.plane, projectId: medId }) : null;
+      hubJobs = new HubJobs(
+        hub,
+        [
+          {
+            kind: PLANE_KIND,
+            hour: 6,
+            collect: async (at) => {
+              const pet = await petClient.read();
+              // A PET board that cannot be read stores nothing, so the job retries instead of keeping an empty day.
+              if (!pet.ok) throw new Error(`PET board not read: ${pet.error}`);
+              return planeRecord(pet, medClient ? await medClient.read() : null, localTime(at).date, at);
+            },
+          },
+        ],
+        logger,
+      );
+      hubJobs.start();
+    } else logger.warn('[Hub] PLANE_API_KEY is empty, so the Plane report is not collected');
     backupConfig = loadBackupConfig(env);
     if (backupConfig.state === 'misconfigured') logger.error(`[Backup] The report backup is off because it is misconfigured: ${backupConfig.reason}`);
     else if (backupConfig.state === 'off') logger.warn('[Backup] No report backup is set (REPORT_BACKUP_*): the reports live only on this host.');
@@ -131,9 +157,9 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv): Promi
 }
 
 /** For /health. Running names the last attempt, so "never ran" and "ran and failed" differ. */
-export function weeklyHealth(): { state: string; reason?: string; last?: unknown; lastFailure?: unknown; backup?: unknown } {
+export function weeklyHealth(): { state: string; reason?: string; last?: unknown; lastFailure?: unknown; backup?: unknown; hubJobs?: unknown } {
   if (weekly.state === 'misconfigured') return { state: 'misconfigured', reason: weekly.reason };
   if (weekly.state === 'off') return { state: 'off' };
   const b = backupConfig.state === 'ready' ? backup?.state() ?? { state: 'never' } : backupConfig.state === 'misconfigured' ? { state: 'misconfigured', reason: backupConfig.reason } : { state: 'off' };
-  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null, lastFailure: weeklyRunner?.lastFailure ?? null, backup: b };
+  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null, lastFailure: weeklyRunner?.lastFailure ?? null, backup: b, hubJobs: Object.fromEntries(hubJobs?.last ?? []) };
 }
