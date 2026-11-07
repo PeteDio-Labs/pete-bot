@@ -348,6 +348,7 @@ export function createAlertHandler(
 
       if (down) {
         const sent = await sendDown(dm, monitor, detail);
+        logger.info(`[alert] decision=${sent.action} monitor=${monitor} status=down heartbeat=${parsed.data.heartbeat?.time ?? 'none'}`);
         res.json({ ok: true, action: sent.action, monitor, channelId: dm.id, messageId: sent.messageId });
         return;
       }
