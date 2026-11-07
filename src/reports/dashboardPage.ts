@@ -337,7 +337,7 @@ RENDER.cycle=function(box,r){var c=r.cycle;
  var br=r.byRoute||{};box.appendChild(el('p',['pedro','ai','other'].map(function(k){var t=br[k]||{total:0,done:0};return k+' '+t.done+'/'+t.total}).join(' · ')+(r.lost?' · '+r.lost+' cycle item(s) not on the board read':''),{class:'mute'}));
  if((r.openItems||[]).length)box.appendChild(rtable(['Item','Title','State','Labels'],r.openItems.map(function(i){return['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')]})))};
 RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{},ku=rd.kuma||{},cv=rd.cve||{};
- var when=new Date(r.generatedAt);box.appendChild(el('div','Updated '+(isNaN(when)?r.generatedAt:when.toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' ET'),{class:'mute'}));
+ var when=new Date(r.generatedAt);if(!isNaN(when)&&Date.now()-when.getTime()>8*36e5)box.appendChild(el('p','This record is '+Math.round((Date.now()-when.getTime())/36e5)+' hours old. The rebuild runs every 3 hours, so a read has been failing: do not treat it as current.',{class:'warn'}));box.appendChild(el('div','Updated '+(isNaN(when)?r.generatedAt:when.toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' ET'),{class:'mute'}));
  var hs=el('ul',null,{class:'heads'});var LV={bad:['Act','!'],warn:['Watch','!'],info:['Note','i'],good:['OK','✓']};
  (r.headlines||[]).forEach(function(h){var li=el('li',null,{class:'lv-'+h.level}),lv=LV[h.level]||LV.info;li.appendChild(el('span',lv[1]+' '+lv[0],{class:'lvl'}));var t=el('span',h.text);li.appendChild(t);
   if(h.link&&kinds.some(function(k){return k.kind===h.link})||h.link==='weekly'){var a=el('button','Open',{type:'button',class:'chip'});a.onclick=function(){pick(h.link)};li.appendChild(a)}hs.appendChild(li)});
@@ -357,11 +357,12 @@ RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{
    [x.title,x.why,x.days<0?'?':String(x.days)].forEach(function(v,i){tr.appendChild(el('td',v,{'data-label':['Title','Why','Days'][i]}))});tb.appendChild(tr)});t.appendChild(tb);box.appendChild(t);
   if(total>rows.length)box.appendChild(el('p','and '+(total-rows.length)+' more',{class:'hint'}))}
  list('Needs you',r.needsYou||[],r.needsYouTotal||0,'Nothing is waiting on you in the sources read.');
- list('Stuck '+r.stuckAfterDays+'+ days',r.stuck||[],r.stuckTotal||0,'Nothing has sat that long in the sources read.');
+ list('Stuck or failing',r.stuck||[],r.stuckTotal||0,'No PR is failing and nothing has sat '+r.stuckAfterDays+'+ days in the sources read.');
  box.appendChild(el('h3','Broke or drifted'));
  if(!(r.broke||[]).length)box.appendChild(el('p','Nothing down or exploited in the sources read.',{class:'mute'}));
  else box.appendChild(rtable(['What','Detail'],r.broke.map(function(b){return[b.what,b.detail]})));
  if((r.gaps||[]).length)box.appendChild(el('p','Not read: '+r.gaps.join('; ')+'.',{class:'warn'}));
+ if((r.notes||[]).length)box.appendChild(el('p','Note: '+r.notes.join('; ')+'.',{class:'hint'}));
  box.appendChild(el('p','Read: '+(gh.reposRead==null?'GitHub not read':gh.reposRead+' of '+gh.reposTotal+' repos, '+gh.openPrs+' open PRs')+'; '+(pl.ok?'Plane '+pl.items+' items ('+pl.open+' open, '+pl.med+')':'Plane not read')+'; '+(ku.ok?'Kuma '+ku.monitors+' monitors':'Kuma not read')+'; '+(cv.newest?'CVE run '+cv.newest:'no CVE run')+'; '+rd.weeks+' weekly reports.',{class:'hint'}))};
 RENDER.plane=function(box,r){
  [['PET','pet'],['MED','med']].forEach(function(p){var b=r[p[1]];box.appendChild(el('h3',p[0]+' board'));

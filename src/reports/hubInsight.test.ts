@@ -67,6 +67,34 @@ describe('insightRecord', () => {
     expect(t.verdict).toBe('higher'); // 12 by ~Saturday noon is a pace near 16 against an average of 10
   });
 
+
+  it('does not judge the pace early in the week', () => {
+    const early = new Date('2026-11-02T14:00:00Z'); // Monday morning Eastern
+    const closed = [{ repo: 'petedio-iac', number: 1, title: 't', url: 'u', headSha: 's', headRef: 'b', closedAt: '', mergedAt: '2026-11-02T13:00:00Z', author: 'x', petKeys: [], codex: null }];
+    const weeks = ['2026-10-26', '2026-10-19', '2026-10-12', '2026-10-05'].map((w) => week(w, 10));
+    const r = insightRecord(base({ at: early, weeks, reads: [{ repo: 'petedio-iac', ok: true, open: [], closed, closedRead: 1 }] }));
+    expect((r.trends as { verdict: string }[])[0]!.verdict).toBe('unknown');
+  });
+
+  it('lists a young PR with failing CI, and does not compare CVE runs when one was incomplete', () => {
+    const r = insightRecord(
+      base({
+        reads: [repo([pr(9, { updatedAt: '2026-11-07T10:00:00Z', checks: { total: 1, passed: 0, pending: [], failed: ['validate'], skipped: 0 } as never })])],
+        cve: [{ id: '2026-11-07', generatedAt: '', complete: true, actionable: 1, exploited: 0 }, { id: '2026-11-06', generatedAt: '', complete: false, actionable: 9, exploited: 0 }],
+      }),
+    );
+    expect((r.stuck as { key: string }[]).map((x) => x.key)).toEqual(['petedio-iac#9']);
+    expect(JSON.stringify(r.headlines)).toContain('not compared');
+    expect(JSON.stringify(r.headlines)).not.toContain('fell');
+  });
+
+  it('records an unset MED id as a note, not as a read failure, so "nothing needs you" can show', () => {
+    const r = insightRecord(base({ med: { ok: false, reason: 'no MED project id is set on this host (PLANE_MED_PROJECT_ID)' } }));
+    expect(r.gaps as string[]).toEqual([]);
+    expect((r.notes as string[])[0]).toContain('MED');
+    expect(JSON.stringify(r.headlines)).toContain('Nothing needs you');
+  });
+
   it('weekFraction grows through the week and stays in range', () => {
     expect(weekFraction(new Date('2026-11-02T05:00:00Z'))).toBeLessThan(0.1);
     expect(weekFraction(new Date('2026-11-08T23:00:00Z'))).toBeGreaterThan(0.95);

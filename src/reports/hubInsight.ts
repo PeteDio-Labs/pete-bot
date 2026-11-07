@@ -26,6 +26,8 @@ export const INSIGHT_KIND = 'insight';
 export const STUCK_DAYS = 3;
 /** A week is "usual" within this fraction of the 8-week average. */
 const USUAL_BAND = 0.3;
+/** Part of the week that must have passed before a pace is judged. Earlier, one merge reads as a surge. */
+const MIN_FRACTION = 0.3;
 /** Weeks of history needed before a verdict on "usual". */
 const MIN_HISTORY = 3;
 const LIST_CAP = 12;
@@ -60,6 +62,8 @@ export interface Trend {
   note: string;
   /** usual, higher, lower, or unknown. */
   verdict: 'usual' | 'higher' | 'lower' | 'unknown';
+  /** False when either run read incompletely, so a rise or fall would be noise. Absent means comparable. */
+  comparable?: boolean;
 }
 
 export interface Broke {
@@ -114,7 +118,7 @@ function prRows(reads: RepoRead[], at: Date): { needs: Row[]; stuck: Row[]; open
       if (p.draft) why.push('draft');
       const row = { kind: 'pr' as const, key: `${p.repo}#${p.number}`, title: clip(p.title, 90), url: p.url, days };
       if (escalated) needs.push({ ...row, why: why.join(', ') });
-      else if (days >= STUCK_DAYS && !p.draft) stuck.push({ ...row, why: why.length ? why.join(', ') : `no update for ${days} days, nothing failing` });
+      else if (!p.draft && (days >= STUCK_DAYS || why.length)) stuck.push({ ...row, why: why.length ? why.join(', ') : `no update for ${days} days, nothing failing` });
     }
   }
   const byAge = (a: Row, b: Row): number => b.days - a.days;
@@ -143,8 +147,8 @@ export function weekFraction(at: Date): number {
   return Math.min(1, Math.max(0.05, (days + t.minutes / 1440) / 7));
 }
 
-function verdictFor(pace: number | null, avg: number | null, history: number): Trend['verdict'] {
-  if (pace == null || avg == null || history < MIN_HISTORY || avg <= 0) return 'unknown';
+function verdictFor(pace: number | null, avg: number | null, history: number, frac: number): Trend['verdict'] {
+  if (frac < MIN_FRACTION || pace == null || avg == null || history < MIN_HISTORY || avg <= 0) return 'unknown';
   if (pace > avg * (1 + USUAL_BAND)) return 'higher';
   if (pace < avg * (1 - USUAL_BAND)) return 'lower';
   return 'usual';
@@ -162,12 +166,13 @@ function mergedTrend(reads: RepoRead[], weeks: WeekRecord[], at: Date): Trend {
   const avg = hist.length ? hist.reduce((n, w) => n + w.total, 0) / hist.length : null;
   const frac = weekFraction(at);
   const pace = now / frac;
-  const verdict = verdictFor(pace, avg, hist.length);
-  const note = `${now} so far, ${Math.round(frac * 100)}% of the week gone, a pace of about ${Math.round(pace)}` + (avg == null ? '; no earlier weeks stored' : `; ${hist.length}-week average ${Math.round(avg)}`);
+  const verdict = verdictFor(pace, avg, hist.length, frac);
+  const floor = countWeek(reads, thisWeek).floorRepos.length > 0 || countWeek(reads, prev).floorRepos.length > 0;
+  const note = `${now} so far, ${Math.round(frac * 100)}% of the week gone, a pace of about ${Math.round(pace)}` + (avg == null ? '; no earlier weeks stored' : `; ${hist.length}-week average ${Math.round(avg)}`) + (frac < MIN_FRACTION ? '; too early in the week to judge the pace' : '') + (floor ? '; the GitHub read hit its cap, so these counts are a floor' : '');
   return { label: 'PRs merged', now, last, avg: avg == null ? null : Math.round(avg), badUp: false, note, verdict };
 }
 
-function doneTrend(items: PlaneItem[] | null, history: HubRecord[], at: Date): Trend {
+function doneTrend(items: PlaneItem[] | null, at: Date): Trend {
   if (!items) return { label: 'Plane items done', now: null, last: null, avg: null, badUp: false, note: 'Plane was not read', verdict: 'unknown' };
   const done = new Map<string, number>();
   for (const i of items) {
@@ -180,19 +185,20 @@ function doneTrend(items: PlaneItem[] | null, history: HubRecord[], at: Date): T
   const thisWeek = weekStart(at);
   const prev = weekStart(new Date(Date.parse(`${thisWeek}T12:00:00Z`) - 7 * DAY_MS));
   const past = [...Array(8)].map((_, k) => weekStart(new Date(Date.parse(`${thisWeek}T12:00:00Z`) - (k + 1) * 7 * DAY_MS)));
-  const nonEmpty = past.filter((w) => done.has(w));
-  const avg = nonEmpty.length ? nonEmpty.reduce((n, w) => n + done.get(w)!, 0) / nonEmpty.length : null;
+  // A week with no completion counts as zero, but only for weeks the board reaches back to: the oldest completion read bounds them.
+  const oldest = [...done.keys()].sort()[0];
+  const covered = past.filter((w) => oldest != null && w >= oldest);
+  const avg = covered.length ? covered.reduce((n, w) => n + (done.get(w) ?? 0), 0) / covered.length : null;
   const now = done.get(thisWeek) ?? 0;
   const pace = now / weekFraction(at);
-  void history;
   return {
     label: 'Plane items done',
     now,
     last: done.get(prev) ?? 0,
     avg: avg == null ? null : Math.round(avg),
     badUp: false,
-    note: `counted by last-updated day; ${plural(nonEmpty.length, 'earlier week')} with a completion`,
-    verdict: verdictFor(pace, avg, nonEmpty.length),
+    note: `counted by last-updated day, so a later edit moves an item; average over ${plural(covered.length, 'earlier week')}`,
+    verdict: verdictFor(pace, avg, covered.length, weekFraction(at)),
   };
 }
 
@@ -202,10 +208,12 @@ function cveTrend(cve: HubRecord[]): Trend {
   const now = Number(a.actionable);
   const last = b ? Number(b.actionable) : null;
   const complete = a.complete === true;
+  const comparable = complete && !!b && b.complete === true;
   return {
     label: 'Actionable CVEs',
     now: Number.isFinite(now) ? now : null,
     last: last != null && Number.isFinite(last) ? last : null,
+    comparable,
     avg: null,
     badUp: true,
     note: `run ${a.id}${complete ? '' : ', incomplete read'}; "last" is the run before it${b ? ` (${b.id})` : ''}`,
@@ -246,12 +254,14 @@ export function insightRecord(i: InsightInput): HubRecord {
   if (read.length === 0 && !i.pet.ok && !i.kuma.ok) throw new Error('no source could be read, so there is nothing to report');
 
   const gaps: string[] = [];
+  /** Sources that are not set up or empty on purpose. Shown, but they never raise a headline. */
+  const notes: string[] = [];
   if (i.reads.length === 0 || read.length === 0) gaps.push('GitHub was not read, so PR trends, stuck PRs and PRs that need you are missing');
   else if (unread.length) gaps.push(`GitHub: ${unread.join(', ')} not read`);
   if (!i.pet.ok) gaps.push(`Plane PET board not read: ${i.pet.error.slice(0, 120)}`);
-  if (!i.med.ok) gaps.push(`MED board not read: ${i.med.reason ?? 'unknown'}`);
+  if (!i.med.ok) (i.med.reason?.startsWith('no MED project id') ? notes : gaps).push(`MED board not read: ${i.med.reason ?? 'unknown'}`);
   if (!i.kuma.ok) gaps.push(`Uptime Kuma not read: ${i.kuma.error.slice(0, 120)}`);
-  if (i.cve.length === 0) gaps.push('no CVE run is stored');
+  if (i.cve.length === 0) notes.push('no CVE run is stored yet');
 
   const prs = read.length ? prRows(i.reads, at) : { needs: [], stuck: [], open: 0, red: 0, conflict: 0 };
   const pl = i.pet.ok ? planeRows(i.pet.items, at) : { needs: [], stuck: [], open: 0 };
@@ -259,7 +269,7 @@ export function insightRecord(i: InsightInput): HubRecord {
   const stuck = [...prs.stuck, ...pl.stuck].sort((a, b) => b.days - a.days);
   const broke = brokeList(i);
 
-  const trends: Trend[] = [mergedTrend(i.reads, i.weeks, at), doneTrend(i.pet.ok ? i.pet.items : null, i.planeHistory, at), openTrend(i.pet.ok ? pl.open : null, i.planeHistory), cveTrend(i.cve)];
+  const trends: Trend[] = [mergedTrend(i.reads, i.weeks, at), doneTrend(i.pet.ok ? i.pet.items : null, at), openTrend(i.pet.ok ? pl.open : null, i.planeHistory), cveTrend(i.cve)];
 
   const heads: (Headline & { rank: number })[] = [];
   const add = (rank: number, level: Level, text: string, link?: string): void => void heads.push({ rank, level, text, link });
@@ -282,7 +292,8 @@ export function insightRecord(i: InsightInput): HubRecord {
   const d = trends[1]!;
   if (d.verdict === 'lower') add(45, 'warn', `Plane completions are below the usual pace: ${d.now} done this week against a typical ${d.avg}.`, 'plane');
   const c = trends[3]!;
-  if (c.now != null && c.last != null && c.now > c.last) add(60, 'warn', `Actionable CVEs rose from ${c.last} to ${c.now}.`, 'cve');
+  if (c.comparable === false && c.now != null) add(40, 'info', 'CVE counts are not compared with the run before, because one of the two runs read incompletely.', 'cve');
+  else if (c.now != null && c.last != null && c.now > c.last) add(60, 'warn', `Actionable CVEs rose from ${c.last} to ${c.now}.`, 'cve');
   else if (c.now != null && c.last != null && c.now < c.last) add(15, 'good', `Actionable CVEs fell from ${c.last} to ${c.now}.`, 'cve');
   if (gaps.length) add(85, 'warn', `${plural(gaps.length, 'source')} could not be fully read, so some numbers below are missing: ${gaps[0]}.`);
   const headlines: Headline[] = heads
@@ -316,5 +327,6 @@ export function insightRecord(i: InsightInput): HubRecord {
     ],
     broke,
     gaps,
+    notes,
   };
 }
