@@ -65,6 +65,16 @@ export class ReportHub {
       .reverse();
   }
 
+  /** One record, or null when it is absent or cannot be read. */
+  get(kind: string, id: string): HubRecord | null {
+    if (!ID_RE.test(id)) return null;
+    try {
+      return JSON.parse(readFileSync(join(this.kindDir(kind), `${id}.json`), 'utf8')) as HubRecord;
+    } catch {
+      return null;
+    }
+  }
+
   has(kind: string, id: string): boolean {
     return this.ids(kind).includes(id);
   }
