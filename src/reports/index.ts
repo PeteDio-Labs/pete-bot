@@ -29,6 +29,10 @@ export function discordSender(client: Client, ownerUserId: string): Sender {
 
 export function startReports(client: Client, ownerUserId: string, env: ReportsEnv = process.env as ReportsEnv): void {
   state = loadReportSettings(env);
+  if (state.state !== 'ready' && ((env as WeeklyEnv).WEEKLY_REPORT_DIR ?? '').trim()) {
+    // The weekly report reads GitHub through these settings, so it cannot start without them.
+    weekly = { state: 'misconfigured', reason: `WEEKLY_REPORT_DIR is set but the scheduled reports are ${state.state === 'off' ? 'off (REPORTS_MODE is empty)' : 'misconfigured'}` };
+  }
   if (state.state === 'off') {
     logger.info('[Reports] The scheduled reports are off (REPORTS_MODE is empty)');
     return;
@@ -92,8 +96,8 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
 }
 
 /** For /health. Running names the last attempt, so "never ran" and "ran and failed" differ. */
-export function weeklyHealth(): { state: string; reason?: string; last?: unknown } {
+export function weeklyHealth(): { state: string; reason?: string; last?: unknown; lastFailure?: unknown } {
   if (weekly.state === 'misconfigured') return { state: 'misconfigured', reason: weekly.reason };
   if (weekly.state === 'off') return { state: 'off' };
-  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null };
+  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null, lastFailure: weeklyRunner?.lastFailure ?? null };
 }

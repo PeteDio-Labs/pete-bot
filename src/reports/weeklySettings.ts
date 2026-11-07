@@ -41,7 +41,7 @@ export function loadWeeklySettings(env: WeeklyEnv): WeeklyState {
   if (!/^[0-9a-f]{64}$/.test(aud)) return bad('WEEKLY_ACCESS_AUD must be the 64-hex Access AUD tag');
   const emails = (env.WEEKLY_ACCESS_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (emails.length === 0) return bad('WEEKLY_ACCESS_EMAILS is empty');
-  const ollamaUrl = (env.WEEKLY_OLLAMA_URL ?? '').trim().replace(/\/+$/, '') || 'http://192.168.50.12:11434';
+  const ollamaUrl = (env.WEEKLY_OLLAMA_URL ?? '').trim().replace(/\/+$/, '') || 'http://192.168.50.246:11434';
   if (!/^https?:\/\//.test(ollamaUrl)) return bad(`WEEKLY_OLLAMA_URL must start with http:// or https://, not "${ollamaUrl}"`);
   return { state: 'ready', settings: { dir, host: (env.WEEKLY_DASH_HOST ?? '').trim() || '127.0.0.1', port, teamDomain, aud, emails, ollamaUrl } };
 }

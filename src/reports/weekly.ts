@@ -27,7 +27,7 @@ import type { Logger } from './runner.js';
 export const WEEKLY_MODEL = 'qwen3:8b';
 const DAY_MS = 86_400_000;
 const WEEK_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** Sunday 22:30 Eastern. Later merges that night belong to the stored week only if the run is late. */
+/** Sunday 22:30 Eastern. The Monday check rebuilds the week once more, for merges after the slot (needsRebuild). */
 export const WEEKLY_SLOT = { weekday: 0, minutes: 22 * 60 + 30 };
 
 export interface WeekPr {
@@ -200,16 +200,34 @@ export class WeekStore {
 
 /**
  * The weeks to build now. The week that holds `at` is due from Sunday 22:30 Eastern. The
- * previous week is due at any time when it has no file, which covers a week lost to an outage.
+ * previous week is due when it has no file, which covers a week lost to an outage, and again
+ * when `stale` says its file is partial (see `needsRebuild`). Only the previous week is
+ * repaired: an outage longer than a week leaves the older gap, and the dashboard shows it.
  */
-export function dueWeeks(at: Date, has: (week: string) => boolean): string[] {
+export function dueWeeks(at: Date, has: (week: string) => boolean, stale: (week: string) => boolean = () => false): string[] {
   const t = localTime(at);
   const current = weekStart(at);
   const due: string[] = [];
   const previous = addDays(current, -7);
-  if (!has(previous) && previous >= FIRST_WEEK) due.push(previous);
+  if (previous >= FIRST_WEEK && (!has(previous) || stale(previous))) due.push(previous);
   if (t.weekday === WEEKLY_SLOT.weekday && t.minutes >= WEEKLY_SLOT.minutes && !has(current)) due.push(current);
   return due;
+}
+
+const REBUILD_GAP_MS = 60 * 60_000;
+
+/**
+ * Whether a stored week is partial and worth another try: a repo was not read, the summary is
+ * missing, or the file was written before the week ended (Sunday 22:30 leaves the last hour out).
+ * Tried at most once an hour, so a model that stays down does not cost a GitHub read every tick.
+ */
+export function needsRebuild(rec: WeekRecord, now: Date): boolean {
+  const generated = Date.parse(rec.generatedAt);
+  if (!Number.isFinite(generated)) return true;
+  if (now.getTime() - generated < REBUILD_GAP_MS) return false;
+  // Monday 05:00 UTC is after Eastern midnight in both EST and EDT.
+  const weekEnd = Date.parse(`${addDays(rec.week, 7)}T05:00:00Z`);
+  return generated < weekEnd || rec.coverage.unread.length > 0 || (rec.summary.source === 'none' && rec.total > 0);
 }
 
 /** The first week the report exists for. Earlier weeks are not back-filled. */
@@ -231,6 +249,8 @@ export class WeeklyRunner {
   private readonly now: () => Date;
   /** What the last attempt did, for /health: "never ran" and "ran, failed" must differ. */
   last: { at: string; week: string; ok: boolean; detail: string } | null = null;
+  /** The latest failure, kept after a later success so /health does not hide it. */
+  lastFailure: { at: string; week: string; detail: string } | null = null;
 
   constructor(private readonly d: WeeklyDeps) {
     this.now = d.now ?? (() => new Date());
@@ -246,7 +266,18 @@ export class WeeklyRunner {
     if (this.busy) return;
     this.busy = true;
     try {
-      for (const week of dueWeeks(this.now(), (w) => this.d.store.has(w))) await this.generate(week);
+      const at = this.now();
+      const stale = (w: string): boolean => {
+        const rec = this.d.store.all().weeks.find((r) => r.week === w);
+        return rec ? needsRebuild(rec, at) : true;
+      };
+      for (const week of dueWeeks(at, (w) => this.d.store.has(w), stale)) await this.generate(week);
+    } catch (err) {
+      // An unreadable store must not escape as an unhandled rejection from the timer.
+      const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+      this.last = { at: this.now().toISOString(), week: '', ok: false, detail };
+      this.lastFailure = { at: this.last.at, week: '', detail };
+      this.d.log.error(`[Weekly] tick failed: ${detail}`);
     } finally {
       this.busy = false;
     }
@@ -264,6 +295,7 @@ export class WeeklyRunner {
     } catch (err) {
       const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
       this.last = { at: at.toISOString(), week, ok: false, detail };
+      this.lastFailure = { at: at.toISOString(), week, detail };
       this.d.log.error(`[Weekly] ${week} failed: ${detail}`);
       return false;
     }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { GithubReads } from './collect.js';
 import { createDashboardApp } from './dashboard.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
-import { buildWeek, cleanSummary, dueWeeks, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekRecord } from './weekly.js';
+import { buildWeek, cleanSummary, dueWeeks, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekRecord } from './weekly.js';
 import { loadWeeklySettings } from './weeklySettings.js';
 
 const pr = (n: number, merged: string | null, extra: Record<string, unknown> = {}) => ({
@@ -99,6 +99,20 @@ describe('dueWeeks', () => {
   });
 });
 
+describe('needsRebuild', () => {
+  const base = (over: Partial<WeekRecord>): WeekRecord => ({ week: WEEK, generatedAt: '2026-11-09T04:00:00Z', total: 2, byRepo: {}, byAuthor: {}, openNow: 0, merged: [], coverage: { reposRead: 1, reposTotal: 1, unread: [], floorRepos: [] }, summary: { source: 'ollama', text: 'x' }, ...over });
+  const mon = new Date('2026-11-09T15:00:00Z');
+  it('rebuilds a file written before the week ended, a partial read, or a missing summary', () => {
+    expect(needsRebuild(base({}), mon)).toBe(true); // 04:00Z Monday is 23:00 Sunday Eastern
+    expect(needsRebuild(base({ generatedAt: '2026-11-09T09:00:00Z', coverage: { reposRead: 0, reposTotal: 1, unread: ['b'], floorRepos: [] } }), mon)).toBe(true);
+    expect(needsRebuild(base({ generatedAt: '2026-11-09T09:00:00Z', summary: { source: 'none', text: '', reason: 'x' } }), mon)).toBe(true);
+  });
+  it('leaves a complete file alone, and waits an hour between tries', () => {
+    expect(needsRebuild(base({ generatedAt: '2026-11-09T09:00:00Z' }), mon)).toBe(false);
+    expect(needsRebuild(base({}), new Date('2026-11-09T04:20:00Z'))).toBe(false);
+  });
+});
+
 describe('store and runner', () => {
   let dir = '';
   afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
@@ -174,7 +188,7 @@ describe('loadWeeklySettings', () => {
   it('is off with no directory, and ready with defaults', () => {
     expect(loadWeeklySettings({}).state).toBe('off');
     const s = loadWeeklySettings(env);
-    expect(s).toMatchObject({ state: 'ready', settings: { host: '127.0.0.1', port: 3018, emails: ['p@x.dev'], ollamaUrl: 'http://192.168.50.12:11434' } });
+    expect(s).toMatchObject({ state: 'ready', settings: { host: '127.0.0.1', port: 3018, emails: ['p@x.dev'], ollamaUrl: 'http://192.168.50.246:11434' } });
   });
   it('refuses to start the dashboard without an AUD tag or an email', () => {
     expect(loadWeeklySettings({ ...env, WEEKLY_ACCESS_AUD: '' })).toMatchObject({ state: 'misconfigured' });

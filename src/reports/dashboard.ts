@@ -19,7 +19,7 @@ import type { WeekStore, WeeklyRunner } from './weekly.js';
 export interface DashboardDeps {
   store: WeekStore;
   verify: (jwt: string | null) => Promise<AccessResult>;
-  runner?: Pick<WeeklyRunner, 'last'>;
+  runner?: Pick<WeeklyRunner, 'last' | 'lastFailure'>;
   log?: (msg: string) => void;
 }
 
@@ -36,7 +36,8 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/health', (_req, res) => {
     try {
       const weeks = d.store.weeks();
-      res.json({ ok: true, weeks: weeks.length, newest: weeks[0] ?? null, last: d.runner?.last ?? null });
+      // Flags only: error text can name internal URLs and this route takes no auth.
+      res.json({ ok: true, weeks: weeks.length, newest: weeks[0] ?? null, lastRunOk: d.runner?.last ? d.runner.last.ok : null, everFailed: !!d.runner?.lastFailure });
     } catch (err) {
       res.status(503).json({ ok: false, error: (err as Error).message.slice(0, 120) });
     }
