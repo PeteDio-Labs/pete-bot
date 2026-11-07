@@ -134,7 +134,10 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
               const pet = await petClient.read();
               // A PET board that cannot be read stores nothing, so the job retries instead of keeping an empty day.
               if (!pet.ok) throw new Error(`PET board not read: ${pet.error}`);
-              return planeRecord(pet, medClient ? await medClient.read() : null, localTime(at).date, at);
+              const med = medClient ? await medClient.read() : null;
+              // A MED id that is set but unreadable retries too; only "no id set" is stored as unread.
+              if (med && !med.ok) throw new Error(`MED board not read: ${med.error}`);
+              return planeRecord(pet, med, localTime(at).date, at);
             },
           },
         ],

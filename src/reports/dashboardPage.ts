@@ -332,7 +332,7 @@ RENDER.plane=function(box,r){
  [['PET','pet'],['MED','med']].forEach(function(p){var b=r[p[1]];box.appendChild(el('h3',p[0]+' board'));
   if(!b||!b.ok){box.appendChild(el('p','Not read: '+((b&&b.unread)||'no data')+'.',{class:'warn'}));return}
   box.appendChild(el('div',String(b.open),{class:'big'}));
-  box.appendChild(el('div','open of '+b.items+' items read · '+b.inReview+' in review, '+b.stuckTotal+' waiting '+r.stuckAfterDays+'+ days',{class:'mute'}));
+  box.appendChild(el('div','open of '+b.items+' items read · '+b.inReview+' in review, '+b.stuckTotal+' waiting '+r.stuckAfterDays+'+ days'+(b.undatedReview?' ('+b.undatedReview+' undated, not judged)':''),{class:'mute'}));
   box.appendChild(el('div','Done per week (by last update): '+b.doneByWeek.map(function(w){return w.week.slice(5)+' '+w.done}).join(' · '),{class:'mute'}));
   box.appendChild(el('p','Open by label: '+b.labelMix.map(function(l){return l.label+' '+l.open}).join(' · '),{class:'mute'}));
   if(b.stuck.length)box.appendChild(rtable(['Item','Title','State','Days'],b.stuck.map(function(i){return[i.key,i.name,i.state,String(i.days)]})))})};

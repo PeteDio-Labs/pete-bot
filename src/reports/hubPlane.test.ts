@@ -26,6 +26,7 @@ describe('tallyBoard', () => {
     item(4, { stateName: 'In Review', stateGroup: 'started', updatedAt: '2026-11-01T00:00:00Z', labels: ['cloud'] }),
     item(5, { stateName: 'In Review', stateGroup: 'started', updatedAt: '2026-11-07T00:00:00Z', labels: ['cloud', 'security'] }),
     item(6),
+    item(7, { stateName: 'In Review', stateGroup: 'started', updatedAt: '' }),
   ];
   const t = tallyBoard(items, 'PET', AT);
   it('counts done per week and leaves cancelled items out', () => {
@@ -34,7 +35,7 @@ describe('tallyBoard', () => {
     expect(t.doneByWeek.at(-2)).toEqual({ week: '2026-10-26', done: 1 });
   });
   it('lists only reviews older than the stuck limit', () => {
-    expect(t).toMatchObject({ items: 6, open: 3, inReview: 2, stuckTotal: 1 });
+    expect(t).toMatchObject({ items: 7, open: 4, inReview: 3, stuckTotal: 1, undatedReview: 1 });
     expect(t.stuck).toEqual([{ key: 'PET-4', name: 'Item 4', state: 'In Review', days: 6 }]);
   });
   it('mixes labels and names unlabelled items', () => {

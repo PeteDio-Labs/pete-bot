@@ -38,6 +38,8 @@ export interface BoardTally {
   inReview: number;
   stuck: { key: string; name: string; state: string; days: number }[];
   stuckTotal: number;
+  /** Items in review whose last-update time is missing, so their wait cannot be judged. */
+  undatedReview: number;
   labelMix: { label: string; open: number }[];
 }
 
@@ -57,6 +59,7 @@ export function tallyBoard(items: PlaneItem[], prefix: string, at: Date): BoardT
     .map((i) => ({ i, days: Math.floor((at.getTime() - Date.parse(i.updatedAt)) / DAY_MS) }))
     .filter((x) => Number.isFinite(x.days) && x.days >= STUCK_DAYS)
     .sort((a, b) => b.days - a.days);
+  const undatedReview = review.filter((i) => !Number.isFinite(Date.parse(i.updatedAt))).length;
   const mix = new Map<string, number>();
   for (const i of open) for (const l of i.labels.length ? i.labels : ['(no label)']) mix.set(l, (mix.get(l) ?? 0) + 1);
   return {
@@ -65,6 +68,7 @@ export function tallyBoard(items: PlaneItem[], prefix: string, at: Date): BoardT
     doneByWeek: weeks.map((week) => ({ week, done: done.get(week)! })),
     inReview: review.length,
     stuckTotal: stuck.length,
+    undatedReview,
     stuck: stuck.slice(0, LIST_CAP).map(({ i, days }) => ({ key: `${prefix}-${i.seq}`, name: clip(i.name, 80), state: i.stateName, days })),
     labelMix: [...mix].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, LABEL_CAP).map(([label, n]) => ({ label, open: n })),
   };
