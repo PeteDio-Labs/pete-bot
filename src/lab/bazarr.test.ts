@@ -49,6 +49,17 @@ describe('bazarr_find', () => {
       expect(init.headers).toMatchObject({ 'x-api-key': CFG.apiKey });
     }
   });
+  it('lists every title with missing subtitles when asked for missing only, with no title', async () => {
+    const res = await callTool(bazarrFindTool({ ...CFG, fetch: router() as never }), { missingOnly: true });
+    expect(res.ok && res.text).toContain('Survivor');
+    expect(res.ok && res.text).toContain('Never After Dark');
+    expect(res.ok && res.text).not.toContain('Edge of Extinction');
+    expect(res.ok && res.text).toContain('3 have missing subtitles');
+  });
+  it('rejects a call with neither a title nor missingOnly', async () => {
+    const res = await callTool(bazarrFindTool({ ...CFG, fetch: router() as never }), {});
+    expect(res.ok).toBe(false);
+  });
   it('fails on a 401 and a body with no data list, never an empty result', async () => {
     const a = await callTool(bazarrFindTool({ ...CFG, fetch: router({ '/api/series': () => json({}, 401) }) as never }), { title: 'dexter' });
     expect(!a.ok && a.error).toContain('refused the lab-agent key');
