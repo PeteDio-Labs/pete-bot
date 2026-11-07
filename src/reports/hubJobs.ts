@@ -7,10 +7,17 @@
 import { localTime } from './schedule.js';
 import type { HubRecord, ReportHub } from './hub.js';
 
+const RETRY_MINUTES = 10;
+
 export interface HubJob {
   kind: string;
   /** Local hour (Eastern) from which the job is due. */
   hour: number;
+  /**
+   * When set, the job runs again this many minutes after its last success, replacing the day's
+   * record. A failed try waits RETRY_MINUTES. Unset, the job stores once per local date.
+   */
+  everyMinutes?: number;
   /** Null stores nothing and counts as a failed try. */
   collect(at: Date): Promise<HubRecord | null>;
 }
@@ -24,6 +31,8 @@ export class HubJobs {
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
   private done = new Map<string, string>();
+  /** Earliest time (ms) a repeating job may run again. */
+  private nextAt = new Map<string, number>();
   readonly last = new Map<string, { date: string; ok: boolean; detail: string }>();
 
   constructor(
@@ -51,9 +60,12 @@ export class HubJobs {
       const at = this.now();
       const t = localTime(at);
       for (const job of this.jobs) {
-        // A restart the same day must not rebuild a record the store already holds.
-        if (this.done.get(job.kind) === t.date || t.minutes < job.hour * 60) continue;
-        if (this.hub.has(job.kind, t.date)) {
+        if (t.minutes < job.hour * 60) continue;
+        if (job.everyMinutes) {
+          if (at.getTime() < (this.nextAt.get(job.kind) ?? 0)) continue;
+        } else if (this.done.get(job.kind) === t.date) continue;
+        // A restart the same day must not rebuild a record the store already holds (once-a-day jobs).
+        if (!job.everyMinutes && this.hub.has(job.kind, t.date)) {
           this.done.set(job.kind, t.date);
           continue;
         }
@@ -62,10 +74,12 @@ export class HubJobs {
           if (!rec) throw new Error('the collector returned no record');
           this.hub.save(job.kind, rec);
           this.done.set(job.kind, t.date);
+          if (job.everyMinutes) this.nextAt.set(job.kind, at.getTime() + job.everyMinutes * 60_000);
           this.last.set(job.kind, { date: t.date, ok: true, detail: 'stored' });
           this.log.info(`[Hub] ${job.kind} stored for ${t.date}`);
         } catch (err) {
           const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+          if (job.everyMinutes) this.nextAt.set(job.kind, at.getTime() + RETRY_MINUTES * 60_000);
           this.last.set(job.kind, { date: t.date, ok: false, detail });
           this.log.warn(`[Hub] ${job.kind} failed, will retry: ${detail}`);
         }

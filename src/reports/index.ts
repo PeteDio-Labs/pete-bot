@@ -16,6 +16,9 @@ import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
 import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
 import { PLANE_KIND, planeRecord } from './hubPlane.js';
 import { HubJobs } from './hubJobs.js';
+import { INSIGHT_KIND, insightRecord } from './hubInsight.js';
+import { collectGithub } from './collect.js';
+import { readKuma } from '../lab/tools/kuma.js';
 import { localTime } from './schedule.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './backup.js';
@@ -120,31 +123,53 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
       w.port,
     );
     weeklyRunner.start();
-    if (s.plane) {
-      const petClient = new PlaneClient(s.plane);
-      const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();
-      const medClient = medId ? new PlaneClient({ ...s.plane, projectId: medId }) : null;
-      hubJobs = new HubJobs(
-        hub,
-        [
-          {
-            kind: PLANE_KIND,
-            hour: 6,
-            collect: async (at) => {
-              const pet = await petClient.read();
-              // A PET board that cannot be read stores nothing, so the job retries instead of keeping an empty day.
-              if (!pet.ok) throw new Error(`PET board not read: ${pet.error}`);
-              const med = medClient ? await medClient.read() : null;
-              // A MED id that is set but unreadable retries too; only "no id set" is stored as unread.
-              if (med && !med.ok) throw new Error(`MED board not read: ${med.error}`);
-              return planeRecord(pet, med, localTime(at).date, at);
-            },
-          },
-        ],
-        logger,
-      );
-      hubJobs.start();
+    const petClient = s.plane ? new PlaneClient(s.plane) : null;
+    const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();
+    const medClient = s.plane && medId ? new PlaneClient({ ...s.plane, projectId: medId }) : null;
+    const jobs = [];
+    if (s.plane && petClient) {
+      jobs.push({
+        kind: PLANE_KIND,
+        hour: 6,
+        collect: async (at: Date) => {
+          const pet = await petClient.read();
+          // A PET board that cannot be read stores nothing, so the job retries instead of keeping an empty day.
+          if (!pet.ok) throw new Error(`PET board not read: ${pet.error}`);
+          const med = medClient ? await medClient.read() : null;
+          // A MED id that is set but unreadable retries too; only "no id set" is stored as unread.
+          if (med && !med.ok) throw new Error(`MED board not read: ${med.error}`);
+          return planeRecord(pet, med, localTime(at).date, at);
+        },
+      });
     } else logger.warn('[Hub] PLANE_API_KEY is empty, so the Plane report is not collected');
+    // The insight record (what the numbers mean) rebuilds every 3 hours.
+    const kumaCfg = { baseUrl: process.env.LAB_KUMA_URL?.trim() || 'http://192.168.50.4:3001', slug: process.env.LAB_KUMA_SLUG?.trim() || 'fault-study' };
+    jobs.push({
+      kind: INSIGHT_KIND,
+      hour: 0,
+      everyMinutes: 180,
+      collect: async (at: Date) => {
+        const reads = await collectGithub(gh, s.org, s.repos, at);
+        const pet = petClient ? await petClient.read() : { ok: false as const, error: 'PLANE_API_KEY is empty on this host' };
+        const med = medClient ? await medClient.read() : null;
+        const kuma = await readKuma(kumaCfg).then(
+          (monitors) => ({ ok: true as const, monitors }),
+          (err) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }),
+        );
+        return insightRecord({
+          at,
+          reads,
+          pet,
+          kuma,
+          weeks: store.all().weeks,
+          cve: hub!.list(CVE_KIND).records,
+          planeHistory: hub!.list(PLANE_KIND).records,
+          med: med ? (med.ok ? { ok: true } : { ok: false, reason: med.error.slice(0, 120) }) : { ok: false, reason: 'no MED project id is set on this host (PLANE_MED_PROJECT_ID)' },
+        });
+      },
+    });
+    hubJobs = new HubJobs(hub, jobs, logger);
+    hubJobs.start();
     backupConfig = loadBackupConfig(env);
     if (backupConfig.state === 'misconfigured') logger.error(`[Backup] The report backup is off because it is misconfigured: ${backupConfig.reason}`);
     else if (backupConfig.state === 'off') logger.warn('[Backup] No report backup is set (REPORT_BACKUP_*): the reports live only on this host.');
