@@ -243,16 +243,6 @@ export class WeekStore {
     }
   }
 
-  /** One week, or null when it is absent or cannot be read. */
-  get(week: string): WeekRecord | null {
-    if (!WEEK_RE.test(week)) return null;
-    try {
-      return JSON.parse(readFileSync(join(this.dir, `${week}.json`), 'utf8')) as WeekRecord;
-    } catch {
-      return null;
-    }
-  }
-
   save(rec: WeekRecord): void {
     if (!WEEK_RE.test(rec.week)) throw new Error(`bad week "${rec.week}"`);
     this.db.query('INSERT INTO weeks (week, body) VALUES (?, ?) ON CONFLICT(week) DO UPDATE SET body = excluded.body').run(rec.week, JSON.stringify(rec));

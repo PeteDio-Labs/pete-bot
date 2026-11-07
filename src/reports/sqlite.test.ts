@@ -86,5 +86,21 @@ describe('report backup', () => {
     fail = false;
     expect(await b.run()).toBe(true);
     expect(b.state().state).toBe('ok');
+    // A failure survives a restart, and a copy that stops running reads stale.
+    fail = true;
+    t += 25 * 3600_000;
+    await b.run();
+    expect(new ReportBackup(db, target, logger, () => new Date(t)).state().state).toBe('failing');
+    fail = false;
+    await b.run();
+    t += 40 * 3600_000;
+    expect(b.state()).toMatchObject({ state: 'stale', hours: 40 });
+  });
+  it('drops a URL from a failure message', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'bk-'));
+    const db = openReportDb(dir);
+    const b = new ReportBackup(db, { async put() { throw new Error('connect ECONNREFUSED http://192.168.50.245:9000/pete-bot/reports.sqlite'); } }, logger);
+    await b.run();
+    expect((b.state() as { detail: string }).detail).toBe('connect ECONNREFUSED <url>');
   });
 });

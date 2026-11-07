@@ -96,6 +96,7 @@ export function getHub(): ReportHub | null {
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
 async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv): Promise<void> {
   weekly = loadWeeklySettings(env);
+  if (weekly.state !== 'ready' && loadBackupConfig(env).state !== 'off') logger.warn('[Backup] REPORT_BACKUP_* is set but the weekly report is not running, so no reports are stored and nothing is copied.');
   if (weekly.state === 'off') return;
   if (weekly.state === 'misconfigured') {
     logger.error(`[Weekly] The weekly report is off because it is misconfigured: ${weekly.reason}`);

@@ -57,12 +57,27 @@ export function s3Target(s: BackupSettings): BackupTarget {
 export const BACKUP_KEY = 'reports.sqlite';
 const DAY_MS = 24 * 3600_000;
 
-export type BackupState = { state: 'never' } | { state: 'ok'; at: string; bytes: number } | { state: 'failing'; at: string; detail: string; lastOk: string | null };
+export type BackupState = { state: 'never' } | { state: 'ok'; at: string; bytes: number } | { state: 'stale'; at: string; hours: number } | { state: 'failing'; at: string; detail: string; lastOk: string | null };
+
+/** A copy that never answers must not leave `busy` set for good. */
+const PUT_TIMEOUT_MS = 120_000;
+/** An `ok` older than this reads as stale: a day plus a margin, so a missed tick shows. */
+const STALE_MS = 36 * 3600_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const stop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the copy did not finish in ${Math.round(ms / 1000)} s`)), ms);
+  });
+  return Promise.race([p, stop]).finally(() => clearTimeout(timer));
+}
+
+/** Error text for /health and logs: no URL, since an S3 error can name the endpoint. */
+const scrub = (m: string): string => m.replace(/https?:\/\/\S+/g, '<url>').slice(0, 120);
 
 export class ReportBackup {
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
-  private lastFail: { at: string; detail: string } | null = null;
 
   constructor(
     private readonly db: Database,
@@ -80,8 +95,11 @@ export class ReportBackup {
 
   state(): BackupState {
     const ok = this.meta('backup_ok_at');
-    if (this.lastFail && (!ok || this.lastFail.at > ok)) return { state: 'failing', at: this.lastFail.at, detail: this.lastFail.detail, lastOk: ok };
+    const failAt = this.meta('backup_fail_at');
+    if (failAt && (!ok || failAt > ok)) return { state: 'failing', at: failAt, detail: this.meta('backup_fail_detail') ?? '', lastOk: ok };
     if (!ok) return { state: 'never' };
+    const age = this.now().getTime() - Date.parse(ok);
+    if (age > STALE_MS) return { state: 'stale', at: ok, hours: Math.round(age / 3600_000) };
     return { state: 'ok', at: ok, bytes: Number(this.meta('backup_bytes') ?? 0) };
   }
 
@@ -97,15 +115,15 @@ export class ReportBackup {
     const at = this.now().toISOString();
     try {
       const bytes = snapshot(this.db);
-      await this.target.put(BACKUP_KEY, bytes);
+      await withTimeout(this.target.put(BACKUP_KEY, bytes), PUT_TIMEOUT_MS);
       this.setMeta('backup_ok_at', at);
       this.setMeta('backup_bytes', String(bytes.byteLength));
-      this.lastFail = null;
       this.log.info(`[Backup] reports.sqlite copied, ${bytes.byteLength} bytes`);
       return true;
     } catch (err) {
-      const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
-      this.lastFail = { at, detail };
+      const detail = scrub(err instanceof Error ? err.message : String(err));
+      this.setMeta('backup_fail_at', at);
+      this.setMeta('backup_fail_detail', detail);
       this.log.error(`[Backup] the copy failed: ${detail}`);
       return false;
     } finally {
@@ -119,6 +137,7 @@ export class ReportBackup {
       if (this.due()) void this.run();
     };
     this.timer = setInterval(tick, 15 * 60_000);
+    this.timer.unref();
     tick();
   }
 }
