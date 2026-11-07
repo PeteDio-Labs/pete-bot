@@ -112,6 +112,14 @@ var title=function(k){return k==='weekly'?'Weekly PRs':(TITLES[k]||k)};
 function plain(v){if(v==null)return'none';if(typeof v==='object')return JSON.stringify(v);return String(v)}
 function recDefault(box,rec){var dl=el('dl');Object.keys(rec).forEach(function(k){dl.appendChild(el('dt',k));dl.appendChild(el('dd',plain(rec[k])))});box.appendChild(dl)}
 var RENDER={};
+RENDER.cve=function(box,r){var e=r.examined||{},un=e.hostsUnread||[],gaps=r.gaps||[];
+ box.appendChild(el('div',String(r.findings),{class:'big'}));
+ box.appendChild(el('div','findings: '+r.actionable+' actionable, '+r.exploited+' exploited, by severity '+Object.keys(r.bySeverity||{}).map(function(k){return k+' '+r.bySeverity[k]}).join(', '),{class:'mute'}));
+ box.appendChild(el('p','Examined '+e.hostsRead+' host(s)'+(un.length?'; not read: '+un.join(', '):'')+', '+e.queries+' package queries, '+e.advisoriesFetched+' of '+e.advisories+' advisories, '+(e.kevEntries==null?'CISA list not read':e.kevEntries+' CISA entries')+', inventory '+e.snapshotAgeHours+' h old, '+e.images+' container image(s) listed, not matched.',{class:'mute'}));
+ if(!r.complete||gaps.length)box.appendChild(el('p',(r.complete?'Notes: ':'Incomplete: ')+gaps.join(' '),{class:'warn'}));
+ var t=el('table'),h=el('tr');['Package','Installed','Fixed','Severity','Hosts','CVE'].forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
+ (r.top||[]).forEach(function(f){var tr=el('tr');[f.package,f.installed,f.fixed||'no fix',f.severity+(f.kev?' · exploited':''),(f.hosts||[]).join(', '),f.cve||''].forEach(function(x){tr.appendChild(el('td',x))});t.appendChild(tr)});
+ if((r.top||[]).length)box.appendChild(t)};
 function showRec(kind,id){var box=$('recBody');clear(box);var rec=(kindData[kind]||[]).filter(function(r){return r.id===id})[0];if(!rec){box.appendChild(el('p','No record.',{class:'mute'}));return}
  (RENDER[kind]||recDefault)(box,rec)}
 function showKind(kind,bad){var sel=$('recSel');clear(sel);var rs=kindData[kind]||[];

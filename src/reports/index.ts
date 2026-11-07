@@ -12,6 +12,7 @@ import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
 import { ReportHub } from './hub.js';
+import { CVE_KIND, cveRecord } from './hubCve.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 
 let runner: ReportRunner | null = null;
@@ -49,6 +50,7 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     plane: s.plane ? new PlaneClient(s.plane) : null,
     sender: discordSender(client, ownerUserId),
     log: logger,
+    onCve: (run, date, at) => hub?.save(CVE_KIND, cveRecord(run, date, at)),
   });
   runner.start();
   void startWeekly(s, env as WeeklyEnv);

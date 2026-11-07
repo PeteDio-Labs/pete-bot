@@ -380,6 +380,14 @@ describe('ReportRunner cve', () => {
     await r.run('cve', { markRun: false });
     expect(called).toBe(false);
   });
+  it('hands each run to onCve, and a throw there does not stop the report', async () => {
+    const seen: string[] = [];
+    const sent: string[] = [];
+    const r = new ReportRunner({ settings: base(file(), false), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds(), onCve: (run, date) => { seen.push(`${date}:${run.findings.length}`); throw new Error('disk full'); } });
+    await r.run('cve', { markRun: false });
+    expect(seen).toHaveLength(1);
+    expect(sent.join('\n')).not.toContain('cve report failed');
+  });
   it('sends a failure DM when the snapshot is missing', async () => {
     const sent: string[] = [];
     const r = new ReportRunner({ settings: base('/nonexistent/s.json', false), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => NOW, feedFetch: feeds() });
