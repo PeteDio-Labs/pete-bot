@@ -159,7 +159,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         const result: AskResult = isMedia
           ? await ask(body.question, deps.mediaTools!, deps.callModel, deps.model, signal, { system: MEDIA_SYSTEM_PROMPT, history: body.history })
           : await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
-        log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
+        log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, toolErrors: result.toolErrors, usage: result.usage, incomplete: result.incomplete });
         return json(result);
       } catch (err) {
         const message = err instanceof ModelError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;

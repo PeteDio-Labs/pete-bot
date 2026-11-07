@@ -110,6 +110,10 @@ describe('the media prompt', () => {
     expect(MEDIA_SYSTEM_PROMPT).toContain('No tool lists recently added titles');
     expect(MEDIA_SYSTEM_PROMPT).toContain('never answer it with the download queue');
   });
+
+  it('tells the model to state only what a tool returned', () => {
+    expect(MEDIA_SYSTEM_PROMPT).toContain('State only what a tool returned.');
+  });
 });
 
 describe('POST /v1/media/ask', () => {
