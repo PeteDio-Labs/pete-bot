@@ -159,6 +159,19 @@ describe('ask', () => {
     expect(result.answer).toContain('401');
   });
 
+  it('keeps the error text of a failed read for the journal', async () => {
+    const result = await ask('is anything down', tools, scripted([toolUse('t1', 'pve_guests', {}), final('The Proxmox read failed.')]), 'm');
+    expect(result.toolErrors).toEqual([{ name: 'pve_guests', error: 'pve_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)' }]);
+  });
+
+  it('sends a plain failure, not the raw text, when the final answer is an unfinished tool call', async () => {
+    const raw = '<tool_call>\n{"name": "library", "arguments": {}}\n</tool_call>';
+    const result = await ask('what is in the library', tools, scripted([final(raw)]), 'm');
+    expect(result.incomplete).toBe(true);
+    expect(result.answer).not.toContain('tool_call');
+    expect(result.answer).toContain('unfinished tool call');
+  });
+
   it('answers an unknown tool name with an error the model sees', async () => {
     const seen: Array<Record<string, unknown>> = [];
     await ask('q', tools, scripted([toolUse('t1', 'shell', { cmd: 'id' }), final('ok')], seen), 'm');

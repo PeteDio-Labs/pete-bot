@@ -30,6 +30,10 @@ import { toolDefinitions } from './tools/index.js';
 import { PROPOSE_TOOL, type Proposal } from './tools/propose.js';
 
 export const MAX_TURNS = 8;
+/** A tool error longer than this is cut before it reaches the journal. */
+const MAX_ERROR_CHARS = 300;
+/** A tool call the model wrote into its answer text instead of making. */
+const RAW_TOOL_CALL = /<tool_call>/i;
 export const MAX_TOKENS = 1024;
 // The deadline is checked between turns, and one turn's reads can take about 30 s more
 // (each tool has its own timeout), so it sits well inside pete-bot's 120 s wait.
@@ -60,6 +64,7 @@ Rules:
 - Sonarr and Radarr are ground truth. seerr is a cache and can disagree.
 - When a tool returns an error or an ok=false finding, say which read failed and why. Never treat a failed read as "nothing found".
 - You cannot change anything yourself. To search for subtitles or to check or install updates, call propose_action. It only asks the user to confirm. Never say a change happened; say it is proposed and a Confirm button follows. For subtitles, call bazarr_find first when the title is unclear. Refreshing Plex is not available in this chat yet.
+- State only what a tool returned. If no tool said it, do not say it; say you did not check.
 - Name the tools you read. Answer in at most 8 short lines, for a phone screen. No preamble.`;
 
 export interface HistoryTurn {
@@ -94,6 +99,8 @@ export interface AskResult {
   answer: string;
   turns: number;
   toolCalls: Array<{ name: string; ok: boolean }>;
+  /** The error text of each failed tool call, so the journal says why a read failed. */
+  toolErrors?: Array<{ name: string; error: string }>;
   /** Changes the model proposed. None has run: pete-bot shows a Confirm button for each. */
   proposals: Proposal[];
   /** Set when the answer hit a limit, was cut, or came back empty: it is not a full answer. */
@@ -121,6 +128,7 @@ export async function ask(
     { role: 'user', content: question },
   ];
   const toolCalls: AskResult['toolCalls'] = [];
+  const toolErrors: NonNullable<AskResult['toolErrors']> = [];
   const usage = { input: 0, output: 0, cacheRead: 0 };
   const proposals: Proposal[] = [];
 
@@ -128,6 +136,7 @@ export async function ask(
     answer: `${why} Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ') || 'none'}.`,
     turns,
     toolCalls,
+    toolErrors,
     proposals,
     incomplete: true,
     usage,
@@ -157,12 +166,16 @@ export async function ask(
         res.stop_reason === 'max_tokens' ? '\n\n(Answer cut at the output limit.)'
         : res.stop_reason === 'refusal' ? '\n\n(The model refused to answer.)'
         : '';
+      if (RAW_TOOL_CALL.test(text)) {
+        // The model wrote a tool call as text instead of calling it. That is not an answer.
+        return stopped(turn, 'I could not finish: the model ended on an unfinished tool call, so I have no answer to give you.');
+      }
       const incomplete = Boolean(note) || !text;
-      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, proposals, incomplete, usage };
+      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, toolErrors, proposals, incomplete, usage };
     }
     if (last) {
       // tool_choice none should prevent this; if the model still asks, it gets no more reads.
-      return stopped(turn, `I stopped after ${MAX_TURNS} model turns without a final answer.${text ? ` Last note: ${text}` : ''}`);
+      return stopped(turn, `I stopped after ${MAX_TURNS} model turns without a final answer.${text && !RAW_TOOL_CALL.test(text) ? ` Last note: ${text}` : ''}`);
     }
 
     messages.push({ role: 'assistant', content: res.content });
@@ -173,6 +186,7 @@ export async function ask(
         ? await callTool(tool, use.input)
         : ({ ok: false, error: `no tool named ${use.name}` } as const);
       toolCalls.push({ name: use.name ?? '?', ok: result.ok });
+      if (!result.ok) toolErrors.push({ name: use.name ?? '?', error: result.error.slice(0, MAX_ERROR_CHARS) });
       if (result.ok && use.name === PROPOSE_TOOL) {
         // The proposal is read from the tool's own JSON output, not from anything the model wrote.
         try {
