@@ -48,7 +48,7 @@ export function actionFor(p: OpenPr): { action: Action; text: string } {
   return { action: 'unknown', text: 'state unclear: a read failed' };
 }
 
-const PEDRO_LABELS = ['lan', 'mac', 'needs-pedro'];
+export const PEDRO_LABELS = ['lan', 'mac', 'needs-pedro'];
 /** workspace#169: at most eight items per kind in a cycle. */
 export const CYCLE_LIMIT = 8;
 

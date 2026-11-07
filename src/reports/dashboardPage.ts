@@ -120,6 +120,14 @@ RENDER.cve=function(box,r){var e=r.examined||{},un=e.hostsUnread||[],gaps=r.gaps
  var t=el('table'),h=el('tr');['Package','Installed','Fixed','Severity','Hosts','CVE'].forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
  (r.top||[]).forEach(function(f){var tr=el('tr');[f.package,f.installed,f.fixed||'no fix',f.severity+(f.kev?' · exploited':''),(f.hosts||[]).join(', '),f.cve||''].forEach(function(x){tr.appendChild(el('td',x))});t.appendChild(tr)});
  if((r.top||[]).length)box.appendChild(t)};
+RENDER.cycle=function(box,r){var c=r.cycle;
+ if(!c){box.appendChild(el('p','No cycle: '+(r.reason||'none found')+'.',{class:'warn'}));return}
+ box.appendChild(el('div',c.name,{class:'mute'}));box.appendChild(el('div',r.done+' / '+r.total,{class:'big'}));
+ box.appendChild(el('div','done · '+r.open+' open, '+r.inProgress+' in progress, '+r.needsPedro+' need Pedro · '+c.start+' to '+c.end,{class:'mute'}));
+ var br=r.byRoute||{};box.appendChild(el('p',['pedro','ai','other'].map(function(k){var t=br[k]||{total:0,done:0};return k+' '+t.done+'/'+t.total}).join(' · ')+(r.lost?' · '+r.lost+' cycle item(s) not on the board read':''),{class:'mute'}));
+ var t=el('table'),h=el('tr');['Item','Title','State','Labels'].forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
+ (r.openItems||[]).forEach(function(i){var tr=el('tr');['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')].forEach(function(x){tr.appendChild(el('td',x))});t.appendChild(tr)});
+ if((r.openItems||[]).length)box.appendChild(t)};
 function showRec(kind,id){var box=$('recBody');clear(box);var rec=(kindData[kind]||[]).filter(function(r){return r.id===id})[0];if(!rec){box.appendChild(el('p','No record.',{class:'mute'}));return}
  (RENDER[kind]||recDefault)(box,rec)}
 function showKind(kind,bad){var sel=$('recSel');clear(sel);var rs=kindData[kind]||[];

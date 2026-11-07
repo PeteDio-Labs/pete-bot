@@ -12,6 +12,7 @@ import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
 import { ReportHub } from './hub.js';
+import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
 import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 
@@ -50,6 +51,10 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     plane: s.plane ? new PlaneClient(s.plane) : null,
     sender: discordSender(client, ownerUserId),
     log: logger,
+    onMorning: (snap, date) => {
+      const rec = cycleRecord(snap, date);
+      if (rec && hub) hub.save(CYCLE_KIND, rec);
+    },
     onCve: (run, date, at) => {
       if (!hub) {
         logger.info('[Reports] The cve run was not kept for the dashboard because the dashboard is off');
