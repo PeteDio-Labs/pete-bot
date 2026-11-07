@@ -31,13 +31,13 @@ jobs:
     # cleanly and never execute.
     runs-on: [self-hosted, linux, x64, homelab]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: pete-bot
 
       # The play lives in petedio-iac, where it is reviewed and where the operator's own
       # scripts/deploy-pete-bot.sh runs the identical thing by hand.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: PeteDio-Labs/petedio-iac
           path: iac
@@ -66,7 +66,7 @@ jobs:
         run: echo "b64=$(base64 -w0 vault-ca.crt)" >> "$GITHUB_OUTPUT"
 
       - name: Vault — SSH key + app secrets via OIDC
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -118,7 +118,7 @@ jobs:
       # SWALLOWS A VAULT OUTAGE. The ordering is load-bearing.
       - name: Vault — the optional /update token, absent is allowed
         continue-on-error: true
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -138,7 +138,7 @@ jobs:
       # desk on only when all three fields arrive, so a partial read leaves it off too.
       - name: Vault — the optional merge desk App, absent is allowed
         continue-on-error: true
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -160,7 +160,7 @@ jobs:
       # scripts/seed-pete-bot-plane-key.sh in petedio-iac writes the field.
       - name: Vault — the optional Plane token for the reports, absent is allowed
         continue-on-error: true
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -179,7 +179,7 @@ jobs:
       # the path before the vault-config apply lands.
       - name: Vault — the report backup key, absent is allowed
         continue-on-error: true
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -201,7 +201,7 @@ jobs:
       # play leaves lab-agent off, and the deploy passes. A half-seeded pair fails at the
       # play's assertion, which names the step to run.
       - name: Vault — the lab-agent secrets, an absent path is allowed
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -216,7 +216,7 @@ jobs:
             kv/data/services/lab-agent vault_token | LAB_VAULT_TOKEN
 
       - name: Vault — the lab-agent Proxmox token, an absent path is allowed
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -236,7 +236,7 @@ jobs:
       # it with the read-only petedio-workspace-mirror App, as petedio-search does (PET-542).
       # lab-agent asks for a token scoped to petedio-vault alone. Same shape as the step above.
       - name: Vault — the read-only mirror App for lab-agent, an absent path is allowed
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -257,7 +257,7 @@ jobs:
       # before a seed, the tool stays off and the deploy passes. A 403 or an outage still
       # fails the step, as in the steps above.
       - name: Vault — the lab-agent plane and search tokens, an absent path is allowed
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
@@ -277,7 +277,7 @@ jobs:
       # from failing closed. pete-bot-cd needs the policy from apply-vault-config.sh first:
       # a denied path fails the whole step.
       - name: Vault — the lab-agent media tokens, an absent path is allowed
-        uses: hashicorp/vault-action@v4
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
         with:
           url: https://192.168.50.223:8200
           method: jwt
