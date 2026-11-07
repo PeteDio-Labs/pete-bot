@@ -357,6 +357,15 @@ export class GitHubApp {
     return text;
   }
 
+  /** First lines of the newest commits on a branch. A failed read throws; an empty list is a real answer only with no throw. */
+  async recentCommitSubjects(repo: string, branch: string, count = 100): Promise<string[]> {
+    const raw = await this.json<{ commit: { message: string } }[]>(
+      `listing recent commits on ${repo}@${branch}`,
+      `${this.repoPath(repo)}/commits?sha=${encodeURIComponent(branch)}&per_page=${count}`,
+    );
+    return raw.map((c) => c.commit.message.split('\n', 1)[0] ?? '');
+  }
+
   async comment(repo: string, n: number, body: string): Promise<void> {
     await this.json(`commenting on ${repo}#${n}`, `${this.repoPath(repo)}/issues/${n}/comments`, {
       method: 'POST',
