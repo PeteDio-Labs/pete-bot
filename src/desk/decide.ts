@@ -38,6 +38,23 @@ export interface PrMemory {
   /** The head Pedro asked Codex to review again, and when. Reviews of it before then don't count. */
   requeueSha?: string;
   requeuedAt?: string;
+  /** When the desk queued Codex for queuedSha (ISO). The fallback timer starts here. */
+  queuedAt?: string;
+  /** The local Qwen pass on one head (PET-751). Reset by any push, because it names its SHA. */
+  qwen?: { sha: string; verdict: QwenVerdict | 'running'; at: string };
+}
+
+/** `clean` is the only verdict that lets a PR through. Every other value holds it. */
+export type QwenVerdict = 'clean' | 'block' | 'unreadable' | 'too-large';
+
+/** How long a `running` Qwen pass counts before the desk assumes pete-bot restarted and runs it again. */
+export const QWEN_STALE_MS = 10 * 60_000;
+
+/** The Codex-out fallback (PET-751). Absent or `enabled: false` keeps the Codex-only gate. */
+export interface Fallback {
+  enabled: boolean;
+  /** Minutes of silence from a queued Codex review before the fallback starts. */
+  afterMs: number;
 }
 
 export interface Facts {
@@ -54,6 +71,9 @@ export interface Facts {
   requiredChecks?: string[] | null;
   unresolvedThreads: number;
   memory: PrMemory;
+  fallback?: Fallback;
+  /** Epoch ms; tests set it. */
+  now?: number;
 }
 
 export type Decision =
@@ -61,8 +81,12 @@ export type Decision =
   | { kind: 'queue'; sha: string; effort: Effort }
   | { kind: 'wait'; reason: string }
   | { kind: 'stop'; sha: string; rounds: CodexReview[] }
-  | { kind: 'merge'; sha: string; review: CodexReview }
-  | { kind: 'ask'; sha: string; review: CodexReview; why: string };
+  | { kind: 'qwen'; sha: string }
+  | { kind: 'merge'; sha: string; review: CodexReview | null; by: ReviewedBy }
+  | { kind: 'ask'; sha: string; review: CodexReview | null; by: ReviewedBy; why: string };
+
+/** Who cleared the head: Codex, the local Qwen pass (tier 1), or CI alone (tier 0, Codex out). */
+export type ReviewedBy = 'codex' | 'qwen' | 'ci';
 
 /** Distinct commits Codex blocked, oldest first. */
 export function blockingRounds(codex: CodexReview[]): CodexReview[] {
@@ -113,19 +137,36 @@ export function decide(f: Facts): Decision {
     .filter((r) => r.commitId === sha && Date.parse(r.submittedAt) > since)
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
 
+  let review: CodexReview | null = null;
+  let by: ReviewedBy = 'codex';
+
   if (!onHead) {
     if (rounds.length >= allowed) return { kind: 'stop', sha, rounds };
-    if (f.memory.queuedSha === sha) {
-      if (f.memory.queueRunning) return { kind: 'wait', reason: 'Codex is reviewing the head' };
-      if (f.memory.queueFailedSha === sha) return { kind: 'wait', reason: 'queueing Codex failed for this head' };
-      return { kind: 'wait', reason: 'Codex finished but posted no review of the head yet' };
+    const fb = fallbackFor(f, sha);
+    if (fb === 'ci') {
+      by = 'ci';
+    } else if (fb === 'qwen') {
+      const q = f.memory.qwen?.sha === sha ? f.memory.qwen : undefined;
+      const now = f.now ?? Date.now();
+      const stale = q?.verdict === 'running' && now - (Date.parse(q.at) || 0) > QWEN_STALE_MS;
+      if (!q || stale) return { kind: 'qwen', sha };
+      if (q.verdict === 'running') return { kind: 'wait', reason: 'the Qwen review is running' };
+      if (q.verdict !== 'clean') return { kind: 'wait', reason: `Qwen review: ${q.verdict}; push a fix or ask for a person` };
+      by = 'qwen';
+    } else {
+      if (f.memory.queuedSha === sha) {
+        if (f.memory.queueRunning) return { kind: 'wait', reason: 'Codex is reviewing the head' };
+        if (f.memory.queueFailedSha === sha) return { kind: 'wait', reason: 'queueing Codex failed for this head' };
+        return { kind: 'wait', reason: 'Codex finished but posted no review of the head yet' };
+      }
+      return { kind: 'queue', sha, effort: effortFor(f.classification.tier) };
     }
-    return { kind: 'queue', sha, effort: effortFor(f.classification.tier) };
-  }
-
-  if (onHead.verdict === 'changes-requested') {
-    if (rounds.length >= allowed) return { kind: 'stop', sha, rounds };
-    return { kind: 'wait', reason: 'Codex requested changes on the head' };
+  } else {
+    review = onHead;
+    if (onHead.verdict === 'changes-requested') {
+      if (rounds.length >= allowed) return { kind: 'stop', sha, rounds };
+      return { kind: 'wait', reason: 'Codex requested changes on the head' };
+    }
   }
 
   if (pull.mergeable === null) return { kind: 'wait', reason: 'GitHub is still computing mergeability' };
@@ -141,15 +182,34 @@ export function decide(f: Facts): Decision {
   // validation by decision; anywhere else it may be CI that never started.
   const gate = checkGate(f);
   if (gate.blocking.length) {
-    return { kind: 'ask', sha, review: onHead, why: `checks did not run: ${gate.blocking.join(', ')}` };
+    return { kind: 'ask', sha, review, by, why: `checks did not run: ${gate.blocking.join(', ')}` };
   }
   if (f.checks.total === 0 && !f.noCi) {
-    return { kind: 'ask', sha, review: onHead, why: 'no check ran on the head' };
+    return { kind: 'ask', sha, review, by, why: 'no check ran on the head' };
   }
 
-  if (onHead.verdict === 'escalate') {
-    return { kind: 'ask', sha, review: onHead, why: 'Codex escalated it to you' };
+  if (onHead?.verdict === 'escalate') {
+    return { kind: 'ask', sha, review, by, why: 'Codex escalated it to you' };
   }
-  if (f.classification.tier === 2) return { kind: 'ask', sha, review: onHead, why: 'tier 2' };
-  return { kind: 'merge', sha, review: onHead };
+  if (f.classification.tier === 2) return { kind: 'ask', sha, review, by, why: 'tier 2' };
+  return { kind: 'merge', sha, review, by };
+}
+
+/**
+ * Whether the head may go on without a Codex review (PET-751), and how. Only tiers 0 and 1,
+ * and only once Codex is out: its queue failed for this head, or it stayed silent past
+ * `afterMs`. Tier 0 then rides on CI. Tier 1 needs a clean Qwen pass, which can hold a PR
+ * and never widens what merges. Tier 2 never falls back.
+ */
+function fallbackFor(f: Facts, sha: string): 'qwen' | 'ci' | null {
+  if (!f.fallback?.enabled) return null;
+  const tier = f.classification.tier;
+  if (tier > 1) return null;
+  const m = f.memory;
+  const now = f.now ?? Date.now();
+  const failed = m.queueFailedSha === sha;
+  const silent = m.queuedSha === sha && !m.queueRunning && now - (Date.parse(m.queuedAt ?? '') || now) >= f.fallback.afterMs;
+  const timedOut = m.queuedSha === sha && m.queueRunning && now - (Date.parse(m.queuedAt ?? '') || now) >= f.fallback.afterMs;
+  if (!failed && !silent && !timedOut) return null;
+  return tier === 0 ? 'ci' : 'qwen';
 }

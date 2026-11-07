@@ -348,6 +348,15 @@ export class GitHubApp {
     return r.status === 'identical' || r.status === 'ahead';
   }
 
+  /** The PR's unified diff. A failed read throws, so an empty diff never passes for a clean one. */
+  async diff(repo: string, n: number): Promise<string> {
+    const res = await this.request(`${this.repoPath(repo)}/pulls/${n}`, { accept: 'application/vnd.github.diff' });
+    if (!res.ok) throw new GitHubError(`reading the diff of ${repo}#${n}`, res.status, await short(res));
+    const text = await res.text();
+    if (!text.trim()) throw new Error(`the diff of ${repo}#${n} came back empty`);
+    return text;
+  }
+
   async comment(repo: string, n: number, body: string): Promise<void> {
     await this.json(`commenting on ${repo}#${n}`, `${this.repoPath(repo)}/issues/${n}/comments`, {
       method: 'POST',
