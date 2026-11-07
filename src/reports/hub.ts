@@ -7,8 +7,9 @@
  * ⚠ A record says what it examined. The store keeps the record a kind wrote and adds nothing
  * to it, so a kind that stored "0 findings" must also have stored what it read.
  */
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import type { Database } from 'bun:sqlite';
+import { mkdirSync } from 'node:fs';
+import { openReportDb } from './db.js';
 
 const KIND_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const ID_RE = /^\d{4}-\d{2}-\d{2}(-[a-z0-9]{1,16})?$/;
@@ -29,47 +30,34 @@ export interface KindInfo {
 }
 
 export class ReportHub {
-  private readonly root: string;
+  private readonly db: Database;
   constructor(dir: string) {
-    this.root = join(dir, 'reports');
-    mkdirSync(this.root, { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    this.db = openReportDb(dir);
   }
 
-  private kindDir(kind: string): string {
+  private checkKind(kind: string): string {
     if (!KIND_RE.test(kind)) throw new Error(`bad report kind "${kind}"`);
-    return join(this.root, kind);
+    return kind;
   }
 
   save(kind: string, rec: HubRecord): void {
     if (!ID_RE.test(rec.id)) throw new Error(`bad record id "${rec.id}"`);
-    const dir = this.kindDir(kind);
-    mkdirSync(dir, { recursive: true });
-    const path = join(dir, `${rec.id}.json`);
-    // Write then rename, so the dashboard never reads half a file.
-    writeFileSync(`${path}.tmp`, JSON.stringify(rec), { mode: 0o640 });
-    renameSync(`${path}.tmp`, path);
+    this.checkKind(kind);
+    this.db.query('INSERT INTO hub (kind, id, body) VALUES (?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET body = excluded.body').run(kind, rec.id, JSON.stringify(rec));
   }
 
   private ids(kind: string): string[] {
-    let names: string[];
-    try {
-      names = readdirSync(this.kindDir(kind));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw err;
-    }
-    return names
-      .map((f) => /^(.+)\.json$/.exec(f)?.[1])
-      .filter((id): id is string => !!id && ID_RE.test(id))
-      .sort()
-      .reverse();
+    return (this.db.query('SELECT id FROM hub WHERE kind = ? ORDER BY id DESC').all(this.checkKind(kind)) as { id: string }[]).map((r) => r.id);
   }
 
   /** One record, or null when it is absent or cannot be read. */
   get(kind: string, id: string): HubRecord | null {
     if (!ID_RE.test(id)) return null;
+    const row = this.db.query('SELECT body FROM hub WHERE kind = ? AND id = ?').get(this.checkKind(kind), id) as { body: string } | null;
+    if (!row) return null;
     try {
-      return JSON.parse(readFileSync(join(this.kindDir(kind), `${id}.json`), 'utf8')) as HubRecord;
+      return JSON.parse(row.body) as HubRecord;
     } catch {
       return null;
     }
@@ -79,29 +67,20 @@ export class ReportHub {
     return this.ids(kind).includes(id);
   }
 
-  /** The kinds that have a folder, with how many records each holds. */
+  /** The kinds that hold records, with how many each holds. */
   kinds(): KindInfo[] {
-    return readdirSync(this.root, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && KIND_RE.test(e.name))
-      .map((e) => e.name)
-      .sort()
-      .map((kind) => {
-        const ids = this.ids(kind);
-        return { kind, count: ids.length, newest: ids[0] ?? null };
-      })
-      .filter((k) => k.count > 0);
+    const rows = this.db.query('SELECT kind, COUNT(*) AS count, MAX(id) AS newest FROM hub GROUP BY kind ORDER BY kind').all() as { kind: string; count: number; newest: string | null }[];
+    return rows.filter((r) => KIND_RE.test(r.kind) && r.count > 0).map((r) => ({ kind: r.kind, count: r.count, newest: r.newest }));
   }
 
-  /** The newest records of a kind, newest first. A file that cannot be read is named, not skipped. */
+  /** The newest records of a kind, newest first. A record that cannot be read is named, not skipped. */
   list(kind: string): { records: HubRecord[]; unreadable: string[] } {
     const records: HubRecord[] = [];
     const unreadable: string[] = [];
     for (const id of this.ids(kind).slice(0, FEED_LIMIT)) {
-      try {
-        records.push(JSON.parse(readFileSync(join(this.kindDir(kind), `${id}.json`), 'utf8')) as HubRecord);
-      } catch {
-        unreadable.push(id);
-      }
+      const rec = this.get(kind, id);
+      if (rec) records.push(rec);
+      else unreadable.push(id);
     }
     return { records, unreadable };
   }
