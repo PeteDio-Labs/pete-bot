@@ -135,7 +135,7 @@ fetch('api/weeks',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw n
  data=j.weeks||[];var s=$('status');
  if(j.unreadable&&j.unreadable.length){s.textContent='Could not read: '+j.unreadable.join(', ')+'. ';s.className='card warn'}
  loadKinds();
- if(!data.length){s.textContent=(s.textContent||'')+'No weekly report has run yet. The first one is written on a Sunday evening.';return}
+ if(!data.length){s.textContent=((j.unreadable&&j.unreadable.length)?s.textContent:'')+'No weekly report has run yet. The first one is written on a Sunday evening.';return}
  if(!(j.unreadable&&j.unreadable.length))s.hidden=true;
  var sel=$('weekSel');data.forEach(function(x){var o=el('option',fmtWeek(x.week)+' · '+x.total);o.value=x.week;sel.appendChild(o)});
  sel.onchange=function(){select(sel.value)};$('q').oninput=function(){render()};
