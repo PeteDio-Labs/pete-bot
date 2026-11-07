@@ -95,6 +95,17 @@ export function mtraceTools(cfg: MtraceConfig): LabTool[] {
       );
       if (res.status === 401 || res.status === 403) throw new LabToolError(`mtrace refused the lab-agent token (HTTP ${res.status})`);
       if (res.status === 404) throw new LabToolError(`mtrace has no tool named ${spec.name} (HTTP 404); the tool list has drifted`);
+      if (res.status === 502) {
+        // mtrace answers 502 with { ok: false, error } when a tool cannot read the stack (PET-638).
+        let detail = '';
+        try {
+          const failed = (await res.json()) as { error?: unknown };
+          if (typeof failed?.error === 'string') detail = `: ${failed.error.slice(0, 300)}`;
+        } catch {
+          // A 502 from a proxy has no JSON body; the status alone is the message.
+        }
+        throw new LabToolError(`mtrace could not run ${spec.name} (HTTP 502)${detail}`);
+      }
       if (!res.ok) throw new LabToolError(`mtrace answered HTTP ${res.status} for ${spec.name}`);
       let body: unknown;
       try {
