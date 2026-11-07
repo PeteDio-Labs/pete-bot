@@ -3,6 +3,8 @@
  *
  *   GET /            the page
  *   GET /api/weeks   every stored week, newest first, plus any file that could not be read
+ *   GET /api/reports        the other report kinds that have records
+ *   GET /api/reports/:kind  one kind's records, newest first
  *   GET /health      no auth, no data: whether the store reads and when the last run happened
  *
  * ⚠ EVERY ROUTE BUT /health CHECKS THE ACCESS JWT. The listener is separate from the bot's
@@ -14,10 +16,13 @@ import express, { type Express } from 'express';
 import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
+import type { ReportHub } from './hub.js';
 import type { WeekStore, WeeklyRunner } from './weekly.js';
 
 export interface DashboardDeps {
   store: WeekStore;
+  /** The other report kinds. Absent, the page shows the weekly report alone. */
+  hub?: ReportHub;
   verify: (jwt: string | null) => Promise<AccessResult>;
   runner?: Pick<WeeklyRunner, 'last' | 'lastFailure'>;
   log?: (msg: string) => void;
@@ -66,6 +71,27 @@ export function createDashboardApp(d: DashboardDeps): Express {
       res.json(d.store.all());
     } catch (err) {
       res.status(500).json({ error: `cannot read the store: ${(err as Error).message.slice(0, 120)}` });
+    }
+  });
+
+  app.get('/api/reports', (_req, res) => {
+    try {
+      res.json({ kinds: d.hub ? d.hub.kinds() : [] });
+    } catch (err) {
+      res.status(500).json({ error: `cannot read the store: ${(err as Error).message.slice(0, 120)}` });
+    }
+  });
+
+  app.get('/api/reports/:kind', (req, res) => {
+    if (!d.hub) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    try {
+      res.json(d.hub.list(req.params.kind));
+    } catch (err) {
+      const msg = (err as Error).message;
+      res.status(msg.startsWith('bad report kind') ? 404 : 500).json({ error: msg.startsWith('bad report kind') ? 'not_found' : `cannot read the store: ${msg.slice(0, 120)}` });
     }
   });
 

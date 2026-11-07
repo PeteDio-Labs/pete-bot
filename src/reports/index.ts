@@ -11,6 +11,7 @@ import { AccessVerifier } from '../lab/access.js';
 import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
+import { ReportHub } from './hub.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 
 let runner: ReportRunner | null = null;
@@ -67,6 +68,12 @@ export function reportsHealth(): { state: string; reason?: string } & Partial<Re
 
 let weekly: WeeklyState = { state: 'off' };
 let weeklyRunner: WeeklyRunner | null = null;
+let hub: ReportHub | null = null;
+
+/** Where the other report kinds save a record for the dashboard. Null until the dashboard is on. */
+export function getHub(): ReportHub | null {
+  return hub;
+}
 
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
 async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
@@ -79,11 +86,12 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
   const w = weekly.settings;
   try {
     const store = new WeekStore(w.dir);
+    hub = new ReportHub(w.dir);
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize: ollamaSummarizer(w.ollamaUrl), log: logger });
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
     await listenDashboard(
-      createDashboardApp({ store, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );
