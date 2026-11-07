@@ -14,9 +14,17 @@ something to tell the owner. It adds no incident state.
 **The merge desk** merges low-risk PRs after a clean Codex review, and DMs a Merge button
 for the rest (PET-645).
 
-It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
-and plain-DM questions went in PET-518, when Muse took over asking mtrace with its own
-token. The bot reads no messages, so it requests no privileged intent.
+It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing itself.
+`/ask` and plain-DM questions went in PET-518, when Muse took over asking mtrace.
+
+**The media assistant (PET-869)** brings plain DMs back, behind `MEDIA_CHAT=on` and off by
+default. The owner's DM text goes to lab-agent's `POST /v1/media/ask` with the last six turns, and the
+answer comes back with the tools it read. A message from anyone else, from a bot or from a
+server channel gets no answer. Discord delivers a DM's content to the app it is addressed to
+without the `MessageContent` privileged intent, so the app still requests none. It does
+request `Partials.Channel`, because discord.js drops the first DM from an uncached channel
+without it. Until lab-agent serves `/v1/media/ask`, a question answers `No answer: lab-agent
+answered HTTP 404`, which is why the switch stays off.
 
 ## It is a user-installed app, not a server bot
 
@@ -158,6 +166,44 @@ gets 429.
 the tools, any failed reads and the tokens. pete-bot runs no model for it and gives
 `lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
 configured". `lab-agent` refuses to start on a missing or malformed setting.
+
+## The media assistant's lab-agent side (PET-869)
+
+`POST /v1/media/ask` on lab-agent takes `{"question", "history"}` (at most 12 turns) with the ask bearer
+and runs the same Qwen loop and limits as `/v1/ask`, over the media tools only. It shares the
+one-question slot with `/v1/ask`, so a second request gets 429. With `LAB_MTRACE_TOKEN` empty it
+answers 404, and `lab-agent` starts without the route.
+
+| Tool | Reads |
+|---|---|
+| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `stale_versions`, `partial_files` | mtrace on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
+| `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
+
+`LAB_MTRACE_TOKEN` is lab-agent's own mtrace caller (`token_lab-agent`), never pete-bot's. 237 reaches mtrace on
+its own LAN address through the `lo` rule in the nftables allowlist. `LAB_OLLAMA_URL` now defaults to
+CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the port.
+
+`scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
+mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
+ten tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
+
+### Changes need your tap (PET-869)
+
+The model cannot change anything. Its `propose_action` tool validates a request and returns a
+proposal, and lab-agent hands the proposals to pete-bot with the answer. Three actions exist:
+
+| Action | Runs | Confirm |
+|---|---|---|
+| `subtitles` for one title that resolved to one Bazarr item | `POST /v1/media/act` on lab-agent: Bazarr `PATCH /api/series` or `/api/movies` with `action=search-missing` | yes |
+| `update_check` for one target | the `/update check` workflow run, followed in the DM | no, it reads and changes nothing |
+| `update_apply` for one target | the `/update apply` workflow run, with force off | yes |
+
+A button names a random id. The action and its arguments stay in pete-bot's memory, so a forged
+`customId` cannot name a different title or target. A tap works once, within ten minutes, for the
+owner only, and removes the buttons first. A restart empties the store, and old buttons then say
+they expired. The Bazarr key (`LAB_BAZARR_KEY`) lives in lab-agent's env and never reaches
+pete-bot or the model. Without it there are no subtitle tools and `/v1/media/act` answers 404.
+Refreshing Plex is not offered yet: it needs a Plex token and its own proposal.
 
 ## The nightly drift check (PET-671)
 

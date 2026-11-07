@@ -5,6 +5,12 @@
  *                  one caller. Answers {answer, turns, toolCalls, incomplete, usage}.
  *   GET  /health   one flag per dependency: model, proxmox, vault clone, kuma. HTTP 503
  *                  unless every flag is up, so the deploy's assertion can fail on it.
+ *   POST /v1/media/ask  {"question": "...", "history": [...]} with the ask bearer (PET-869).
+ *                  The media assistant: the same loop over the media tools only. Absent
+ *                  media tools, it answers 404, so an unconfigured host says so.
+ *   POST /v1/media/act  {"kind": "series"|"movie", "id": 12} with the ask bearer (PET-869).
+ *                  Runs the one write lab-agent holds, a Bazarr subtitle search, after the
+ *                  owner tapped Confirm in Discord. 404 without a Bazarr key.
  *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
  *                  answers with the run's outcome and DMs exactly as the nightly run does.
  *
@@ -13,7 +19,7 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { ask, ASK_DEADLINE_MS, type AskResult, type CallModel } from './agent.js';
+import { ask, ASK_DEADLINE_MS, MEDIA_SYSTEM_PROMPT, type AskResult, type CallModel } from './agent.js';
 import { ModelError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
 import type { LabTool } from './tools/index.js';
@@ -30,11 +36,25 @@ export interface LabServerDeps {
   log?: (msg: string, fields?: Record<string, unknown>) => void;
   /** Tests shorten it; production uses ASK_DEADLINE_MS. */
   deadlineMs?: number;
+  /** The media assistant's tools (PET-869): mtrace and search. Absent, /v1/media/ask answers 404. */
+  mediaTools?: Map<string, LabTool>;
+  /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
+  actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
 }
 
 const AskBody = z.object({ question: z.string().trim().min(3).max(500) }).strict();
+const MediaBody = z
+  .object({
+    question: z.string().trim().min(2).max(1500),
+    history: z
+      .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(4000) }).strict())
+      .max(12)
+      .default([]),
+  })
+  .strict();
+const ActBody = z.object({ kind: z.enum(['series', 'movie']), id: z.number().int().min(0).max(10_000_000) }).strict();
 const CHECK_TIMEOUT_MS = 10_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
@@ -87,15 +107,46 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       return json({ status: result.ok ? 'ok' : 'degraded', ...result }, result.ok ? 200 : 503);
     }
 
-    if (url.pathname === '/v1/ask') {
+    if (url.pathname === '/v1/media/act' && deps.actBazarr) {
+      if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
+      let body: z.infer<typeof ActBody>;
+      try {
+        const parsed = ActBody.safeParse(await req.json());
+        if (!parsed.success) return json({ error: 'body must be {"kind": "series" or "movie", "id": <whole number>}' }, 400);
+        body = parsed.data;
+      } catch {
+        return json({ error: 'body is not JSON' }, 400);
+      }
+      try {
+        const message = await deps.actBazarr(body.kind, body.id);
+        log('media act done', { kind: body.kind, id: body.id });
+        return json({ ok: true, message });
+      } catch (err) {
+        // A LabToolError message is written for the caller and holds no key.
+        const message = err instanceof Error && err.name === 'LabToolError' ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        log('media act failed', { kind: body.kind, id: body.id, error: message });
+        return json({ ok: false, error: message }, 502);
+      }
+    }
+
+    const isMedia = url.pathname === '/v1/media/ask' && Boolean(deps.mediaTools);
+    if (url.pathname === '/v1/ask' || isMedia) {
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
 
-      let body: z.infer<typeof AskBody>;
+      let body: { question: string; history: Array<{ role: 'user' | 'assistant'; content: string }> };
       try {
-        const parsed = AskBody.safeParse(await req.json());
-        if (!parsed.success) return json({ error: 'body must be {"question": "<3 to 500 characters>"}' }, 400);
-        body = parsed.data;
+        const raw: unknown = await req.json();
+        if (isMedia) {
+          const parsed = MediaBody.safeParse(raw);
+          if (!parsed.success) return json({ error: 'body must be {"question": "<2 to 1500 characters>", "history": [{role, content}] (at most 12)}' }, 400);
+          body = parsed.data;
+        } else {
+          const parsed = AskBody.safeParse(raw);
+          if (!parsed.success) return json({ error: 'body must be {"question": "<3 to 500 characters>"}' }, 400);
+          body = { question: parsed.data.question, history: [] };
+        }
       } catch {
         return json({ error: 'body is not JSON' }, 400);
       }
@@ -105,12 +156,14 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       const started = Date.now();
       try {
         const signal = AbortSignal.any([req.signal, AbortSignal.timeout(deps.deadlineMs ?? ASK_DEADLINE_MS)]);
-        const result: AskResult = await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
-        log('ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
+        const result: AskResult = isMedia
+          ? await ask(body.question, deps.mediaTools!, deps.callModel, deps.model, signal, { system: MEDIA_SYSTEM_PROMPT, history: body.history })
+          : await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
+        log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, usage: result.usage, incomplete: result.incomplete });
         return json(result);
       } catch (err) {
         const message = err instanceof ModelError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
-        log('ask failed', { ms: Date.now() - started, error: message });
+        log(isMedia ? 'media ask failed' : 'ask failed', { ms: Date.now() - started, error: message });
         return json({ error: message }, 502);
       } finally {
         busy = false;

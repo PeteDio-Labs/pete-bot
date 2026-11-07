@@ -26,6 +26,7 @@ import { getDesk } from '../desk/index.js';
 import { BUTTON_PREFIX, type MergeDesk } from '../desk/desk.js';
 import { getReports } from '../reports/index.js';
 import { REPORT_NAMES, type ReportName } from '../reports/settings.js';
+import { mediaPending, parseButton, runProposal, type PendingStore, type ProposalResult } from '../media/actions.js';
 
 const COLOR_OK = 0x57f287;
 const COLOR_WARN = 0xfee75c;
@@ -82,7 +83,7 @@ function needsAttention(report: string): boolean {
   return /Updates available: [1-9]|Pending: [1-9]|NOTE /.test(report);
 }
 
-function outcomeEmbed(mode: UpdateMode, target: UpdateTarget, outcome: UpdateOutcome): EmbedBuilder {
+export function outcomeEmbed(mode: UpdateMode, target: UpdateTarget, outcome: UpdateOutcome): EmbedBuilder {
   const title = updateTitle(mode, target);
   if (outcome.kind === 'not-found') {
     return new EmbedBuilder()
@@ -280,6 +281,64 @@ async function handleDeskButton(interaction: ButtonInteraction, desk: MergeDesk 
   }
 }
 
+/** Renders what a confirmed proposal did. Every ending is said: success, failure and still running. */
+export function resultMessage(r: ProposalResult): { content?: string; embeds?: EmbedBuilder[] } {
+  if (r.kind === 'text') return { content: `${r.ok ? '✅' : '❌'} ${r.text}`.slice(0, 1900) };
+  return { embeds: [outcomeEmbed(r.mode, r.target as UpdateTarget, r.outcome)] };
+}
+
+/**
+ * A media assistant button (PET-869). Owner only, one use, ten minutes. The tap removes the
+ * buttons first, so a double tap cannot run the change twice, and then runs it and says how it ended.
+ */
+async function handleMediaButton(interaction: ButtonInteraction, store: PendingStore, run: typeof runUpdate): Promise<void> {
+  if (interaction.user.id !== config.discord.ownerUserId) {
+    askTotal.inc({ surface: 'media', status: 'refused' });
+    logger.warn(`Refused a media button from ${interaction.user.id}`);
+    await interaction.reply({ content: 'This app answers only the account that installed it.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const button = parseButton(interaction.customId);
+  if (!button) {
+    await interaction.update({ content: 'That button is not valid.', components: [] });
+    return;
+  }
+  const proposal = store.take(button.id);
+  if (button.verb === 'no') {
+    await interaction.update({ content: proposal ? `Cancelled: ${proposal.label}` : 'Cancelled.', components: [] });
+    return;
+  }
+  if (!proposal) {
+    await interaction.update({ content: 'That request expired or already ran, so nothing ran. Ask again.', components: [] });
+    return;
+  }
+  await interaction.update({ content: `Running: ${proposal.label}`, components: [] });
+  const startedAt = Date.now();
+  let message: { content?: string; embeds?: EmbedBuilder[] };
+  try {
+    if (proposal.action !== 'subtitles' && !config.updates.token) throw new Error('`GITHUB_UPDATES_TOKEN` is empty on this host, so pete-bot cannot start a run');
+    const result = await runProposal(proposal, { media: { ...config.lab, timeoutMs: config.media.timeoutMs }, update: run });
+    askTotal.inc({ surface: 'media', status: result.kind === 'text' ? (result.ok ? 'success' : 'failure') : result.outcome.kind === 'completed' && result.outcome.conclusion === 'success' ? 'success' : 'failure' });
+    message = resultMessage(result);
+  } catch (err) {
+    askTotal.inc({ surface: 'media', status: 'failure' });
+    const text = err instanceof Error ? err.message : String(err);
+    logger.error(`media action ${proposal.action} failed: ${text}`);
+    message = { content: `❌ ${proposal.label} did not run: ${text.slice(0, 300)}` };
+  }
+  askDuration.observe({ surface: 'media' }, (Date.now() - startedAt) / 1000);
+  // The follow-up token lasts fifteen minutes; an update can outlast it, so fall back to a DM.
+  try {
+    if (Date.now() - startedAt < EDIT_WINDOW_MS) {
+      await interaction.followUp(message);
+      return;
+    }
+  } catch (err) {
+    logger.warn('media action: could not follow up, sending a DM instead:', err instanceof Error ? err.message : String(err));
+  }
+  await interaction.user.send(message);
+}
+
 export interface InteractionDeps {
   /** Tests pass a fake, so /update never reaches GitHub. */
   runUpdate?: typeof runUpdate;
@@ -287,15 +346,22 @@ export interface InteractionDeps {
   askLab?: typeof askLab;
   /** Tests pass a fake desk; production reads the one main.ts started. */
   desk?: () => MergeDesk | null;
+  /** Tests pass their own store, so no test shares the production one. */
+  mediaPending?: PendingStore;
 }
 
 export function createInteractionHandler(deps: InteractionDeps = {}) {
   const run = deps.runUpdate ?? runUpdate;
   const desk = deps.desk ?? getDesk;
   const lab = deps.askLab ?? askLab;
+  const pending = deps.mediaPending ?? mediaPending;
   return async function onInteraction(interaction: Interaction): Promise<void> {
     if (typeof interaction.isButton === 'function' && interaction.isButton() && interaction.customId.startsWith(`${BUTTON_PREFIX}:`)) {
       await handleDeskButton(interaction, desk());
+      return;
+    }
+    if (typeof interaction.isButton === 'function' && interaction.isButton() && interaction.customId.startsWith('media:')) {
+      await handleMediaButton(interaction, pending, run);
       return;
     }
     if (!interaction.isChatInputCommand()) return;

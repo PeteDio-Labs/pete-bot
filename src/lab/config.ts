@@ -19,7 +19,7 @@ const EnvSchema = z.object({
   // The model backend (PET-742): a local Ollama lane. The Anthropic gateway is retired (PET-744),
   // so a stale LAB_PROVIDER=gateway is refused at startup instead of quietly running Ollama.
   LAB_PROVIDER: z.literal('ollama', { errorMap: () => ({ message: 'must be ollama; the Anthropic gateway was retired (PET-744)' }) }).default('ollama'),
-  LAB_OLLAMA_URL: z.string().url().default('http://192.168.50.12:11434'),
+  LAB_OLLAMA_URL: z.string().url().default('http://192.168.50.246:11434'),
   LAB_OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).max(32768).default(8192),
   LAB_MODEL: z.string().min(1).optional(),
   LAB_PVE_URL: z.string().regex(/^https:\/\//, 'must be https://'),
@@ -56,6 +56,14 @@ const EnvSchema = z.object({
   // search_lab (PET-745). The tool is offered only when the token is set.
   LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
   LAB_SEARCH_TOKEN: TOKEN.optional(),
+  // mtrace, for the media assistant (PET-869). 237 reaches its own LAN address through the
+  // `lo` allowlist rule. The tools are offered only when the token is set, and the token is
+  // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
+  LAB_MTRACE_URL: z.string().url().default('http://192.168.50.237:8237'),
+  LAB_MTRACE_TOKEN: TOKEN.optional(),
+  // Bazarr, for the subtitle search the owner confirms (PET-869). Offered only when the key is set.
+  LAB_BAZARR_URL: z.string().url().default('http://192.168.50.222:6767'),
+  LAB_BAZARR_KEY: z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace').optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
   // The vault is private and deploy keys are disabled org-wide, so its fetch carries a
@@ -81,6 +89,10 @@ export interface LabConfig {
   plane: { baseUrl: string; workspace: string; identifiers: string[]; token: string } | null;
   /** null while no search token is set. */
   search: { baseUrl: string; token: string } | null;
+  /** null while no mtrace token is set: the media assistant then answers 404. */
+  mtrace: { baseUrl: string; token: string } | null;
+  /** null while no Bazarr key is set: no subtitle tools, no subtitle action. */
+  bazarr: { baseUrl: string; apiKey: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
@@ -150,6 +162,8 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
       ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, identifiers: e.LAB_PLANE_PROJECTS.split(','), token: e.LAB_PLANE_TOKEN }
       : null,
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
+    mtrace: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
+    bazarr: e.LAB_BAZARR_KEY ? { baseUrl: e.LAB_BAZARR_URL.replace(/\/$/, ''), apiKey: e.LAB_BAZARR_KEY } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,
   };

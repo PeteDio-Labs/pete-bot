@@ -36,7 +36,7 @@ describe('loadLabConfig', () => {
     const cfg = loadLabConfig(baseEnv, read);
     expect(cfg.port).toBe(3016);
     expect(cfg.model).toBe('qwen3:8b');
-    expect(cfg.ollama).toEqual({ url: 'http://192.168.50.12:11434', numCtx: 8192 });
+    expect(cfg.ollama).toEqual({ url: 'http://192.168.50.246:11434', numCtx: 8192 });
     expect(cfg.proxmox.caPem).toBe(CA);
     expect(cfg.kuma).toEqual({ baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' });
     expect(cfg.github).toEqual({ appId: '1234567', installationId: '89012345', privateKeyPem: KEY, vaultRepo: 'petedio-vault' });
