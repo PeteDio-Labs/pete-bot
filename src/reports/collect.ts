@@ -43,8 +43,6 @@ export interface ClosedPr {
   url: string;
   headSha: string;
   headRef: string;
-  /** When the PR was opened. */
-  createdAt?: string;
   closedAt: string;
   /** When the PR was opened. */
   createdAt?: string;
@@ -155,7 +153,6 @@ export async function collectRepo(
         url: r.html_url,
         headSha: r.head.sha,
         headRef: r.head.ref,
-        createdAt: r.created_at,
         closedAt: r.closed_at ?? '',
         createdAt: r.created_at,
         mergedAt: r.merged_at ?? null,
