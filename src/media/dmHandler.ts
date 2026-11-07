@@ -10,6 +10,7 @@
  */
 import type { Message } from 'discord.js';
 import { askMedia, type MediaOutcome, type MediaTurn } from '../clients/mediaAgent.js';
+import type { Proposal } from '../lab/tools/propose.js';
 import { logger } from '../utils/index.js';
 
 /** Discord's message limit is 2000 characters. */
@@ -20,6 +21,8 @@ export const HISTORY_TURNS = 6;
 export interface DmHandlerDeps {
   ownerUserId: string;
   ask?: (question: string, history: MediaTurn[]) => Promise<MediaOutcome>;
+  /** Shows the changes the model proposed (buttons, or a check that runs now). Absent, they are said but not offered. */
+  present?: (message: Message, proposals: Proposal[]) => Promise<void>;
   /** Tests pass a clock so the history expiry is deterministic. */
   now?: () => number;
   /** A conversation idle this long starts fresh. */
@@ -84,6 +87,17 @@ export function createDmHandler(deps: DmHandlerDeps, cfg: Parameters<typeof askM
       const outcome = await ask(text, history);
       if (outcome.kind === 'failed') logger.error(`[media] failed: ${outcome.reason}`);
       for (const part of chunk(describe(outcome))) await message.reply(part);
+      if (outcome.kind === 'answer' && outcome.result.proposals.length > 0) {
+        if (!deps.present) await message.reply('(Changes were proposed, but this host cannot offer a Confirm button, so nothing ran.)');
+        else {
+          try {
+            await deps.present(message, outcome.result.proposals);
+          } catch (err) {
+            logger.error('[media] could not present proposals:', err);
+            await message.reply('I could not show the Confirm button, so nothing ran. Ask again.');
+          }
+        }
+      }
       if (outcome.kind === 'answer') {
         history = [...history, { role: 'user' as const, content: text }, { role: 'assistant' as const, content: outcome.result.answer }].slice(-HISTORY_TURNS);
         lastAt = now();

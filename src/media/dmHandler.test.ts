@@ -22,7 +22,7 @@ function msg(opts: { id?: string; bot?: boolean; guild?: string | null; content?
   return { message, reply, sendTyping };
 }
 
-const answer = (text: string): MediaOutcome => ({ kind: 'answer', result: { answer: text, toolCalls: [{ name: 'trace_request', ok: true }], incomplete: false } });
+const answer = (text: string): MediaOutcome => ({ kind: 'answer', result: { answer: text, toolCalls: [{ name: 'trace_request', ok: true }], proposals: [], incomplete: false } });
 
 describe('owner and place gate', () => {
   it.each([
@@ -64,7 +64,7 @@ describe('failures are said', () => {
     expect(ask.mock.calls[1]![1]).toEqual([]);
   });
   it('flags an incomplete or failed-read answer', () => {
-    const t = describeOutcome({ kind: 'answer', result: { answer: 'partial', toolCalls: [{ name: 'vpn_health', ok: false }], incomplete: true } });
+    const t = describeOutcome({ kind: 'answer', result: { answer: 'partial', toolCalls: [{ name: 'vpn_health', ok: false }], proposals: [], incomplete: true } });
     expect(t).toContain('incomplete');
     expect(t).toContain('1 read(s) failed');
   });

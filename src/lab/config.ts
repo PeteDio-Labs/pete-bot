@@ -61,6 +61,9 @@ const EnvSchema = z.object({
   // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
   LAB_MTRACE_URL: z.string().url().default('http://192.168.50.237:8237'),
   LAB_MTRACE_TOKEN: TOKEN.optional(),
+  // Bazarr, for the subtitle search the owner confirms (PET-869). Offered only when the key is set.
+  LAB_BAZARR_URL: z.string().url().default('http://192.168.50.222:6767'),
+  LAB_BAZARR_KEY: z.string().min(16, 'must be at least 16 characters').regex(/^\S+$/, 'must not contain whitespace').optional(),
   LAB_IAC_CLONE: z.string().min(1),
   LAB_MEDIA_IAC_CLONE: z.string().min(1),
   // The vault is private and deploy keys are disabled org-wide, so its fetch carries a
@@ -88,6 +91,8 @@ export interface LabConfig {
   search: { baseUrl: string; token: string } | null;
   /** null while no mtrace token is set: the media assistant then answers 404. */
   mtrace: { baseUrl: string; token: string } | null;
+  /** null while no Bazarr key is set: no subtitle tools, no subtitle action. */
+  bazarr: { baseUrl: string; apiKey: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
@@ -158,6 +163,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
       : null,
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
     mtrace: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
+    bazarr: e.LAB_BAZARR_KEY ? { baseUrl: e.LAB_BAZARR_URL.replace(/\/$/, ''), apiKey: e.LAB_BAZARR_KEY } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,
   };

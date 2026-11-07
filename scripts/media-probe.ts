@@ -13,7 +13,10 @@
  *      re-shaped tool is drift, and the probe says which.
  *   3. All ten tools through the code the assistant uses (src/lab/tools/mtrace.ts), with
  *      timings. An `ok=false` finding is printed as a finding, not a failure.
- *   4. With --ask, the whole loop: the question goes to Ollama (OLLAMA_URL, default
+ *   4. With BAZARR_API_KEY set (read the key in Bazarr's config.yaml on 222, never print it):
+ *      bazarr_status, bazarr_find for PROBE_TITLE, and propose_action for it. These only read
+ *      and resolve. The probe never runs the subtitle search, which only a Confirm tap runs.
+ *   5. With --ask, the whole loop: the question goes to Ollama (OLLAMA_URL, default
  *      http://192.168.50.246:11434) with the ten tools, and the probe prints which tools the
  *      model chose and its answer. The first call after the model unloads takes about 22 s.
  *
@@ -25,6 +28,8 @@ import { ask, MEDIA_SYSTEM_PROMPT } from '../src/lab/agent.js';
 import { ollamaCaller } from '../src/lab/ollama.js';
 import { callTool, inputJsonSchema } from '../src/lab/tools/index.js';
 import { MTRACE_SPECS, mtraceTools } from '../src/lab/tools/mtrace.js';
+import { bazarrFindTool, bazarrStatusTool } from '../src/lab/tools/bazarr.js';
+import { proposeActionTool } from '../src/lab/tools/propose.js';
 
 const BASE = (process.env.MTRACE_URL ?? 'http://192.168.50.237:8237').replace(/\/$/, '');
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://192.168.50.246:11434';
@@ -118,6 +123,23 @@ for (const tool of tools) {
 console.log(`      examined ${ran} of ${tools.length} tools; trace_request used title "${TITLE}"`);
 
 // 4
+if (process.env.BAZARR_API_KEY) {
+  const bz = { baseUrl: process.env.BAZARR_URL ?? 'http://192.168.50.222:6767', apiKey: process.env.BAZARR_API_KEY, timeoutMs: 30_000 };
+  const checks: Array<[string, ReturnType<typeof bazarrFindTool>, Record<string, unknown>]> = [
+    ['bazarr_status', bazarrStatusTool(bz), {}],
+    ['bazarr_find', bazarrFindTool(bz), { title: TITLE }],
+    ['propose_action (resolve only)', proposeActionTool(bz), { action: 'subtitles', title: TITLE }],
+  ];
+  for (const [label, tool, args] of checks) {
+    const started = Date.now();
+    const res = await callTool(tool, args, 4096);
+    line(res.ok, `4 ${label} (${Date.now() - started} ms): ${res.ok ? res.text.replace(/\s+/g, ' ').slice(0, 200) : res.error}`);
+  }
+} else {
+  console.log('      step 4 skipped: set BAZARR_API_KEY to check the Bazarr reads');
+}
+
+// 5
 const map = new Map(tools.map((t) => [t.name, t] as const));
 const call = ollamaCaller(OLLAMA, 8192);
 for (const q of questions) {
@@ -125,12 +147,12 @@ for (const q of questions) {
   try {
     const r = await ask(q, map, call, MODEL, AbortSignal.timeout(80_000), { system: MEDIA_SYSTEM_PROMPT });
     const names = r.toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ') || 'none';
-    line(!r.incomplete && r.toolCalls.every((t) => t.ok), `4 "${q}" (${Date.now() - started} ms, ${r.turns} turns, tools: ${names})\n      ${r.answer.replace(/\n/g, '\n      ')}`);
+    line(!r.incomplete && r.toolCalls.every((t) => t.ok), `5 "${q}" (${Date.now() - started} ms, ${r.turns} turns, tools: ${names})\n      ${r.answer.replace(/\n/g, '\n      ')}`);
   } catch (err) {
-    line(false, `4 "${q}": ${(err as Error).message}`);
+    line(false, `5 "${q}": ${(err as Error).message}`);
   }
 }
-if (questions.length === 0) console.log('      step 4 skipped: pass --ask "<question>" to run the model loop');
+if (questions.length === 0) console.log('      step 5 skipped: pass --ask "<question>" to run the model loop');
 
 console.log(failures === 0 ? '\nmedia-probe: no failures' : `\nmedia-probe: ${failures} failure(s)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -15,6 +15,7 @@ import { config } from './config.js';
 import { registerCommands } from './commands/registerCommands.js';
 import { createInteractionHandler } from './events/interactionCreate.js';
 import { createDmHandler } from './media/dmHandler.js';
+import { createPresenter } from './media/present.js';
 import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
@@ -66,7 +67,7 @@ client.on('interactionCreate', createInteractionHandler());
 
 // The media assistant answers the owner's DMs only when MEDIA_CHAT=on (PET-869).
 if (config.media.chatEnabled) {
-  const onMessage = createDmHandler({ ownerUserId: config.discord.ownerUserId }, { ...config.lab, timeoutMs: config.media.timeoutMs });
+  const onMessage = createDmHandler({ ownerUserId: config.discord.ownerUserId, present: createPresenter() }, { ...config.lab, timeoutMs: config.media.timeoutMs });
   client.on('messageCreate', (message) => {
     onMessage(message).catch((error) => logger.error('[media] handler error:', error));
   });

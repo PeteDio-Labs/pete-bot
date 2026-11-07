@@ -8,6 +8,9 @@
  *   POST /v1/media/ask  {"question": "...", "history": [...]} with the ask bearer (PET-869).
  *                  The media assistant: the same loop over the media tools only. Absent
  *                  media tools, it answers 404, so an unconfigured host says so.
+ *   POST /v1/media/act  {"kind": "series"|"movie", "id": 12} with the ask bearer (PET-869).
+ *                  Runs the one write lab-agent holds, a Bazarr subtitle search, after the
+ *                  owner tapped Confirm in Discord. 404 without a Bazarr key.
  *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
  *                  answers with the run's outcome and DMs exactly as the nightly run does.
  *
@@ -35,6 +38,8 @@ export interface LabServerDeps {
   deadlineMs?: number;
   /** The media assistant's tools (PET-869): mtrace and search. Absent, /v1/media/ask answers 404. */
   mediaTools?: Map<string, LabTool>;
+  /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
+  actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
 }
@@ -49,6 +54,7 @@ const MediaBody = z
       .default([]),
   })
   .strict();
+const ActBody = z.object({ kind: z.enum(['series', 'movie']), id: z.number().int().min(0).max(10_000_000) }).strict();
 const CHECK_TIMEOUT_MS = 10_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
@@ -99,6 +105,29 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
     if (req.method === 'GET' && url.pathname === '/health') {
       const result = await runChecks(deps.checks);
       return json({ status: result.ok ? 'ok' : 'degraded', ...result }, result.ok ? 200 : 503);
+    }
+
+    if (url.pathname === '/v1/media/act' && deps.actBazarr) {
+      if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
+      let body: z.infer<typeof ActBody>;
+      try {
+        const parsed = ActBody.safeParse(await req.json());
+        if (!parsed.success) return json({ error: 'body must be {"kind": "series" or "movie", "id": <whole number>}' }, 400);
+        body = parsed.data;
+      } catch {
+        return json({ error: 'body is not JSON' }, 400);
+      }
+      try {
+        const message = await deps.actBazarr(body.kind, body.id);
+        log('media act done', { kind: body.kind, id: body.id });
+        return json({ ok: true, message });
+      } catch (err) {
+        // A LabToolError message is written for the caller and holds no key.
+        const message = err instanceof Error && err.name === 'LabToolError' ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        log('media act failed', { kind: body.kind, id: body.id, error: message });
+        return json({ ok: false, error: message }, 502);
+      }
     }
 
     const isMedia = url.pathname === '/v1/media/ask' && Boolean(deps.mediaTools);

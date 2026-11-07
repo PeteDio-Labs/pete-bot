@@ -187,6 +187,24 @@ CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the
 mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
 ten tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
 
+### Changes need your tap (PET-869)
+
+The model cannot change anything. Its `propose_action` tool validates a request and returns a
+proposal, and lab-agent hands the proposals to pete-bot with the answer. Three actions exist:
+
+| Action | Runs | Confirm |
+|---|---|---|
+| `subtitles` for one title that resolved to one Bazarr item | `POST /v1/media/act` on lab-agent: Bazarr `PATCH /api/series` or `/api/movies` with `action=search-missing` | yes |
+| `update_check` for one target | the `/update check` workflow run, followed in the DM | no, it reads and changes nothing |
+| `update_apply` for one target | the `/update apply` workflow run, with force off | yes |
+
+A button names a random id. The action and its arguments stay in pete-bot's memory, so a forged
+`customId` cannot name a different title or target. A tap works once, within ten minutes, for the
+owner only, and removes the buttons first. A restart empties the store, and old buttons then say
+they expired. The Bazarr key (`LAB_BAZARR_KEY`) lives in lab-agent's env and never reaches
+pete-bot or the model. Without it there are no subtitle tools and `/v1/media/act` answers 404.
+Refreshing Plex is not offered yet: it needs a Plex token and its own proposal.
+
 ## The nightly drift check (PET-671)
 
 `lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the

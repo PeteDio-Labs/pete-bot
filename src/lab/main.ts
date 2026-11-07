@@ -20,6 +20,8 @@ import { HostIndex } from './tools/hosts.js';
 import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 import { mtraceTools } from './tools/mtrace.js';
+import { bazarrFindTool, bazarrStatusTool, searchMissing } from './tools/bazarr.js';
+import { proposeActionTool } from './tools/propose.js';
 import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -53,8 +55,16 @@ const tools = buildLabTools({
 // The media assistant's tools (PET-869): mtrace's ten reads, plus search when it is set.
 // With no mtrace token the map stays undefined and /v1/media/ask answers 404, so a host
 // that has not been seeded says so instead of answering without its tools.
+const bazarrCfg = cfg.bazarr ?? undefined;
 const mediaTools = cfg.mtrace
-  ? new Map([...mtraceTools(cfg.mtrace), ...(tools.has('search_lab') ? [tools.get('search_lab')!] : [])].map((t) => [t.name, t] as const))
+  ? new Map(
+      [
+        ...mtraceTools(cfg.mtrace),
+        ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
+        ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
+        proposeActionTool(bazarrCfg),
+      ].map((t) => [t.name, t] as const),
+    )
   : undefined;
 const pve = new ProxmoxClient(cfg.proxmox);
 const secrets = new VaultMetadataClient(cfg.vault);
@@ -163,6 +173,7 @@ const handler = createLabHandler({
   callModel,
   model: cfg.model,
   mediaTools,
+  actBazarr: bazarrCfg ? (kind, id) => searchMissing(bazarrCfg, kind, id) : undefined,
   checks,
   log,
   runDrift,

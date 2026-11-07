@@ -27,6 +27,7 @@
  */
 import { callTool, type LabTool } from './tools/index.js';
 import { toolDefinitions } from './tools/index.js';
+import { PROPOSE_TOOL, type Proposal } from './tools/propose.js';
 
 export const MAX_TURNS = 8;
 export const MAX_TOKENS = 1024;
@@ -57,7 +58,7 @@ Rules:
 - mtrace's verdict is the answer. Quote its cause and fix; do not invent a different cause.
 - Sonarr and Radarr are ground truth. seerr is a cache and can disagree.
 - When a tool returns an error or an ok=false finding, say which read failed and why. Never treat a failed read as "nothing found".
-- You cannot change anything yet. If asked to pull subtitles, update, or refresh Plex, say that action is not available in this chat yet.
+- You cannot change anything yourself. To search for subtitles or to check or install updates, call propose_action. It only asks the user to confirm. Never say a change happened; say it is proposed and a Confirm button follows. For subtitles, call bazarr_find first when the title is unclear. Refreshing Plex is not available in this chat yet.
 - Name the tools you read. Answer in at most 8 short lines, for a phone screen. No preamble.`;
 
 export interface HistoryTurn {
@@ -92,6 +93,8 @@ export interface AskResult {
   answer: string;
   turns: number;
   toolCalls: Array<{ name: string; ok: boolean }>;
+  /** Changes the model proposed. None has run: pete-bot shows a Confirm button for each. */
+  proposals: Proposal[];
   /** Set when the answer hit a limit, was cut, or came back empty: it is not a full answer. */
   incomplete: boolean;
   usage: { input: number; output: number; cacheRead: number };
@@ -118,11 +121,13 @@ export async function ask(
   ];
   const toolCalls: AskResult['toolCalls'] = [];
   const usage = { input: 0, output: 0, cacheRead: 0 };
+  const proposals: Proposal[] = [];
 
   const stopped = (turns: number, why: string): AskResult => ({
     answer: `${why} Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ') || 'none'}.`,
     turns,
     toolCalls,
+    proposals,
     incomplete: true,
     usage,
   });
@@ -152,7 +157,7 @@ export async function ask(
         : res.stop_reason === 'refusal' ? '\n\n(The model refused to answer.)'
         : '';
       const incomplete = Boolean(note) || !text;
-      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, incomplete, usage };
+      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, proposals, incomplete, usage };
     }
     if (last) {
       // tool_choice none should prevent this; if the model still asks, it gets no more reads.
@@ -167,6 +172,15 @@ export async function ask(
         ? await callTool(tool, use.input)
         : ({ ok: false, error: `no tool named ${use.name}` } as const);
       toolCalls.push({ name: use.name ?? '?', ok: result.ok });
+      if (result.ok && use.name === PROPOSE_TOOL) {
+        // The proposal is read from the tool's own JSON output, not from anything the model wrote.
+        try {
+          const p = (JSON.parse(result.text) as { data?: { proposal?: Proposal } }).data?.proposal;
+          if (p) proposals.push(p);
+        } catch {
+          // A truncated or malformed result carries no proposal; the model's text still says what happened.
+        }
+      }
       results.push({
         type: 'tool_result',
         tool_use_id: use.id,
