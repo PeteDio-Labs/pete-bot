@@ -69,6 +69,8 @@ export interface RunnerDeps {
   feedFetch?: typeof fetch;
   /** Called with each CVE run, so the dashboard keeps it. A throw is logged, never fatal. */
   onCve?: (run: CveRun, date: string, at: Date) => void;
+  /** Called with the morning queue's snapshot, so the dashboard keeps the cycle. A throw is logged, never fatal. */
+  onMorning?: (snap: Snapshot, date: string) => void;
 }
 
 /** Splits at line breaks so no DM passes Discord's 2000-character limit. */
@@ -264,6 +266,13 @@ export class ReportRunner {
     const cycles: CycleRead | undefined =
       name === 'morning' && plane.ok && this.d.plane ? await this.d.plane.cycles(localTime(at).date) : undefined;
     const snap: Snapshot = { at, repos, plane, cycles };
+    if (name === 'morning') {
+      try {
+        this.d.onMorning?.(snap, localTime(at).date);
+      } catch (err) {
+        this.d.log.warn(`[Reports] could not store the cycle record for the dashboard: ${String(err).slice(0, 160)}`);
+      }
+    }
     switch (name) {
       case 'morning': {
         const comments: CommentMap = new Map();
