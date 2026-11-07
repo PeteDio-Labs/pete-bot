@@ -130,6 +130,9 @@ function toJson(schema: z.ZodTypeAny): Record<string, unknown> {
     }
     return withDescription(out);
   }
+  if (schema instanceof z.ZodBoolean) {
+    return withDescription({ type: 'boolean' });
+  }
   if (schema instanceof z.ZodArray) {
     const out: Record<string, unknown> = { type: 'array', items: toJson(schema._def.type) };
     if (schema._def.minLength) out.minItems = schema._def.minLength.value;

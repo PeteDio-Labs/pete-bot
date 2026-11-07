@@ -85,15 +85,24 @@ export function matchTitle(items: Item[], query: string): Item[] {
 }
 
 export function bazarrFindTool(cfg: BazarrConfig): LabTool {
-  const input = z.object({ title: z.string().min(2).max(200).describe('Part or all of the title, such as "Survivor"') });
+  const input = z.object({
+    title: z.string().min(2).max(200).optional().describe('Part or all of the title, such as "Survivor". Never a phrase like "subtitles" or "movies".'),
+    missingOnly: z.boolean().optional().describe('true lists the series and movies that lack subtitles. Use it with no title to answer "which titles are missing subtitles".'),
+  });
   return {
     name: 'bazarr_find',
-    description: 'Find a series or movie in Bazarr and see how many subtitles it is missing. Use it before proposing a subtitle search.',
+    description:
+      'Find a series or movie in Bazarr and see how many subtitles it is missing, or list every title that lacks subtitles (missingOnly). Use it before proposing a subtitle search.',
     input,
-    async run({ title }: z.infer<typeof input>) {
+    async run({ title, missingOnly }: z.infer<typeof input>) {
+      if (title === undefined && missingOnly !== true) throw new LabToolError('give a title, or set missingOnly to true');
       const items = await listItems(cfg);
-      const hits = matchTitle(items, title).slice(0, 10);
-      return { source: `${items.length} titles read from Bazarr, ${hits.length} match "${title.slice(0, 60)}"`, data: { matches: hits } };
+      const pool = missingOnly ? items.filter((i) => i.missing > 0) : items;
+      const matched = title ? matchTitle(pool, title) : pool;
+      const hits = matched.slice(0, 10);
+      const scope = missingOnly ? `${pool.length} have missing subtitles, ` : '';
+      const what = title ? `${matched.length} match "${title.slice(0, 60)}"` : `${matched.length} listed`;
+      return { source: `${items.length} titles read from Bazarr, ${scope}${what}`, data: { matches: hits } };
     },
   };
 }
