@@ -102,10 +102,11 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
     const store = new WeekStore(w.dir);
     hub = new ReportHub(w.dir);
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
-    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize: ollamaSummarizer(w.ollamaUrl), log: logger });
+    const summarize = ollamaSummarizer(w.ollamaUrl);
+    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
     await listenDashboard(
-      createDashboardApp({ store, hub, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );

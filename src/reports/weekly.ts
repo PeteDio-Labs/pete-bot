@@ -52,6 +52,8 @@ export interface WeekRecord {
   merged: WeekPr[];
   coverage: { reposRead: number; reposTotal: number; unread: string[]; floorRepos: string[] };
   summary: { source: 'ollama' | 'none'; model?: string; text: string; reason?: string };
+  /** Summaries of one repo's PRs, written on request from the dashboard. Absent on older records. */
+  repoSummaries?: Record<string, { model: string; text: string; at: string; prs: number }>;
 }
 
 export type Summarize = (prs: WeekPr[], week: string) => Promise<string>;
@@ -230,6 +232,16 @@ export class WeekStore {
       .reverse();
   }
 
+  /** One week, or null when it is absent or cannot be read. */
+  get(week: string): WeekRecord | null {
+    if (!WEEK_RE.test(week)) return null;
+    try {
+      return JSON.parse(readFileSync(join(this.dir, `${week}.json`), 'utf8')) as WeekRecord;
+    } catch {
+      return null;
+    }
+  }
+
   save(rec: WeekRecord): void {
     if (!WEEK_RE.test(rec.week)) throw new Error(`bad week "${rec.week}"`);
     const path = join(this.dir, `${rec.week}.json`);
@@ -365,6 +377,8 @@ export class WeeklyRunner {
           return true;
         }
         if (rec.summary.source === 'none' && old.summary.source === 'ollama') rec.summary = old.summary;
+        // Summaries written on request outlive a rebuild; the page shows when each was written.
+        if (old.repoSummaries) rec.repoSummaries = old.repoSummaries;
       }
       this.d.store.save(rec);
       this.last = { at: at.toISOString(), week, ok: true, detail: `${rec.total} merged, summary ${rec.summary.source}` };
