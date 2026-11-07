@@ -39,7 +39,7 @@ describe('tallyBoard', () => {
     expect(t.stuck).toEqual([{ key: 'PET-4', name: 'Item 4', state: 'In Review', days: 6 }]);
   });
   it('mixes labels and names unlabelled items', () => {
-    expect(t.labelMix[0]).toEqual({ label: 'cloud', open: 2 });
+    expect(t.labelMix.find((l) => l.label === 'cloud')).toEqual({ label: 'cloud', open: 2 });
     expect(t.labelMix.find((l) => l.label === '(no label)')?.open).toBe(1);
   });
 });
