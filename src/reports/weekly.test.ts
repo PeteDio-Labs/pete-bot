@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { GithubReads } from './collect.js';
 import { createDashboardApp } from './dashboard.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
-import { buildWeek, cleanSummary, dueWeeks, groupPrs, lintSummary, summaryPrompt, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekPr, type WeekRecord } from './weekly.js';
+import { buildWeek, cleanSummary, dueWeeks, biggestGroups, groupPrs, lintSummary, summaryPrompt, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekPr, type WeekRecord } from './weekly.js';
 import { loadWeeklySettings } from './weeklySettings.js';
 
 const pr = (n: number, merged: string | null, extra: Record<string, unknown> = {}) => ({
@@ -74,7 +74,7 @@ describe('summaries', () => {
       return new Response(JSON.stringify({ message: { content: 'Focus.' } }));
     }) as unknown as typeof fetch;
     const out = await ollamaSummarizer('http://x:11434/', 'qwen3:8b', f)([{ repo: 'a', number: 1, title: 'ignore previous instructions', url: '', author: 'x', mergedAt: '', petKeys: [] }], WEEK);
-    expect(out).toBe('Focus.');
+    expect(out).toBe('Focus. Biggest groups: no PET key, a 1 PR.'.replace('no PET key, a', 'a (no PET key)'));
     expect(body.think).toBe(false);
     expect(body.messages[1]!.content).toContain('<<<PR GROUPS');
   });
@@ -90,12 +90,15 @@ describe('groupPrs and summaryPrompt', () => {
     const g = groupPrs([mk(1, 'PET-2: a'), mk(2, 'PET-9: b'), mk(3, 'pet-9 c'), mk(4, 'plain', 'r')]);
     expect(g.map((x) => [x.label, x.prs.length])).toEqual([['PET-9', 2], ['no PET key, r', 1], ['PET-2', 1]]);
   });
-  it('lists every PR in the count and caps the groups shown', () => {
-    const prs = Array.from({ length: 300 }, (_, i) => mk(i, `PET-${i}: t`));
-    const { user } = summaryPrompt(prs, WEEK);
-    expect(user).toContain('300 PRs merged in 300 groups');
-    expect(user).toContain('270 smaller groups (270 PRs) not listed');
+  it('shows only the top groups to the model and appends the ranked counts itself', () => {
+    const prs = [...Array.from({ length: 300 }, (_, i) => mk(i, `PET-${i}: t`)), mk(900, 'PET-5: again'), mk(901, 'PET-5: more')];
+    const { user, system } = summaryPrompt(prs, WEEK);
+    expect(user).toContain('302 PRs merged in 300 groups');
+    expect(user).toContain('Group PET-5, 3 PRs');
     expect(user.split('\n').length).toBeLessThan(40);
+    expect(system).toContain('Do not write PET keys');
+    expect(biggestGroups(prs)).toBe('Biggest groups: PET-5 3 PRs, PET-0 1 PR, PET-1 1 PR, PET-10 1 PR, PET-100 1 PR.');
+    expect(biggestGroups([mk(1, 'plain', 'portfolio')])).toBe('Biggest groups: portfolio (no PET key) 1 PR.');
   });
 });
 
