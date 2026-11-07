@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { CveRun, Finding } from './cve.js';
-import { cveRecord } from './hubCve.js';
+import { cveRecord, shouldReplace } from './hubCve.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 
 const finding = (over: Partial<Finding>): Finding => ({
@@ -17,9 +17,22 @@ describe('cveRecord', () => {
     const r = cveRecord(run({}), '2026-11-07', new Date('2026-11-07T11:00:00Z'));
     expect(r.id).toBe('2026-11-07');
     expect(r.findings).toBe(0);
-    expect(r.complete).toBe(true);
+    expect(r.complete).toBe(false);
     expect(r.examined).toMatchObject({ hostsRead: 12, hostsUnread: ['pve02'], queries: 900, advisories: 40, kevEntries: 1200, snapshotAgeHours: 3 });
-    expect(r.gaps).toEqual(['1 host not read']);
+    expect(r.gaps).toEqual(['1 host not read', 'pve02 was not scanned: timeout']);
+  });
+  it('is complete only when nothing was left unexamined', () => {
+    const clean = cveRecord(run({ hostsUnread: [], inventoryGaps: [] }), '2026-11-07', new Date('2026-11-07T11:00:00Z'));
+    expect(clean.complete).toBe(true);
+    expect(cveRecord(run({ hostsUnread: [], inventoryGaps: [], snapshotAgeHours: 50 }), '2026-11-07', new Date()).complete).toBe(false);
+    expect(cveRecord(run({ hostsUnread: [], inventoryGaps: [], truncated: 3 }), '2026-11-07', new Date()).complete).toBe(false);
+  });
+  it('keeps a complete record over a gapped one from the same day', () => {
+    const ok = cveRecord(run({ hostsUnread: [], inventoryGaps: [] }), '2026-11-07', new Date());
+    const bad = cveRecord(run({}), '2026-11-07', new Date());
+    expect(shouldReplace(ok, bad)).toBe(false);
+    expect(shouldReplace(bad, ok)).toBe(true);
+    expect(shouldReplace(null, bad)).toBe(true);
   });
   it('counts by severity, flags exploited ones, and marks a feed gap incomplete', () => {
     const r = cveRecord(
@@ -32,7 +45,7 @@ describe('cveRecord', () => {
     expect(r.exploited).toBe(1);
     expect(r.actionable).toBe(2);
     expect((r.top as { hosts: string[] }[])[0]!.hosts).toHaveLength(4);
-    expect(r.gaps as string[]).toContain('CISA KEV not read: HTTP 503');
+    expect(r.gaps as string[]).toContain('HTTP 503, so nothing is marked as exploited');
   });
   it('has a renderer on the page', () => {
     expect(DASHBOARD_HTML).toContain('RENDER.cve=');
