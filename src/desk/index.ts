@@ -2,6 +2,7 @@
  * Starts the merge desk when DESK_MODE asks for it (PET-645), and holds the one instance
  * the Discord button handler and /health read.
  */
+import { ollamaReviewer } from './qwen.js';
 import type { Client } from 'discord.js';
 import { loadDeskSettings, type DeskState, type DeskEnv } from './config.js';
 import { CodexQueue } from './codex.js';
@@ -38,6 +39,7 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
     settings: s,
     github: new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org }),
     codex: new CodexQueue(s.codex),
+    qwen: s.fallback ? ollamaReviewer(s.fallback.qwen) : undefined,
     store,
     notifier: discordNotifier(client, ownerUserId),
     log: logger,

@@ -6,7 +6,7 @@ import { describe, it, expect, vi } from 'bun:test';
 import { z } from 'zod';
 import { ask, type CallModel, type ModelResponse } from './agent.js';
 import { createLabHandler } from './server.js';
-import { callTool, type LabTool } from './tools/index.js';
+import { callTool, inputJsonSchema, type LabTool } from './tools/index.js';
 import { bazarrFindTool, bazarrStatusTool, matchTitle, searchMissing } from './tools/bazarr.js';
 import { proposeActionTool } from './tools/propose.js';
 
@@ -48,6 +48,23 @@ describe('bazarr_find', () => {
       expect(url).not.toContain(CFG.apiKey);
       expect(init.headers).toMatchObject({ 'x-api-key': CFG.apiKey });
     }
+  });
+  it('lists every title with missing subtitles when asked for missing only, with no title', async () => {
+    const res = await callTool(bazarrFindTool({ ...CFG, fetch: router() as never }), { missingOnly: true });
+    expect(res.ok && res.text).toContain('Survivor');
+    expect(res.ok && res.text).toContain('Never After Dark');
+    expect(res.ok && res.text).not.toContain('Edge of Extinction');
+    expect(res.ok && res.text).toContain('3 have missing subtitles');
+  });
+  it('advertises a JSON schema, and refuses an unknown key', async () => {
+    const tool = bazarrFindTool({ ...CFG, fetch: router() as never });
+    expect(inputJsonSchema(tool.input)).toMatchObject({ type: 'object', additionalProperties: false, properties: { missingOnly: { type: 'boolean' } } });
+    const res = await callTool(tool, { query: 'x' });
+    expect(!res.ok && res.error).toContain('invalid input');
+  });
+  it('rejects a call with neither a title nor missingOnly', async () => {
+    const res = await callTool(bazarrFindTool({ ...CFG, fetch: router() as never }), {});
+    expect(res.ok).toBe(false);
   });
   it('fails on a 401 and a body with no data list, never an empty result', async () => {
     const a = await callTool(bazarrFindTool({ ...CFG, fetch: router({ '/api/series': () => json({}, 401) }) as never }), { title: 'dexter' });

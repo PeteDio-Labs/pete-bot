@@ -17,8 +17,9 @@
  * Storage is one `<monday>.json` file per week. The file's existence is the schedule's state:
  * a week with a file is done, so a restart neither repeats nor loses one.
  */
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import type { Database } from 'bun:sqlite';
+import { mkdirSync } from 'node:fs';
+import { openReportDb } from './db.js';
 import { collectGithub, type GithubReads } from './collect.js';
 import { AUTHOR_LABELS, countWeek, weekStart } from './merged.js';
 import { localTime } from './schedule.js';
@@ -56,6 +57,8 @@ export interface WeekRecord {
   merged: WeekPr[];
   coverage: { reposRead: number; reposTotal: number; unread: string[]; floorRepos: string[] };
   summary: { source: 'ollama' | 'none'; model?: string; text: string; reason?: string };
+  /** Summaries of one repo's PRs, written on request from the dashboard. Absent on older records. */
+  repoSummaries?: Record<string, { model: string; text: string; at: string; prs: number }>;
 }
 
 export type Summarize = (prs: WeekPr[], week: string) => Promise<string>;
@@ -231,8 +234,10 @@ export function lintSummary(text: string, prs: WeekPr[]): string[] {
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export class WeekStore {
-  constructor(private readonly dir: string) {
+  private readonly db: Database;
+  constructor(dir: string) {
     mkdirSync(dir, { recursive: true });
+    this.db = openReportDb(dir);
   }
 
   has(week: string): boolean {
@@ -241,31 +246,34 @@ export class WeekStore {
 
   /** The stored Mondays, newest first. */
   weeks(): string[] {
-    return readdirSync(this.dir)
-      .map((f) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(f)?.[1])
-      .filter((w): w is string => !!w)
-      .sort()
-      .reverse();
+    return (this.db.query('SELECT week FROM weeks ORDER BY week DESC').all() as { week: string }[]).map((r) => r.week);
+  }
+
+  /** One week, or null when it is absent or cannot be read. */
+  get(week: string): WeekRecord | null {
+    if (!WEEK_RE.test(week)) return null;
+    const row = this.db.query('SELECT body FROM weeks WHERE week = ?').get(week) as { body: string } | null;
+    if (!row) return null;
+    try {
+      return JSON.parse(row.body) as WeekRecord;
+    } catch {
+      return null;
+    }
   }
 
   save(rec: WeekRecord): void {
     if (!WEEK_RE.test(rec.week)) throw new Error(`bad week "${rec.week}"`);
-    const path = join(this.dir, `${rec.week}.json`);
-    // Write then rename, so the dashboard never reads half a file.
-    writeFileSync(`${path}.tmp`, JSON.stringify(rec), { mode: 0o640 });
-    renameSync(`${path}.tmp`, path);
+    this.db.query('INSERT INTO weeks (week, body) VALUES (?, ?) ON CONFLICT(week) DO UPDATE SET body = excluded.body').run(rec.week, JSON.stringify(rec));
   }
 
-  /** Every stored week, newest first. A file that cannot be read is named, not skipped. */
+  /** Every stored week, newest first. A record that cannot be read is named, not skipped. */
   all(): { weeks: WeekRecord[]; unreadable: string[] } {
     const weeks: WeekRecord[] = [];
     const unreadable: string[] = [];
     for (const w of this.weeks()) {
-      try {
-        weeks.push(JSON.parse(readFileSync(join(this.dir, `${w}.json`), 'utf8')) as WeekRecord);
-      } catch {
-        unreadable.push(w);
-      }
+      const rec = this.get(w);
+      if (rec) weeks.push(rec);
+      else unreadable.push(w);
     }
     return { weeks, unreadable };
   }
@@ -383,6 +391,8 @@ export class WeeklyRunner {
           return true;
         }
         if (rec.summary.source === 'none' && old.summary.source === 'ollama') rec.summary = old.summary;
+        // Summaries written on request outlive a rebuild; the page shows when each was written.
+        if (old.repoSummaries) rec.repoSummaries = old.repoSummaries;
       }
       this.d.store.save(rec);
       this.last = { at: at.toISOString(), week, ok: true, detail: `${rec.total} merged, summary ${rec.summary.source}` };

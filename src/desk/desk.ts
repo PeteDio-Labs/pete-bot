@@ -22,7 +22,8 @@ import type { CodexQueue, QueueResult } from './codex.js';
 import { codexReviews } from './codex.js';
 import type { ClassifierSource, RunPython } from './classify.js';
 import { classify } from './classify.js';
-import { checkGate, decide, blockingRounds, MAX_ROUNDS, type Decision, type Facts } from './decide.js';
+import type { QwenReviewer } from './qwen.js';
+import { checkGate, decide, blockingRounds, MAX_ROUNDS, QUEUE_MAX_TRIES, type Decision, type Facts } from './decide.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp } from './github.js';
 import type { DeskStore, Outgoing } from './store.js';
@@ -48,6 +49,8 @@ export interface DeskDeps {
   settings: DeskSettings;
   github: GitHubApp;
   codex: CodexQueue;
+  /** The Codex-out fallback reviewer (PET-751). Absent keeps the Codex-only gate. */
+  qwen?: QwenReviewer;
   store: DeskStore;
   notifier: Notifier;
   log: DeskLog;
@@ -63,6 +66,22 @@ export interface DeskStatus {
   lastPollPrs: number;
   merged: number;
 }
+
+export interface QwenLedger {
+  judged: number;
+  clean: number;
+  block: number;
+  unreadable: number;
+  tooLarge: number;
+  mergedByQwen: number;
+  mergedByCiOnly: number;
+  reverted: number;
+  since: string | null;
+  recent: { repo: string; pr: number; by: string; verdict: string; merged: boolean; outcome: string | null; at: string }[];
+}
+
+/** A fallback merge with no revert after this long is marked `held`, and the poll stops reading commits for it. */
+const HOLD_AFTER_MS = 14 * 24 * 3_600_000;
 
 export const BUTTON_PREFIX = 'desk';
 
@@ -200,6 +219,14 @@ export class MergeDesk {
     const { store, log } = this.deps;
     for (const { repo, n, memory } of store.entries()) {
       if (!memory.queueRunning || !memory.queuedSha) continue;
+      // A restart is not a Codex failure. Queue again on the next poll, a few times per head;
+      // only a head that keeps getting interrupted is reported (PET-751).
+      if ((memory.queueTries ?? 1) < QUEUE_MAX_TRIES) {
+        // queuedAt restarts so a long Codex run cut off by the restart does not look like Codex being out.
+        store.update(repo, n, { queueRunning: false, queuedAt: new Date().toISOString(), queueFailedSha: memory.queuedSha, queueFailedAt: new Date(0).toISOString() });
+        log.warn(`merge desk: the Codex queue for ${repo}#${n} at ${short(memory.queuedSha)} was running when pete-bot stopped; queueing again`);
+        continue;
+      }
       store.update(repo, n, { queueRunning: false });
       log.warn(`merge desk: the Codex queue for ${repo}#${n} at ${short(memory.queuedSha)} was running when pete-bot stopped`);
       await this.reportQueueFailure(repo, n, memory.queuedSha, 'pete-bot restarted while it ran', '').catch((err) =>
@@ -283,6 +310,11 @@ export class MergeDesk {
           }
         }
       }
+      const o = this.deps.store.ledgerOpen().length === 0 ? null : await this.checkLedgerOutcomes().catch((err) => {
+        errors.push(`ledger outcomes: ${String(err)}`);
+        return null;
+      });
+      if (o) this.deps.log.info(`merge desk: checked ${o.checked} fallback merges against ${o.read} commit subjects; ${o.reverted} reverted`);
     } finally {
       this.polling = false;
       this.state.lastPollAt = new Date().toISOString();
@@ -296,6 +328,9 @@ export class MergeDesk {
   private async facts(repo: string, n: number): Promise<Facts> {
     const { github, settings, store } = this.deps;
     const pull = await github.getPull(repo, n);
+    // Memory saved before PET-751 has no queuedAt. Start the fallback clock when the desk first sees that.
+    const seen = store.get(repo, n);
+    if (seen.queuedSha && !seen.queuedAt) store.update(repo, n, { queuedAt: new Date().toISOString() });
     const [defaultBranch, files, reviews, checks, unresolvedThreads] = await Promise.all([
       this.defaultBranch(repo),
       github.listFiles(repo, n),
@@ -321,6 +356,7 @@ export class MergeDesk {
       requiredChecks,
       unresolvedThreads,
       memory: store.get(repo, n),
+      fallback: settings.fallback && this.deps.qwen ? { enabled: true, afterMs: settings.fallback.afterMs } : { enabled: false, afterMs: 0 },
     };
   }
 
@@ -354,7 +390,8 @@ export class MergeDesk {
         return;
 
       case 'queue': {
-        store.update(repo, n, { queuedSha: d.sha, queueRunning: true, queueFailedSha: undefined });
+        const tries = mem.queuedSha === d.sha ? (mem.queueTries ?? 1) + 1 : 1;
+        store.update(repo, n, { queuedSha: d.sha, queuedAt: new Date().toISOString(), queueTries: tries, queueRunning: true, queueFailedSha: undefined, queueFailedAt: undefined });
         log.info(`merge desk: queueing Codex (${d.effort}) for ${repo}#${n} at ${short(d.sha)}`);
         const run = this.deps.codex
           .enqueue(repo, n, d.effort)
@@ -369,6 +406,17 @@ export class MergeDesk {
               log.error(`merge desk: reporting the queue failure for ${repo}#${n}: ${String(e)}`),
             );
           });
+        this.inflight.add(run);
+        void run.finally(() => this.inflight.delete(run));
+        return;
+      }
+
+      case 'qwen': {
+        store.update(repo, n, { qwen: { sha: d.sha, verdict: 'running', at: new Date().toISOString() } });
+        log.info(`merge desk: Codex is out for ${repo}#${n}; running the Qwen review at ${short(d.sha)}`);
+        const run = this.runQwen(repo, n, d.sha, f.pull.title).catch((err) =>
+          log.error(`merge desk: the Qwen review of ${repo}#${n}: ${String(err)}`),
+        );
         this.inflight.add(run);
         void run.finally(() => this.inflight.delete(run));
         return;
@@ -392,7 +440,7 @@ export class MergeDesk {
         // A comment, not a DM: Pedro asked for no tap (2026-10-26). Open PR list merges after review.
         store.update(repo, n, { askedSha: d.sha });
         await this.report(repo, n, {
-          comment: `Merge desk: not merging \`${short(d.sha)}\` automatically (${d.why}; tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}). Codex: [${d.review.verdict}](${d.review.url}); checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
+          comment: `Merge desk: not merging \`${short(d.sha)}\` automatically (${d.why}; tier ${f.classification.tier}, ${f.classification.pathCount} paths: ${f.classification.reasons.slice(0, 3).join('; ').slice(0, 400)}). ${reviewNote(d)}; checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
         });
         return;
       }
@@ -403,7 +451,7 @@ export class MergeDesk {
         if (settings.mode === 'dry-run') {
           if (mem.askedSha === d.sha) return;
           await notifier.dm(
-            `**Merge desk (dry run)** · would merge ${this.link(repo, f)} at \`${short(d.sha)}\`: tier ${f.classification.tier}, Codex [no blocking findings](${d.review.url}), checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
+            `**Merge desk (dry run)** · would merge ${this.link(repo, f)} at \`${short(d.sha)}\`: tier ${f.classification.tier}, ${reviewNote(d)}, checks ${f.checks.passed}/${f.checks.total} passed${gateNote(f)}.`,
           );
           store.update(repo, n, { askedSha: d.sha });
           return;
@@ -413,10 +461,79 @@ export class MergeDesk {
           // merge waits for a person; a repeat refusal is not announced every poll.
           return;
         }
-        await this.merge(repo, f, d.sha, `tier ${f.classification.tier}, merged without a tap`);
+        await this.merge(repo, f, d.sha, `tier ${f.classification.tier}, merged without a tap`, d.by);
         return;
       }
     }
+  }
+
+  /**
+   * Flags a fallback merge that a later commit reverted. It reads the newest 100 commit
+   * subjects on the default branch of each repo that has an unchecked fallback merge, and says
+   * how many it read, so an empty read cannot pass for "nothing reverted".
+   */
+  async checkLedgerOutcomes(): Promise<{ checked: number; reverted: number; read: number }> {
+    const { store, github } = this.deps;
+    const open = store.ledgerOpen();
+    let reverted = 0;
+    let read = 0;
+    const subjects = new Map<string, string[]>();
+    for (const row of open) {
+      if (!subjects.has(row.repo)) {
+        subjects.set(row.repo, await github.recentCommitSubjects(row.repo, await this.defaultBranch(row.repo)));
+        read += subjects.get(row.repo)!.length;
+      }
+      const hit = subjects.get(row.repo)!.some((m) => /^Revert\b/i.test(m) && m.includes(`(#${row.pr})`));
+      if (hit) {
+        store.ledgerOutcome(row.id, 'reverted');
+        reverted++;
+      } else if (Date.now() - Date.parse(row.mergedAt!) > HOLD_AFTER_MS) {
+        // Two weeks on main with no revert naming it. This says nothing about bugs fixed by a normal commit.
+        store.ledgerOutcome(row.id, 'held');
+      }
+    }
+    return { checked: open.length, reverted, read };
+  }
+
+  /** What the Insight tab shows about the fallback: every count says what it covers. */
+  qwenLedger(): QwenLedger {
+    const rows = this.deps.store.ledger();
+    const qwen = rows.filter((r) => r.by === 'qwen');
+    const count = (v: string) => qwen.filter((r) => r.verdict === v).length;
+    const merged = rows.filter((r) => r.mergedAt);
+    return {
+      judged: qwen.length,
+      clean: count('clean'),
+      block: count('block'),
+      unreadable: count('unreadable'),
+      tooLarge: count('too-large'),
+      mergedByQwen: merged.filter((r) => r.by === 'qwen').length,
+      mergedByCiOnly: merged.filter((r) => r.by === 'ci').length,
+      reverted: merged.filter((r) => r.outcome === 'reverted').length,
+      since: rows.length ? rows[rows.length - 1]!.judgedAt : null,
+      recent: rows.slice(0, 10).map((r) => ({ repo: r.repo, pr: r.pr, by: r.by, verdict: r.verdict, merged: !!r.mergedAt, outcome: r.outcome, at: r.judgedAt })),
+    };
+  }
+
+  /** Runs the Qwen pass on one head, records the word, comments, and decides again. */
+  private async runQwen(repo: string, n: number, sha: string, title: string): Promise<void> {
+    const { store, github, qwen } = this.deps;
+    if (!qwen) return;
+    let verdict: import('./decide.js').QwenVerdict = 'unreadable';
+    try {
+      verdict = await qwen.review({ title, diff: await github.diff(repo, n) });
+    } catch (err) {
+      this.deps.log.warn(`merge desk: Qwen review of ${repo}#${n} failed: ${String(err)}`);
+    }
+    // A push while it ran makes this verdict about an old head. Keep it, but it never matches the new SHA.
+    const tries = (store.get(repo, n).qwen?.sha === sha ? store.get(repo, n).qwen?.tries ?? 0 : 0) + 1;
+    store.update(repo, n, { qwen: { sha, verdict, at: new Date().toISOString(), tries } });
+    store.ledgerJudge({ repo, pr: n, sha, tier: 1, by: 'qwen', verdict });
+    // The verdict is saved first: a failed comment must not lose it or skip the decision.
+    await this.report(repo, n, {
+      comment: `Merge desk: Codex is out, so a local Qwen review read \`${short(sha)}\` and answered **${verdict}**. ${verdict === 'clean' ? 'Checks and the other gates still decide the merge.' : verdict === 'unreadable' && tries < 3 ? 'The desk tries again in about ten minutes.' : 'The PR waits for a push or a person.'}`,
+    }).catch((err) => this.deps.log.error(`merge desk: commenting the Qwen verdict on ${repo}#${n}: ${String(err)}`));
+    if ((await github.getPull(repo, n)).headSha === sha) await this.evaluate(repo, n);
   }
 
   private async afterQueue(repo: string, n: number, sha: string, r: QueueResult): Promise<void> {
@@ -448,7 +565,13 @@ export class MergeDesk {
 
   /** Marks the head's queue failed, then one comment and one DM with a button to queue again. */
   private async reportQueueFailure(repo: string, n: number, sha: string, why: string, tail: string): Promise<void> {
-    this.deps.store.update(repo, n, { queueFailedSha: sha });
+    this.deps.store.update(repo, n, { queueFailedSha: sha, queueFailedAt: new Date().toISOString() });
+    // The desk retries a failed call itself. Report the first failure and the last, not the ones between.
+    const tries = this.deps.store.get(repo, n).queueTries ?? 1;
+    if (tries > 1 && tries < QUEUE_MAX_TRIES) {
+      this.deps.log.warn(`merge desk: Codex queue call ${tries} of ${QUEUE_MAX_TRIES} for ${repo}#${n} failed (${why}); retrying`);
+      return;
+    }
     const detail = tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : '';
     // A quota refusal fails every open PR the same way until the quota resets. Each PR keeps
     // its comment; Pedro gets one DM per six hours, not one per PR and head.
@@ -468,10 +591,10 @@ export class MergeDesk {
     });
   }
 
-  private async merge(repo: string, f: Facts, sha: string, how: string): Promise<{ ok: boolean; message: string }> {
+  private async merge(repo: string, f: Facts, sha: string, how: string, by: 'codex' | 'qwen' | 'ci' = 'codex'): Promise<{ ok: boolean; message: string }> {
     const { github, store } = this.deps;
     const n = f.pull.number;
-    const evidence = `tier ${f.classification.tier}; Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed${gateNote(f)}; 0 open threads`;
+    const evidence = `tier ${f.classification.tier}; ${by === 'codex' ? `Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'}` : by === 'qwen' ? 'Codex out, Qwen VERDICT: CLEAN' : 'Codex out, CI only (tier 0)'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed${gateNote(f)}; 0 open threads`;
     // The approval satisfies a required review where one exists, and records the evidence
     // where none does.
     const fail = async (why: string) => {
@@ -505,6 +628,14 @@ export class MergeDesk {
     }
     const where = landed ? `on \`${f.defaultBranch}\`` : `but I could not confirm it is on \`${f.defaultBranch}\``;
     store.update(repo, n, { mergedSha: result.sha });
+    if (by !== 'codex') {
+      try {
+        store.ledgerMerged({ repo, pr: n, sha, tier: f.classification.tier, by, mergedSha: result.sha });
+      } catch (err) {
+        // The PR is merged. A ledger write that fails must not skip the report below.
+        this.deps.log.error(`merge desk: the ledger write for ${repo}#${n} failed: ${String(err)}`);
+      }
+    }
     this.state.merged++;
     await this.report(repo, n, {
       comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,
@@ -533,6 +664,7 @@ export class MergeDesk {
         stopReportedSha: undefined,
         queuedSha: undefined,
         queueFailedSha: undefined,
+        qwen: undefined,
         requeueSha: p.sha,
         requeuedAt: new Date().toISOString(),
       });
@@ -549,7 +681,7 @@ export class MergeDesk {
       const d = decide(f);
       if ((d.kind !== 'ask' && d.kind !== 'merge') || d.sha !== p.sha) return `Not merged: ${describe(d)}.`;
       if (this.deps.settings.mode === 'dry-run') return `Dry run: every gate passed at \`${short(p.sha)}\`, and nothing was merged.`;
-      return (await this.merge(p.repo, f, p.sha, 'merged on your tap')).message;
+      return (await this.merge(p.repo, f, p.sha, 'merged on your tap', d.by)).message;
     } finally {
       this.busy.delete(key);
     }
@@ -563,6 +695,8 @@ function describe(d: Decision): string {
       return d.reason;
     case 'queue':
       return 'no Codex review of the head yet';
+    case 'qwen':
+      return 'Codex is out; the Qwen review is starting';
     case 'stop':
       return `stopped after ${d.rounds.length} blocking Codex rounds`;
     case 'merge':
@@ -577,4 +711,9 @@ function gateNote(f: Facts): string {
   const g = checkGate(f);
   if (!g.examined.length) return '';
   return ` (required: ${g.examined.join(', ')}${g.ignored.length ? `; not required, skipped by workflow condition: ${g.ignored.join(', ')}` : ''})`;
+}
+
+function reviewNote(d: { by: 'codex' | 'qwen' | 'ci'; review: { verdict: string; url: string } | null }): string {
+  if (d.by === 'codex' && d.review) return `Codex: [${d.review.verdict}](${d.review.url})`;
+  return d.by === 'qwen' ? 'Codex out; Qwen VERDICT: CLEAN' : 'Codex out; CI only (tier 0)';
 }

@@ -12,7 +12,18 @@ import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
 import { ReportHub } from './hub.js';
+import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
+import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
+import { PLANE_KIND, planeRecord } from './hubPlane.js';
+import { HubJobs } from './hubJobs.js';
+import { getDesk } from '../desk/index.js';
+import { INSIGHT_KIND, insightRecord } from './hubInsight.js';
+import { collectGithub } from './collect.js';
+import { readKuma } from '../lab/tools/kuma.js';
+import { localTime } from './schedule.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
+import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './backup.js';
+import { openReportDb } from './db.js';
 
 let runner: ReportRunner | null = null;
 let state: ReportsState = { state: 'off' };
@@ -49,9 +60,21 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     plane: s.plane ? new PlaneClient(s.plane) : null,
     sender: discordSender(client, ownerUserId),
     log: logger,
+    onMorning: (snap, date) => {
+      const rec = cycleRecord(snap, date);
+      if (rec && hub) hub.save(CYCLE_KIND, rec);
+    },
+    onCve: (run, date, at) => {
+      if (!hub) {
+        logger.info('[Reports] The cve run was not kept for the dashboard because the dashboard is off');
+        return;
+      }
+      const rec = cveRecord(run, date, at);
+      if (shouldReplace(hub.get(CVE_KIND, rec.id), rec)) hub.save(CVE_KIND, rec);
+    },
   });
   runner.start();
-  void startWeekly(s, env as WeeklyEnv);
+  void startWeekly(s, env as WeeklyEnv & BackupEnv & ReportsEnv);
   logger.info(`[Reports] Scheduled ${[...s.enabled].join(', ')} for ${s.repos.join(', ')}${s.plane ? '' : ' (Plane key absent: Plane will be reported as not read)'}`);
 }
 
@@ -69,6 +92,9 @@ export function reportsHealth(): { state: string; reason?: string } & Partial<Re
 let weekly: WeeklyState = { state: 'off' };
 let weeklyRunner: WeeklyRunner | null = null;
 let hub: ReportHub | null = null;
+let hubJobs: HubJobs | null = null;
+let backup: ReportBackup | null = null;
+let backupConfig: ReturnType<typeof loadBackupConfig> = { state: 'off' };
 
 /** Where the other report kinds save a record for the dashboard. Null until the dashboard is on. */
 export function getHub(): ReportHub | null {
@@ -76,8 +102,9 @@ export function getHub(): ReportHub | null {
 }
 
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
-async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
+async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & ReportsEnv): Promise<void> {
   weekly = loadWeeklySettings(env);
+  if (weekly.state !== 'ready' && loadBackupConfig(env).state !== 'off') logger.warn('[Backup] REPORT_BACKUP_* is set but the weekly report is not running, so no reports are stored and nothing is copied.');
   if (weekly.state === 'off') return;
   if (weekly.state === 'misconfigured') {
     logger.error(`[Weekly] The weekly report is off because it is misconfigured: ${weekly.reason}`);
@@ -88,14 +115,70 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
     const store = new WeekStore(w.dir);
     hub = new ReportHub(w.dir);
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
-    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize: ollamaSummarizer(w.ollamaUrl), log: logger });
+    const summarize = ollamaSummarizer(w.ollamaUrl);
+    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
     await listenDashboard(
-      createDashboardApp({ store, hub, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );
     weeklyRunner.start();
+    const petClient = s.plane ? new PlaneClient(s.plane) : null;
+    const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();
+    const medClient = s.plane && medId ? new PlaneClient({ ...s.plane, projectId: medId }) : null;
+    const jobs = [];
+    if (s.plane && petClient) {
+      jobs.push({
+        kind: PLANE_KIND,
+        hour: 6,
+        collect: async (at: Date) => {
+          const pet = await petClient.read();
+          // A PET board that cannot be read stores nothing, so the job retries instead of keeping an empty day.
+          if (!pet.ok) throw new Error(`PET board not read: ${pet.error}`);
+          const med = medClient ? await medClient.read() : null;
+          // A MED id that is set but unreadable retries too; only "no id set" is stored as unread.
+          if (med && !med.ok) throw new Error(`MED board not read: ${med.error}`);
+          return planeRecord(pet, med, localTime(at).date, at);
+        },
+      });
+    } else logger.warn('[Hub] PLANE_API_KEY is empty, so the Plane report is not collected');
+    // The insight record (what the numbers mean) rebuilds every 3 hours.
+    const kumaCfg = { baseUrl: process.env.LAB_KUMA_URL?.trim() || 'http://192.168.50.4:3001', slug: process.env.LAB_KUMA_SLUG?.trim() || 'fault-study' };
+    jobs.push({
+      kind: INSIGHT_KIND,
+      hour: 0,
+      everyMinutes: 180,
+      collect: async (at: Date) => {
+        const reads = await collectGithub(gh, s.org, s.repos, at);
+        const pet = petClient ? await petClient.read() : { ok: false as const, error: 'PLANE_API_KEY is empty on this host' };
+        const med = medClient ? await medClient.read() : null;
+        const kuma = await readKuma(kumaCfg).then(
+          (monitors) => ({ ok: true as const, monitors }),
+          (err) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }),
+        );
+        return insightRecord({
+          at,
+          reads,
+          pet,
+          kuma,
+          weeks: store.all().weeks,
+          cve: hub!.list(CVE_KIND).records,
+          planeHistory: hub!.list(PLANE_KIND).records,
+          qwen: getDesk()?.qwenLedger() ?? null,
+          med: med ? (med.ok ? { ok: true } : { ok: false, reason: med.error.slice(0, 120) }) : { ok: false, reason: 'no MED project id is set on this host (PLANE_MED_PROJECT_ID)' },
+        });
+      },
+    });
+    hubJobs = new HubJobs(hub, jobs, logger);
+    hubJobs.start();
+    backupConfig = loadBackupConfig(env);
+    if (backupConfig.state === 'misconfigured') logger.error(`[Backup] The report backup is off because it is misconfigured: ${backupConfig.reason}`);
+    else if (backupConfig.state === 'off') logger.warn('[Backup] No report backup is set (REPORT_BACKUP_*): the reports live only on this host.');
+    else {
+      backup = new ReportBackup(openReportDb(w.dir), s3Target(backupConfig.settings), logger);
+      backup.start();
+    }
     logger.info(`[Weekly] Dashboard on ${w.host}:${w.port}, reports in ${w.dir}`);
   } catch (err) {
     weekly = { state: 'misconfigured', reason: String(err).slice(0, 200) };
@@ -104,8 +187,9 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv): Promise<void> {
 }
 
 /** For /health. Running names the last attempt, so "never ran" and "ran and failed" differ. */
-export function weeklyHealth(): { state: string; reason?: string; last?: unknown; lastFailure?: unknown } {
+export function weeklyHealth(): { state: string; reason?: string; last?: unknown; lastFailure?: unknown; backup?: unknown; hubJobs?: unknown } {
   if (weekly.state === 'misconfigured') return { state: 'misconfigured', reason: weekly.reason };
   if (weekly.state === 'off') return { state: 'off' };
-  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null, lastFailure: weeklyRunner?.lastFailure ?? null };
+  const b = backupConfig.state === 'ready' ? backup?.state() ?? { state: 'never' } : backupConfig.state === 'misconfigured' ? { state: 'misconfigured', reason: backupConfig.reason } : { state: 'off' };
+  return { state: weeklyRunner ? 'running' : 'starting', last: weeklyRunner?.last ?? null, lastFailure: weeklyRunner?.lastFailure ?? null, backup: b, hubJobs: Object.fromEntries(hubJobs?.last ?? []) };
 }

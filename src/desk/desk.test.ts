@@ -92,6 +92,10 @@ class FakeGitHub {
   async unresolvedThreads() {
     return this.threads;
   }
+  commitSubjects: string[] = [];
+  async recentCommitSubjects() {
+    return this.commitSubjects;
+  }
   async defaultBranch() {
     return 'main';
   }
@@ -347,10 +351,39 @@ describe('review fixes (Codex round 1)', () => {
     expect(queued).toEqual([`codex-review ${REPO} 5 low`]);
   });
 
-  it('reports a queue the last process left running, and Review again queues it', async () => {
+  it('records fallback merges in the ledger and flags a revert that names the PR', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    store.ledgerMerged({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', mergedSha: MERGED });
+    store.ledgerMerged({ repo: REPO, pr: 6, sha: NEXT, tier: 0, by: 'ci', mergedSha: MERGED });
+    const desk = makeDesk({}, store);
+    gh.commitSubjects = ['fix a thing (#9)', 'Revert "change the desk (#5)"'];
+    expect(await desk.checkLedgerOutcomes()).toEqual({ checked: 2, reverted: 1, read: 2 });
+    expect(desk.qwenLedger()).toMatchObject({ judged: 1, clean: 1, mergedByQwen: 1, mergedByCiOnly: 1, reverted: 1 });
+    // A checked row is not checked again, and a head with no ledger row changes nothing.
+    expect((await desk.checkLedgerOutcomes()).checked).toBe(1);
+  });
+
+  it('queues again after a restart interrupted the queue, without a report', async () => {
     gh.reviews = [];
     const store = new DeskStore(':memory:');
-    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true });
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 1, queuedAt: '2026-01-01T00:00:00Z' });
+    const desk = makeDesk({}, store);
+    await desk.recoverOrphans();
+    // The fallback clock restarts, so a long Codex run cut off by the restart is not read as Codex being out.
+    expect(Date.now() - Date.parse(store.get(REPO, 5).queuedAt!)).toBeLessThan(10_000);
+    expect(gh.comments).toEqual([]);
+    expect(dms).toEqual([]);
+    await desk.poll();
+    await settle(desk);
+    expect(queued).toHaveLength(1);
+    expect(store.get(REPO, 5).queueTries).toBe(2);
+  });
+
+  it('reports a queue the last process left running after three calls, and Review again queues it', async () => {
+    gh.reviews = [];
+    const store = new DeskStore(':memory:');
+    store.update(REPO, 5, { queuedSha: HEAD, queueRunning: true, queueTries: 3 });
     const desk = makeDesk({}, store);
     await desk.recoverOrphans();
     expect(gh.comments[0]).toContain('pete-bot restarted while it ran');
@@ -416,7 +449,7 @@ describe('review fixes (Codex round 2)', () => {
     const desk = makeDesk({}, store);
     await desk.poll();
     // A push queued the next head while the first job still ran.
-    store.update(REPO, 5, { queuedSha: NEXT, queueRunning: true });
+    store.update(REPO, 5, { queuedSha: NEXT, queueRunning: true, queueTries: 3 });
     await settle(desk);
     expect(store.get(REPO, 5)).toMatchObject({ queuedSha: NEXT, queueRunning: true });
     expect(gh.comments).toEqual([]);

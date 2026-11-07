@@ -66,6 +66,8 @@ export interface ReportsEnv {
   PLANE_WORKSPACE?: string;
   PLANE_PROJECT_ID?: string;
   PLANE_API_KEY?: string;
+  /** The MED board's project id. Empty leaves the MED part of the Plane report unread. */
+  PLANE_MED_PROJECT_ID?: string;
 }
 
 const NUMERIC_ID = /^[1-9][0-9]{0,15}$/;

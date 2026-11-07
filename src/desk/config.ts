@@ -39,6 +39,8 @@ export interface DeskSettings {
   classifierRepo: string;
   classifierPath: string;
   python: string;
+  /** Codex-out fallback (PET-751). Null keeps the Codex-only gate. */
+  fallback?: { afterMs: number; qwen: import('./qwen.js').QwenSettings } | null;
   codex: {
     target: string;
     keyPath: string;
@@ -70,6 +72,9 @@ export interface DeskEnv {
   DESK_CODEX_SSH_KEY?: string;
   DESK_CODEX_KNOWN_HOSTS?: string;
   DESK_CODEX_TIMEOUT_MS?: string;
+  DESK_QWEN_URL?: string;
+  DESK_QWEN_MODEL?: string;
+  DESK_FALLBACK_AFTER_MS?: string;
 }
 
 /** The names codex-review-gate on codex-248 accepts. A wider name never reaches ssh. */
@@ -149,6 +154,22 @@ export function loadDeskSettings(
   const timeoutMs = int(env.DESK_CODEX_TIMEOUT_MS, 90 * 60_000, 60_000);
   if (typeof timeoutMs === 'string') return bad(`DESK_CODEX_TIMEOUT_MS ${timeoutMs}`);
 
+  // The fallback is off until DESK_QWEN_URL names an Ollama server.
+  let fallback: DeskSettings['fallback'] = null;
+  const qwenUrl = (env.DESK_QWEN_URL ?? '').trim().replace(/\/$/, '');
+  if (qwenUrl) {
+    if (!/^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(qwenUrl)) return bad('DESK_QWEN_URL must be http(s)://host[:port]');
+    const afterMs = int(env.DESK_FALLBACK_AFTER_MS, 2 * 3_600_000, 600_000);
+    if (typeof afterMs === 'string') return bad(`DESK_FALLBACK_AFTER_MS ${afterMs}`);
+    // numCtx matches lab-agent's 8192, so both share the one qwen3:8b runner on the 3060 Ti. A larger
+    // context makes Ollama reload the model and add KV cache that 8 GB of VRAM may not hold.
+    // 12,000 characters of diff is about 4,000 tokens, which leaves room for the prompt and the answer.
+    fallback = {
+      afterMs,
+      qwen: { url: qwenUrl, model: (env.DESK_QWEN_MODEL ?? '').trim() || 'qwen3:8b', numCtx: 8192, maxDiffChars: 12_000, timeoutMs: 5 * 60_000 },
+    };
+  }
+
   return {
     state: 'ready',
     settings: {
@@ -165,6 +186,7 @@ export function loadDeskSettings(
       classifierRepo: (env.DESK_CLASSIFIER_REPO ?? '').trim() || 'petedio-iac',
       classifierPath: (env.DESK_CLASSIFIER_PATH ?? '').trim() || 'scripts/pr-blast-radius.py',
       python: (env.DESK_PYTHON ?? '').trim() || 'python3',
+      fallback,
       codex: { target: codexTarget, keyPath: codexKey, knownHostsPath: knownHosts, timeoutMs },
     },
   };
