@@ -67,6 +67,19 @@ export interface DeskStatus {
   merged: number;
 }
 
+export interface QwenLedger {
+  judged: number;
+  clean: number;
+  block: number;
+  unreadable: number;
+  tooLarge: number;
+  mergedByQwen: number;
+  mergedByCiOnly: number;
+  reverted: number;
+  since: string | null;
+  recent: { repo: string; pr: number; by: string; verdict: string; merged: boolean; outcome: string | null; at: string }[];
+}
+
 export const BUTTON_PREFIX = 'desk';
 
 export function buttonId(action: 'merge' | 'again', repo: string, n: number, sha: string): string {
@@ -293,6 +306,11 @@ export class MergeDesk {
           }
         }
       }
+      const o = !this.deps.store.ledger().some((r) => r.mergedAt && r.outcome === null) ? null : await this.checkLedgerOutcomes().catch((err) => {
+        errors.push(`ledger outcomes: ${String(err)}`);
+        return null;
+      });
+      if (o) this.deps.log.info(`merge desk: checked ${o.checked} fallback merges against ${o.read} commit subjects; ${o.reverted} reverted`);
     } finally {
       this.polling = false;
       this.state.lastPollAt = new Date().toISOString();
@@ -445,6 +463,51 @@ export class MergeDesk {
     }
   }
 
+  /**
+   * Flags a fallback merge that a later commit reverted. It reads the newest 100 commit
+   * subjects on the default branch of each repo that has an unchecked fallback merge, and says
+   * how many it read, so an empty read cannot pass for "nothing reverted".
+   */
+  async checkLedgerOutcomes(): Promise<{ checked: number; reverted: number; read: number }> {
+    const { store, github } = this.deps;
+    const open = store.ledger().filter((r) => r.mergedAt && r.outcome === null);
+    let reverted = 0;
+    let read = 0;
+    const subjects = new Map<string, string[]>();
+    for (const row of open) {
+      if (!subjects.has(row.repo)) {
+        subjects.set(row.repo, await github.recentCommitSubjects(row.repo, await this.defaultBranch(row.repo)));
+        read += subjects.get(row.repo)!.length;
+      }
+      const hit = subjects.get(row.repo)!.some((m) => /^Revert\b/i.test(m) && m.includes(`(#${row.pr})`));
+      if (hit) {
+        store.ledgerOutcome(row.id, 'reverted');
+        reverted++;
+      }
+    }
+    return { checked: open.length, reverted, read };
+  }
+
+  /** What the Insight tab shows about the fallback: every count says what it covers. */
+  qwenLedger(): QwenLedger {
+    const rows = this.deps.store.ledger();
+    const qwen = rows.filter((r) => r.by === 'qwen');
+    const count = (v: string) => qwen.filter((r) => r.verdict === v).length;
+    const merged = rows.filter((r) => r.mergedAt);
+    return {
+      judged: qwen.length,
+      clean: count('clean'),
+      block: count('block'),
+      unreadable: count('unreadable'),
+      tooLarge: count('too-large'),
+      mergedByQwen: merged.filter((r) => r.by === 'qwen').length,
+      mergedByCiOnly: merged.filter((r) => r.by === 'ci').length,
+      reverted: merged.filter((r) => r.outcome === 'reverted').length,
+      since: rows.length ? rows[rows.length - 1]!.judgedAt : null,
+      recent: rows.slice(0, 10).map((r) => ({ repo: r.repo, pr: r.pr, by: r.by, verdict: r.verdict, merged: !!r.mergedAt, outcome: r.outcome, at: r.judgedAt })),
+    };
+  }
+
   /** Runs the Qwen pass on one head, records the word, comments, and decides again. */
   private async runQwen(repo: string, n: number, sha: string, title: string): Promise<void> {
     const { store, github, qwen } = this.deps;
@@ -458,6 +521,7 @@ export class MergeDesk {
     // A push while it ran makes this verdict about an old head. Keep it, but it never matches the new SHA.
     const tries = (store.get(repo, n).qwen?.sha === sha ? store.get(repo, n).qwen?.tries ?? 0 : 0) + 1;
     store.update(repo, n, { qwen: { sha, verdict, at: new Date().toISOString(), tries } });
+    store.ledgerJudge({ repo, pr: n, sha, tier: 1, by: 'qwen', verdict });
     // The verdict is saved first: a failed comment must not lose it or skip the decision.
     await this.report(repo, n, {
       comment: `Merge desk: Codex is out, so a local Qwen review read \`${short(sha)}\` and answered **${verdict}**. ${verdict === 'clean' ? 'Checks and the other gates still decide the merge.' : verdict === 'unreadable' && tries < 3 ? 'The desk tries again in about ten minutes.' : 'The PR waits for a push or a person.'}`,
@@ -551,6 +615,7 @@ export class MergeDesk {
     }
     const where = landed ? `on \`${f.defaultBranch}\`` : `but I could not confirm it is on \`${f.defaultBranch}\``;
     store.update(repo, n, { mergedSha: result.sha });
+    if (by !== 'codex') store.ledgerMerged({ repo, pr: n, sha, tier: f.classification.tier, by, mergedSha: result.sha });
     this.state.merged++;
     await this.report(repo, n, {
       comment: `Merge desk: merged as \`${short(result.sha)}\` ${where} (${how}; ${evidence}).`,

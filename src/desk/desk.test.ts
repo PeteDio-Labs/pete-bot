@@ -92,6 +92,10 @@ class FakeGitHub {
   async unresolvedThreads() {
     return this.threads;
   }
+  commitSubjects: string[] = [];
+  async recentCommitSubjects() {
+    return this.commitSubjects;
+  }
   async defaultBranch() {
     return 'main';
   }
@@ -345,6 +349,19 @@ describe('review fixes (Codex round 1)', () => {
     expect(await desk.tap(dms[0]!.buttons![0]!.customId)).toBe('Queued one more Codex round.');
     await settle(desk);
     expect(queued).toEqual([`codex-review ${REPO} 5 low`]);
+  });
+
+  it('records fallback merges in the ledger and flags a revert that names the PR', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    store.ledgerMerged({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', mergedSha: MERGED });
+    store.ledgerMerged({ repo: REPO, pr: 6, sha: NEXT, tier: 0, by: 'ci', mergedSha: MERGED });
+    const desk = makeDesk({}, store);
+    gh.commitSubjects = ['fix a thing (#9)', 'Revert "change the desk (#5)"'];
+    expect(await desk.checkLedgerOutcomes()).toEqual({ checked: 2, reverted: 1, read: 2 });
+    expect(desk.qwenLedger()).toMatchObject({ judged: 1, clean: 1, mergedByQwen: 1, mergedByCiOnly: 1, reverted: 1 });
+    // A checked row is not checked again, and a head with no ledger row changes nothing.
+    expect((await desk.checkLedgerOutcomes()).checked).toBe(1);
   });
 
   it('queues again after a restart interrupted the queue, without a report', async () => {

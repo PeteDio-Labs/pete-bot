@@ -85,6 +85,8 @@ export interface InsightInput {
   /** Stored Plane records, newest first. */
   planeHistory: HubRecord[];
   med: { ok: boolean; reason?: string };
+  /** The merge desk's Qwen ledger (PET-751). Null when the desk is off or not running here. */
+  qwen?: import('../desk/desk.js').QwenLedger | null;
 }
 
 const planeUrl = (seq: number): string => `${PLANE_BROWSE}/PET-${seq}/`;
@@ -314,6 +316,7 @@ export function insightRecord(i: InsightInput): HubRecord {
       weeks: i.weeks.length,
     },
     stuckAfterDays: STUCK_DAYS,
+    qwen: i.qwen ?? null,
     headlines,
     needsYou: needs.slice(0, LIST_CAP),
     needsYouTotal: needs.length,

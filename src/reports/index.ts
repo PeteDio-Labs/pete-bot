@@ -16,6 +16,7 @@ import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
 import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
 import { PLANE_KIND, planeRecord } from './hubPlane.js';
 import { HubJobs } from './hubJobs.js';
+import { getDesk } from '../desk/index.js';
 import { INSIGHT_KIND, insightRecord } from './hubInsight.js';
 import { collectGithub } from './collect.js';
 import { readKuma } from '../lab/tools/kuma.js';
@@ -164,6 +165,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
           weeks: store.all().weeks,
           cve: hub!.list(CVE_KIND).records,
           planeHistory: hub!.list(PLANE_KIND).records,
+          qwen: getDesk()?.qwenLedger() ?? null,
           med: med ? (med.ok ? { ok: true } : { ok: false, reason: med.error.slice(0, 120) }) : { ok: false, reason: 'no MED project id is set on this host (PLANE_MED_PROJECT_ID)' },
         });
       },

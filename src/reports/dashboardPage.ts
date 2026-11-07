@@ -358,6 +358,12 @@ RENDER.insight=function(box,r){var rd=r.read||{},gh=rd.github||{},pl=rd.plane||{
   if(total>rows.length)box.appendChild(el('p','and '+(total-rows.length)+' more',{class:'hint'}))}
  list('Needs you',r.needsYou||[],r.needsYouTotal||0,'Nothing is waiting on you in the sources read.');
  list('Stuck or failing',r.stuck||[],r.stuckTotal||0,'No PR is failing and nothing has sat '+r.stuckAfterDays+'+ days in the sources read.');
+ var q=r.qwen;box.appendChild(el('h3','Qwen as reviewer'));
+ if(!q)box.appendChild(el('p','The merge desk is not reporting here, so the Qwen record is missing.',{class:'warn'}));
+ else if(!q.judged&&!q.mergedByCiOnly)box.appendChild(el('p','No head has fallen back to Qwen yet. Codex has reviewed everything the desk saw.',{class:'mute'}));
+ else{box.appendChild(el('p',q.judged+' heads judged since '+(q.since?q.since.slice(0,10):'the start')+': '+q.clean+' clean, '+q.block+' block, '+q.unreadable+' unreadable, '+q.tooLarge+' too large. Merged on Qwen: '+q.mergedByQwen+'. Merged on CI alone (tier 0): '+q.mergedByCiOnly+'. Reverted afterwards: '+q.reverted+'.',{class:q.reverted?'warn':'mute'}));
+  box.appendChild(rtable(['PR','Lane','Verdict','Merged','Outcome'],(q.recent||[]).map(function(x){return[x.repo+'#'+x.pr,x.by,x.verdict,x.merged?'yes':'no',x.outcome||'none seen']})));
+  box.appendChild(el('p','Outcome checks read the newest 100 commits on each repo for a revert that names the PR. They find reverts only. A bug fixed by a later commit is not seen.',{class:'hint'}))}
  box.appendChild(el('h3','Broke or drifted'));
  if(!(r.broke||[]).length)box.appendChild(el('p','Nothing down or exploited in the sources read.',{class:'mute'}));
  else box.appendChild(rtable(['What','Detail'],r.broke.map(function(b){return[b.what,b.detail]})));
