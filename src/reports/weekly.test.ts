@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { GithubReads } from './collect.js';
 import { createDashboardApp } from './dashboard.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
-import { buildWeek, cleanSummary, dueWeeks, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekRecord } from './weekly.js';
+import { buildWeek, cleanSummary, dueWeeks, lintSummary, needsRebuild, ollamaSummarizer, WeekStore, WeeklyRunner, type WeekRecord } from './weekly.js';
 import { loadWeeklySettings } from './weeklySettings.js';
 
 const pr = (n: number, merged: string | null, extra: Record<string, unknown> = {}) => ({
@@ -81,6 +81,20 @@ describe('summaries', () => {
   it('fails on a non-200', async () => {
     const f = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
     await expect(ollamaSummarizer('http://x', 'm', f)([], WEEK)).rejects.toThrow('HTTP 500');
+  });
+});
+
+describe('lintSummary', () => {
+  const prs = [{ repo: 'pete-bot', number: 1, title: 'PET-860 add lab_overview', url: '', author: 'x', mergedAt: '', petKeys: [] }];
+  it('passes a grounded two-sentence summary', () => {
+    expect(lintSummary('The week added lab_overview in pete-bot (PET-860). It was small.', prs)).toEqual([]);
+  });
+  it('flags an invented PET key or repo, markdown and a wrong length', () => {
+    const flags = lintSummary('- Shipped PET-999 in petedio-iac', prs).join('|');
+    expect(flags).toContain('PET-999');
+    expect(flags).toContain('petedio-iac');
+    expect(flags).toContain('markdown');
+    expect(flags).toContain('1 sentences');
   });
 });
 

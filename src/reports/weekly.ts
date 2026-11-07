@@ -153,6 +153,26 @@ export function ollamaSummarizer(baseUrl: string, model = WEEKLY_MODEL, fetchImp
   };
 }
 
+/**
+ * Checks a summary against the PRs it was written from (PET-868 sample batch). Returns the
+ * problems found, empty when none. It flags what the prompt forbids: a PET key or repo that no
+ * PR title or repo carries (an invented detail), markdown, and a length outside two or three
+ * sentences.
+ */
+export function lintSummary(text: string, prs: WeekPr[]): string[] {
+  const out: string[] = [];
+  const keys = new Set(prs.flatMap((p) => [...p.title.matchAll(/PET-(\d+)/gi)].map((m) => m[1]!)));
+  for (const m of text.matchAll(/PET-(\d+)/gi)) if (!keys.has(m[1]!)) out.push(`names PET-${m[1]}, which no PR title carries`);
+  const repos = new Set(prs.map((p) => p.repo.toLowerCase()));
+  for (const m of text.matchAll(/\b(pete-bot|petedio-[a-z-]+|pdlabs-portfolio|skills)\b/gi)) {
+    if (!repos.has(m[1]!.toLowerCase())) out.push(`names repo ${m[1]}, which had no merged PR`);
+  }
+  if (/^\s*[-*#]|\*\*|`/m.test(text)) out.push('uses markdown');
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+  if (sentences < 2 || sentences > 3) out.push(`has ${sentences} sentences, not two or three`);
+  return [...new Set(out)];
+}
+
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export class WeekStore {
