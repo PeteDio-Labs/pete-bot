@@ -35,15 +35,39 @@ td,th{text-align:left;padding:6px 8px;border-top:1px solid var(--line);vertical-
 th{font-size:12px;color:var(--mute);border-top:0}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 #focus{margin:6px 0 0}
+#recBody{margin-top:12px}
 nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
 nav button{font:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 12px;cursor:pointer}
 nav button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:6px 0 0;font-size:14px}dt{color:var(--mute)}dd{margin:0;overflow-wrap:anywhere}
+@media (max-width:640px){
+main{padding:12px}
+h1{font-size:18px;margin:4px 0 10px}
+.card{padding:12px;margin-bottom:10px}
+.big{font-size:32px}
+nav{flex-wrap:nowrap;overflow-x:auto;position:sticky;top:0;z-index:2;background:var(--bg);padding:6px 0;margin:0 -12px 10px;padding-left:12px;padding-right:12px;-webkit-overflow-scrolling:touch}
+nav button{flex:none;min-height:40px;padding:6px 14px}
+select,input{width:100%;min-height:40px;font-size:16px}
+label.mute{display:block;width:100%}
+button.chip{min-height:34px;padding:5px 12px}
+.bar span:first-child{width:96px}
+#trend{height:64px}
+table.rt thead,table.rt tr:has(th){display:none}
+table.rt,table.rt tbody{display:block}
+table.rt tr{display:block;padding:8px 0;border-top:1px solid var(--line)}
+table.rt td{display:flex;justify-content:space-between;gap:12px;border:0;padding:2px 0;overflow-wrap:anywhere}
+table.rt td::before{content:attr(data-label);flex:none;color:var(--mute);font-size:12px;padding-top:2px}
+table.rt td>a,table.rt td{text-align:right}
+table.rt td[data-label=Title]{display:block;text-align:left;font-weight:600;padding:3px 0}
+table.rt td[data-label=Title]::before{display:none}
+dl{grid-template-columns:1fr}
+dd{margin-bottom:6px}
+}
 </style>
 </head>
 <body>
 <main>
-<h1>Weekly PRs</h1>
+<h1>Reports</h1>
 <nav id="tabs" role="tablist" hidden></nav>
 <div id="status" class="card mute">Loading…</div>
 <div id="view" hidden>
@@ -63,7 +87,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:6px 0 
   </div>
   <div class="card">
     <div class="row" style="margin-bottom:8px"><input id="q" type="search" placeholder="Filter by title or PET key" aria-label="Filter PRs"><div id="chips" class="row" style="gap:6px"></div></div>
-    <table><thead><tr><th>PR</th><th>Title</th><th>Author</th><th>Merged</th></tr></thead><tbody id="rows"></tbody></table>
+    <table class="rt"><thead><tr><th>PR</th><th>Title</th><th>Author</th><th>Merged</th></tr></thead><tbody id="rows"></tbody></table>
   </div>
 </div>
 <div id="kindview" hidden>
@@ -97,10 +121,10 @@ function render(){
   if(repoFilter&&p.repo!==repoFilter)return;
   var hay=(p.title+' '+p.repo+' '+p.author+' '+p.petKeys.map(function(k){return'pet-'+k}).join(' ')).toLowerCase();
   if(q&&hay.indexOf(q)<0)return;shown++;
-  var tr=el('tr'),u=safeUrl(p.url),td=el('td');
+  var tr=el('tr'),u=safeUrl(p.url),td=el('td',null,{'data-label':'PR'});
   if(u){var a=el('a',p.repo+'#'+p.number,{href:u,rel:'noopener noreferrer'});td.appendChild(a)}else td.textContent=p.repo+'#'+p.number;
-  tr.appendChild(td);tr.appendChild(el('td',p.title));tr.appendChild(el('td',p.author));
-  tr.appendChild(el('td',new Date(p.mergedAt).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})));tb.appendChild(tr)});
+  tr.appendChild(td);tr.appendChild(el('td',p.title,{'data-label':'Title'}));tr.appendChild(el('td',p.author,{'data-label':'Author'}));
+  tr.appendChild(el('td',new Date(p.mergedAt).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}),{'data-label':'Merged'}));tb.appendChild(tr)});
  if(!shown){var r=el('tr'),t=el('td',w.merged.length?'No PR matches the filter.':'No merged PRs recorded for this week.',{colspan:'4',class:'mute'});r.appendChild(t);tb.appendChild(r)}
  var tr=$('trend');clear(tr);var rev=data.slice().reverse(),max=Math.max.apply(null,rev.map(function(x){return x.total}).concat([1]));
  rev.forEach(function(x){var b=el('button',null,{title:fmtWeek(x.week)+': '+x.total+' merged','aria-label':fmtWeek(x.week)+': '+x.total+' merged'});b.style.height=Math.max(4,Math.round(x.total/max*100))+'%';if(x.week===w.week)b.setAttribute('aria-current','true');b.onclick=function(){select(x.week)};tr.appendChild(b)})}
@@ -112,22 +136,20 @@ var title=function(k){return k==='weekly'?'Weekly PRs':(TITLES[k]||k)};
 function plain(v){if(v==null)return'none';if(typeof v==='object')return JSON.stringify(v);return String(v)}
 function recDefault(box,rec){var dl=el('dl');Object.keys(rec).forEach(function(k){dl.appendChild(el('dt',k));dl.appendChild(el('dd',plain(rec[k])))});box.appendChild(dl)}
 var RENDER={};
+function rtable(heads,rows){var t=el('table',null,{class:'rt'}),h=el('tr');heads.forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
+ rows.forEach(function(r){var tr=el('tr');r.forEach(function(x,i){tr.appendChild(el('td',x,{'data-label':heads[i]}))});t.appendChild(tr)});return t}
 RENDER.cve=function(box,r){var e=r.examined||{},un=e.hostsUnread||[],gaps=r.gaps||[];
  box.appendChild(el('div',String(r.findings),{class:'big'}));
  box.appendChild(el('div','findings: '+r.actionable+' actionable, '+r.exploited+' exploited, by severity '+Object.keys(r.bySeverity||{}).map(function(k){return k+' '+r.bySeverity[k]}).join(', '),{class:'mute'}));
  box.appendChild(el('p','Examined '+e.hostsRead+' host(s)'+(un.length?'; not read: '+un.join(', '):'')+', '+e.queries+' package queries, '+e.advisoriesFetched+' of '+e.advisories+' advisories, '+(e.kevEntries==null?'CISA list not read':e.kevEntries+' CISA entries')+', inventory '+e.snapshotAgeHours+' h old, '+e.images+' container image(s) listed, not matched.',{class:'mute'}));
  if(!r.complete||gaps.length)box.appendChild(el('p',(r.complete?'Notes: ':'Incomplete: ')+gaps.join(' '),{class:'warn'}));
- var t=el('table'),h=el('tr');['Package','Installed','Fixed','Severity','Hosts','CVE'].forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
- (r.top||[]).forEach(function(f){var tr=el('tr');[f.package,f.installed,f.fixed||'no fix',f.severity+(f.kev?' · exploited':''),(f.hosts||[]).join(', '),f.cve||''].forEach(function(x){tr.appendChild(el('td',x))});t.appendChild(tr)});
- if((r.top||[]).length)box.appendChild(t)};
+ if((r.top||[]).length)box.appendChild(rtable(['Package','Installed','Fixed','Severity','Hosts','CVE'],r.top.map(function(f){return[f.package,f.installed,f.fixed||'no fix',f.severity+(f.kev?' · exploited':''),(f.hosts||[]).join(', '),f.cve||'']})))};
 RENDER.cycle=function(box,r){var c=r.cycle;
  if(!c){box.appendChild(el('p','No cycle: '+(r.reason||'none found')+'.',{class:'warn'}));return}
  box.appendChild(el('div',c.name,{class:'mute'}));box.appendChild(el('div',r.done+' / '+r.total,{class:'big'}));
  box.appendChild(el('div','done · '+r.open+' open, '+r.inProgress+' in progress, '+r.needsPedro+' need Pedro · '+c.start+' to '+c.end,{class:'mute'}));
  var br=r.byRoute||{};box.appendChild(el('p',['pedro','ai','other'].map(function(k){var t=br[k]||{total:0,done:0};return k+' '+t.done+'/'+t.total}).join(' · ')+(r.lost?' · '+r.lost+' cycle item(s) not on the board read':''),{class:'mute'}));
- var t=el('table'),h=el('tr');['Item','Title','State','Labels'].forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
- (r.openItems||[]).forEach(function(i){var tr=el('tr');['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')].forEach(function(x){tr.appendChild(el('td',x))});t.appendChild(tr)});
- if((r.openItems||[]).length)box.appendChild(t)};
+ if((r.openItems||[]).length)box.appendChild(rtable(['Item','Title','State','Labels'],r.openItems.map(function(i){return['PET-'+i.seq,i.name,i.state,(i.labels||[]).join(', ')]})))};
 function showRec(kind,id){var box=$('recBody');clear(box);var rec=(kindData[kind]||[]).filter(function(r){return r.id===id})[0];if(!rec){box.appendChild(el('p','No record.',{class:'mute'}));return}
  (RENDER[kind]||recDefault)(box,rec)}
 function showKind(kind,bad){var sel=$('recSel');clear(sel);var rs=kindData[kind]||[];
