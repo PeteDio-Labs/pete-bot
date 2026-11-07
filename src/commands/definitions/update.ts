@@ -15,6 +15,7 @@ const LABELS: Record<UpdateTarget, string> = {
   sonarr: 'Sonarr',
   radarr: 'Radarr',
   prowlarr: 'Prowlarr',
+  bazarr: 'Bazarr (version only)',
   arr: 'Sonarr, Radarr and Prowlarr',
   'plex-and-arr': 'Plex and the *arr apps',
 };

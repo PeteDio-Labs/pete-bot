@@ -16,7 +16,7 @@
 import { config } from '../config.js';
 
 /** Mirrors the workflow's `target` choice input. Keep the two in step. */
-export const UPDATE_TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'arr', 'plex-and-arr'] as const;
+export const UPDATE_TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'bazarr', 'arr', 'plex-and-arr'] as const;
 export type UpdateTarget = (typeof UPDATE_TARGETS)[number];
 export type UpdateMode = 'check' | 'apply';
 

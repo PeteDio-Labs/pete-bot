@@ -303,7 +303,7 @@ Bun 1.4.2 or later is required.
 and shows the report the run printed. The run mints its own narrow Vault role and runs
 Ansible from a homelab runner.
 
-Targets are `plex`, `sonarr`, `radarr`, `prowlarr`, `arr` (all three), and `plex-and-arr`,
+Targets are `plex`, `sonarr`, `radarr`, `prowlarr`, `bazarr`, `arr` (all three), and `plex-and-arr`,
 the default for `check`. Each result says how the run ended: green when nothing is left to
 do, yellow for an available update or a service that skipped itself, and red for a failure.
 A run that never appears, or is still going after 30 minutes, says so. Past Discord's
