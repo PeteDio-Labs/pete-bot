@@ -35,11 +35,16 @@ td,th{text-align:left;padding:6px 8px;border-top:1px solid var(--line);vertical-
 th{font-size:12px;color:var(--mute);border-top:0}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 #focus{margin:6px 0 0}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+nav button{font:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 12px;cursor:pointer}
+nav button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:6px 0 0;font-size:14px}dt{color:var(--mute)}dd{margin:0;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
 <main>
 <h1>Weekly PRs</h1>
+<nav id="tabs" role="tablist" hidden></nav>
 <div id="status" class="card mute">Loading…</div>
 <div id="view" hidden>
   <div class="card">
@@ -62,6 +67,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div class="row" style="margin-bottom:8px"><input id="q" type="search" placeholder="Filter by title or PET key" aria-label="Filter PRs"><div id="chips" class="row" style="gap:6px"></div></div>
     <table><thead><tr><th>PR</th><th>Title</th><th>Author</th><th>Merged</th></tr></thead><tbody id="rows"></tbody></table>
   </div>
+</div>
+<div id="kindview" hidden>
+  <div class="card"><div class="row"><label class="mute">Report <select id="recSel"></select></label></div><div id="recBody"></div></div>
 </div>
 </main>
 <script>
@@ -101,10 +109,37 @@ function render(){
  var tr=$('trend');clear(tr);var rev=data.slice().reverse(),max=Math.max.apply(null,rev.map(function(x){return x.total}).concat([1]));
  rev.forEach(function(x){var b=el('button',null,{title:fmtWeek(x.week)+': '+x.total+' merged','aria-label':fmtWeek(x.week)+': '+x.total+' merged'});b.style.height=Math.max(4,Math.round(x.total/max*100))+'%';if(x.week===w.week)b.setAttribute('aria-current','true');b.onclick=function(){select(x.week)};tr.appendChild(b)})}
 function select(week){cur=data.filter(function(x){return x.week===week})[0];repoFilter=null;$('weekSel').value=week;render()}
+
+var kinds=[],tab='weekly',kindData={},seq=0;
+var TITLES={cve:'Daily CVE',cycle:'Plane cycle'};
+var title=function(k){return k==='weekly'?'Weekly PRs':(TITLES[k]||k)};
+function plain(v){if(v==null)return'none';if(typeof v==='object')return JSON.stringify(v);return String(v)}
+function recDefault(box,rec){var dl=el('dl');Object.keys(rec).forEach(function(k){dl.appendChild(el('dt',k));dl.appendChild(el('dd',plain(rec[k])))});box.appendChild(dl)}
+var RENDER={};
+function showRec(kind,id){var box=$('recBody');clear(box);var rec=(kindData[kind]||[]).filter(function(r){return r.id===id})[0];if(!rec){box.appendChild(el('p','No record.',{class:'mute'}));return}
+ (RENDER[kind]||recDefault)(box,rec)}
+function showKind(kind,bad){var sel=$('recSel');clear(sel);var rs=kindData[kind]||[];
+ if(!rs.length){clear($('recBody'));$('recBody').appendChild(el('p','No report of this kind has been stored yet.',{class:'mute'}))}
+ if(bad.length)$('recBody').appendChild(el('p','Could not read: '+bad.join(', ')+'.',{class:'warn'}));
+ if(!rs.length)return
+ rs.forEach(function(r){var o=el('option',r.id);o.value=r.id;sel.appendChild(o)});
+ sel.onchange=function(){showRec(kind,sel.value);if(bad.length)$('recBody').appendChild(el('p','Could not read: '+bad.join(', ')+'.',{class:'warn'}))};showRec(kind,rs[0].id);if(bad.length)$('recBody').appendChild(el('p','Could not read: '+bad.join(', ')+'.',{class:'warn'}))}
+function pick(k){tab=k;
+ Array.prototype.forEach.call($('tabs').children,function(b){b.setAttribute('aria-selected',String(b.getAttribute('data-kind')===k))});
+ $('view').hidden=(k!=='weekly'||!data.length);$('kindview').hidden=(k==='weekly');$('status').style.display=(k==='weekly'?'':'none');
+ if(k==='weekly')return;
+ var mine=++seq;
+ fetch('api/reports/'+encodeURIComponent(k),{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(j){if(mine!==seq)return;kindData[k]=(j.records||[]).filter(function(r){return r&&typeof r.id==='string'});showKind(k,j.unreadable||[])})
+ .catch(function(e){if(mine!==seq)return;var b=$('recBody');clear(b);b.appendChild(el('p','Could not load this report: '+e.message,{class:'warn'}))})}
+function tabs(){var n=$('tabs');clear(n);
+ ['weekly'].concat(kinds.map(function(x){return x.kind})).forEach(function(k){var b=el('button',title(k),{role:'tab','data-kind':k,'aria-selected':String(k===tab)});b.onclick=function(){pick(k)};n.appendChild(b)});
+ n.hidden=kinds.length===0}
+function loadKinds(){fetch('api/reports',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{kinds:[]}}).then(function(j){kinds=j.kinds||[];tabs()}).catch(function(){})}
 fetch('api/weeks',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(j){
  data=j.weeks||[];var s=$('status');
  if(j.unreadable&&j.unreadable.length){s.textContent='Could not read: '+j.unreadable.join(', ')+'. ';s.className='card warn'}
- if(!data.length){s.textContent=(s.textContent||'')+'No weekly report has run yet. The first one is written on a Sunday evening.';return}
+ loadKinds();
+ if(!data.length){s.textContent=((j.unreadable&&j.unreadable.length)?s.textContent:'')+'No weekly report has run yet. The first one is written on a Sunday evening.';return}
  if(!(j.unreadable&&j.unreadable.length))s.hidden=true;
  var sel=$('weekSel');data.forEach(function(x){var o=el('option',fmtWeek(x.week)+' · '+x.total);o.value=x.week;sel.appendChild(o)});
  sel.onchange=function(){select(sel.value)};$('q').oninput=function(){render()};
