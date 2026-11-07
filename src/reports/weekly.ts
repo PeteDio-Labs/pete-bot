@@ -256,17 +256,23 @@ export class WeekStore {
 // ── Schedule ──────────────────────────────────────────────────────────────────
 
 /**
- * The weeks to build now. The week that holds `at` is due from Sunday 22:30 Eastern. The
- * previous week is due when it has no file, which covers a week lost to an outage, and again
- * when `stale` says its file is partial (see `needsRebuild`). Only the previous week is
- * repaired: an outage longer than a week leaves the older gap, and the dashboard shows it.
+ * The weeks to build now. The week that holds `at` is due from Sunday 22:30 Eastern. Every
+ * finished week since FIRST_WEEK is due when it has no file, which covers a week lost to an
+ * outage. The previous week is built again when `stale` says its file is partial (see
+ * `needsRebuild`); an older partial week stays as stored.
  */
 export function dueWeeks(at: Date, has: (week: string) => boolean, stale: (week: string) => boolean = () => false): string[] {
   const t = localTime(at);
   const current = weekStart(at);
   const due: string[] = [];
+  // Every finished week from FIRST_WEEK on, oldest first: a week lost to an outage is built
+  // when the bot is next up, and a first deploy fills the weeks before it.
   const previous = addDays(current, -7);
-  if (previous >= FIRST_WEEK && (!has(previous) || stale(previous))) due.push(previous);
+  for (let w = FIRST_WEEK; w < current; w = addDays(w, 7)) {
+    // Only the previous week is repaired when partial: an older week with a repo that never
+    // reads would otherwise cost a full GitHub read every hour for good.
+    if (!has(w) || (w === previous && stale(w))) due.push(w);
+  }
   if (t.weekday === WEEKLY_SLOT.weekday && t.minutes >= WEEKLY_SLOT.minutes && !has(current)) due.push(current);
   return due;
 }
@@ -288,7 +294,7 @@ export function needsRebuild(rec: WeekRecord, now: Date): boolean {
 }
 
 /** The first week the report exists for. Earlier weeks are not back-filled. */
-export const FIRST_WEEK = '2026-11-02';
+export const FIRST_WEEK = '2026-10-19';
 
 export interface WeeklyDeps {
   gh: GithubReads;
