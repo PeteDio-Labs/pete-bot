@@ -299,6 +299,9 @@ export class MergeDesk {
   private async facts(repo: string, n: number): Promise<Facts> {
     const { github, settings, store } = this.deps;
     const pull = await github.getPull(repo, n);
+    // Memory saved before PET-751 has no queuedAt. Start the fallback clock when the desk first sees that.
+    const seen = store.get(repo, n);
+    if (seen.queuedSha && !seen.queuedAt) store.update(repo, n, { queuedAt: new Date().toISOString() });
     const [defaultBranch, files, reviews, checks, unresolvedThreads] = await Promise.all([
       this.defaultBranch(repo),
       github.listFiles(repo, n),
@@ -445,10 +448,12 @@ export class MergeDesk {
       this.deps.log.warn(`merge desk: Qwen review of ${repo}#${n} failed: ${String(err)}`);
     }
     // A push while it ran makes this verdict about an old head. Keep it, but it never matches the new SHA.
-    store.update(repo, n, { qwen: { sha, verdict, at: new Date().toISOString() } });
+    const tries = (store.get(repo, n).qwen?.sha === sha ? store.get(repo, n).qwen?.tries ?? 0 : 0) + 1;
+    store.update(repo, n, { qwen: { sha, verdict, at: new Date().toISOString(), tries } });
+    // The verdict is saved first: a failed comment must not lose it or skip the decision.
     await this.report(repo, n, {
-      comment: `Merge desk: Codex is out, so a local Qwen review read \`${short(sha)}\` and answered **${verdict}**. ${verdict === 'clean' ? 'Tier 1 merges on this and green checks.' : 'The PR waits for a push or a person.'}`,
-    });
+      comment: `Merge desk: Codex is out, so a local Qwen review read \`${short(sha)}\` and answered **${verdict}**. ${verdict === 'clean' ? 'Checks and the other gates still decide the merge.' : verdict === 'unreadable' && tries < 3 ? 'The desk tries again in about ten minutes.' : 'The PR waits for a push or a person.'}`,
+    }).catch((err) => this.deps.log.error(`merge desk: commenting the Qwen verdict on ${repo}#${n}: ${String(err)}`));
     if ((await github.getPull(repo, n)).headSha === sha) await this.evaluate(repo, n);
   }
 

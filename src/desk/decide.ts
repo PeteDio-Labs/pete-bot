@@ -41,10 +41,14 @@ export interface PrMemory {
   /** When the desk queued Codex for queuedSha (ISO). The fallback timer starts here. */
   queuedAt?: string;
   /** The local Qwen pass on one head (PET-751). Reset by any push, because it names its SHA. */
-  qwen?: { sha: string; verdict: QwenVerdict | 'running'; at: string };
+  qwen?: { sha: string; verdict: QwenVerdict | 'running'; at: string; tries?: number };
 }
 
 /** `clean` is the only verdict that lets a PR through. Every other value holds it. */
+export const FAILED_GRACE_MS = 30 * 60_000;
+/** Qwen passes the desk will run on one head after an unreadable answer. */
+export const QWEN_MAX_TRIES = 3;
+
 export type QwenVerdict = 'clean' | 'block' | 'unreadable' | 'too-large';
 
 /** How long a `running` Qwen pass counts before the desk assumes pete-bot restarted and runs it again. */
@@ -148,8 +152,10 @@ export function decide(f: Facts): Decision {
     } else if (fb === 'qwen') {
       const q = f.memory.qwen?.sha === sha ? f.memory.qwen : undefined;
       const now = f.now ?? Date.now();
-      const stale = q?.verdict === 'running' && now - (Date.parse(q.at) || 0) > QWEN_STALE_MS;
-      if (!q || stale) return { kind: 'qwen', sha };
+      const age = q ? now - (Date.parse(q.at) || 0) : 0;
+      // A pass stuck `running` after a restart, or an unreadable answer (a timeout, a 5xx), runs again.
+      const retry = q && age > QWEN_STALE_MS && (q.verdict === 'running' || (q.verdict === 'unreadable' && (q.tries ?? 1) < QWEN_MAX_TRIES));
+      if (!q || retry) return { kind: 'qwen', sha };
       if (q.verdict === 'running') return { kind: 'wait', reason: 'the Qwen review is running' };
       if (q.verdict !== 'clean') return { kind: 'wait', reason: `Qwen review: ${q.verdict}; push a fix or ask for a person` };
       by = 'qwen';
@@ -207,9 +213,11 @@ function fallbackFor(f: Facts, sha: string): 'qwen' | 'ci' | null {
   if (tier > 1) return null;
   const m = f.memory;
   const now = f.now ?? Date.now();
-  const failed = m.queueFailedSha === sha;
-  const silent = m.queuedSha === sha && !m.queueRunning && now - (Date.parse(m.queuedAt ?? '') || now) >= f.fallback.afterMs;
-  const timedOut = m.queuedSha === sha && m.queueRunning && now - (Date.parse(m.queuedAt ?? '') || now) >= f.fallback.afterMs;
-  if (!failed && !silent && !timedOut) return null;
+  // No queuedAt means no timer: the desk stamps it on the next read, so the clock starts then.
+  const waited = m.queuedSha === sha && m.queuedAt ? now - (Date.parse(m.queuedAt) || now) : 0;
+  // One failed queue call can be a network blip, so a failure counts only after a short grace.
+  const failed = m.queueFailedSha === sha && waited >= FAILED_GRACE_MS;
+  const silent = m.queuedSha === sha && waited >= f.fallback.afterMs;
+  if (!failed && !silent) return null;
   return tier === 0 ? 'ci' : 'qwen';
 }

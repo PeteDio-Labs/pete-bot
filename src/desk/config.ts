@@ -163,7 +163,7 @@ export function loadDeskSettings(
     if (typeof afterMs === 'string') return bad(`DESK_FALLBACK_AFTER_MS ${afterMs}`);
     fallback = {
       afterMs,
-      qwen: { url: qwenUrl, model: (env.DESK_QWEN_MODEL ?? '').trim() || 'qwen3:8b', numCtx: 16384, maxDiffChars: 24_000, timeoutMs: 5 * 60_000 },
+      qwen: { url: qwenUrl, model: (env.DESK_QWEN_MODEL ?? '').trim() || 'qwen3:8b', numCtx: 16384, maxDiffChars: 16_000, timeoutMs: 5 * 60_000 },
     };
   }
 

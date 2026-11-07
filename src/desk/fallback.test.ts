@@ -33,12 +33,26 @@ function facts(tier: 0 | 1 | 2, memory: PrMemory, over: Partial<Facts> = {}): Fa
 }
 
 const silent: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 3 * HOUR).toISOString() };
-const failed: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 5 * 60_000).toISOString(), queueFailedSha: HEAD };
+const failed: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 40 * 60_000).toISOString(), queueFailedSha: HEAD };
+const blip: PrMemory = { queuedSha: HEAD, queuedAt: new Date(NOW - 5 * 60_000).toISOString(), queueFailedSha: HEAD };
 
 describe('Codex-out fallback', () => {
   it('waits for Codex inside the window', () => {
     const m = { queuedSha: HEAD, queuedAt: new Date(NOW - HOUR).toISOString() };
     expect(decide(facts(1, m)).kind).toBe('wait');
+  });
+  it('does not treat one fresh queue failure as Codex being out', () => {
+    expect(decide(facts(0, blip)).kind).toBe('wait');
+    expect(decide(facts(1, blip)).kind).toBe('wait');
+  });
+  it('starts no timer for memory saved without queuedAt', () => {
+    expect(decide(facts(1, { queuedSha: HEAD })).kind).toBe('wait');
+  });
+  it('retries an unreadable Qwen answer after ten minutes, up to three tries', () => {
+    const old = new Date(NOW - 20 * 60_000).toISOString();
+    expect(decide(facts(1, { ...silent, qwen: { sha: HEAD, verdict: 'unreadable', at: old, tries: 1 } })).kind).toBe('qwen');
+    expect(decide(facts(1, { ...silent, qwen: { sha: HEAD, verdict: 'unreadable', at: old, tries: 3 } })).kind).toBe('wait');
+    expect(decide(facts(1, { ...silent, qwen: { sha: HEAD, verdict: 'block', at: old, tries: 1 } })).kind).toBe('wait');
   });
   it('merges tier 0 on CI alone once Codex is silent past the window', () => {
     expect(decide(facts(0, silent))).toMatchObject({ kind: 'merge', by: 'ci', review: null });

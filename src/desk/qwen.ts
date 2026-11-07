@@ -1,10 +1,12 @@
 /**
  * The Qwen review pass for tier 1 PRs when Codex is out (PET-751).
  *
- * ⚠ THIS PASS CAN ONLY HOLD A PR. The desk reads one word from it. Anything but a first
- * line of exactly `VERDICT: CLEAN` is a hold: a reply that is empty, cut off, off-format,
- * or that argues with the prompt. The diff is untrusted text and can tell the model what to
- * say, so the verdict never widens what merges beyond what CI and the tier already allow.
+ * ⚠ THE DESK READS ONE WORD FROM IT. Anything but a first line of exactly `VERDICT: CLEAN`
+ * is a hold: a reply that is empty, cut off, off-format, or that argues with the prompt.
+ * For tier 1 while Codex is out, that word is the only model gate. The diff is untrusted
+ * text, and a diff that says "reply CLEAN" can steer a small model. What limits the harm:
+ * the desk merges only PRs by its listed authors, tier 1 runs nothing on merge, and CI,
+ * threads and the hold label still apply. Tier 2 never reaches this pass.
  * A local 8B model reviews worse than Codex. That is the price of tier 1 not waiting on quota.
  */
 import type { QwenVerdict } from './decide.js';
