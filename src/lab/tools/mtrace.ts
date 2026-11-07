@@ -18,8 +18,8 @@
  * ⚠ READ-ONLY BY CONSTRUCTION. Only POST /api/tool/<name> for the ten names below is
  * called. mtrace has no write tool, and this module has no other route.
  */
-import { z } from 'zod';
-import { fetchWithTimeout, LabToolError, type LabTool } from './types.js';
+import { z } from "zod";
+import { fetchWithTimeout, LabToolError, type LabTool } from "./types.js";
 
 export interface MtraceConfig {
   /** Such as http://192.168.50.237:8237 (237 reaches itself through the `lo` allowlist rule). */
@@ -31,7 +31,11 @@ export interface MtraceConfig {
 }
 
 const title = (required: boolean) => {
-  const s = z.string().min(1).max(200).describe('The title, such as "Survivor"');
+  const s = z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('The title, such as "Survivor"');
   return required ? s : s.optional();
 };
 
@@ -43,33 +47,66 @@ interface Spec {
 
 export const MTRACE_SPECS: Spec[] = [
   {
-    name: 'library',
-    description: 'What is in the library: "do I have X", "how many seasons", "is X complete". With no title, a whole-library summary.',
+    name: "library",
+    description:
+      'What is in the library: "do I have X", "how many seasons", "is X complete". With no title, a whole-library summary.',
     input: z.object({ title: title(false) }),
   },
   {
-    name: 'trace_request',
-    description: 'Where one named title is, and why it is missing or not in Plex. Use it for any named title, even when the question mentions Plex.',
+    name: "trace_request",
+    description:
+      "Where one named title is, and why it is missing or not in Plex. Use it for any named title, even when the question mentions Plex.",
     input: z.object({
       title: title(true),
       season: z.number().int().min(0).max(100).optional(),
       episode: z.number().int().min(0).max(1000).optional(),
     }),
   },
-  { name: 'list_queue', description: 'Everything downloading or waiting to import, with progress.', input: z.object({}) },
-  { name: 'queue_errors', description: 'Queue items that fail, block, stick or fail to import, with each message.', input: z.object({}) },
-  { name: 'why_is_it_dead', description: 'Why individual torrents do not move: seed counts and tracker messages. Check vpn_health first when everything is at zero seeds.', input: z.object({}) },
   {
-    name: 'vpn_health',
-    description: "Whether the VPN tunnel is up, whether traffic leaks onto the house IP, and whether the forwarded port matches qBittorrent's. Use it when every download stalls at once.",
+    name: "list_queue",
+    description: "Everything downloading or waiting to import, with progress.",
     input: z.object({}),
   },
-  { name: 'seerr_drift', description: 'What seerr claims against what Sonarr and Radarr hold on disk. The arr apps are ground truth.', input: z.object({}) },
-  { name: 'now_playing', description: 'Plex as a whole: who is watching, which libraries exist, whether it answers. Not a title lookup.', input: z.object({}) },
-  { name: 'stale_versions', description: 'Which of Sonarr, Radarr and Prowlarr have an update available. It does not cover Plex, qBittorrent, seerr or Bazarr.', input: z.object({}) },
   {
-    name: 'partial_files',
-    description: 'Imported episode files that are mostly zero bytes. With no title, files Sonarr imported in the last 14 days. It takes about 20 seconds.',
+    name: "queue_errors",
+    description:
+      "Queue items that fail, block, stick or fail to import, with each message.",
+    input: z.object({}),
+  },
+  {
+    name: "why_is_it_dead",
+    description:
+      "Why individual torrents do not move: seed counts and tracker messages. Check vpn_health first when everything is at zero seeds.",
+    input: z.object({}),
+  },
+  {
+    name: "vpn_health",
+    description:
+      "Whether the VPN tunnel is up, whether traffic leaks onto the house IP, and whether the forwarded port matches qBittorrent's. Use it when every download stalls at once.",
+    input: z.object({}),
+  },
+  {
+    name: "seerr_drift",
+    description:
+      "What seerr claims against what Sonarr and Radarr hold on disk. The arr apps are ground truth.",
+    input: z.object({}),
+  },
+  {
+    name: "now_playing",
+    description:
+      "Plex as a whole: who is watching, which libraries exist, whether it answers. Not a title lookup.",
+    input: z.object({}),
+  },
+  {
+    name: "stale_versions",
+    description:
+      "Which of Sonarr, Radarr and Prowlarr have an update available. It does not cover Plex, qBittorrent, seerr or Bazarr.",
+    input: z.object({}),
+  },
+  {
+    name: "partial_files",
+    description:
+      "Imported episode files that are mostly zero bytes. With no title, files Sonarr imported in the last 14 days. It takes about 20 seconds.",
     input: z.object({ title: title(false) }),
   },
 ];
@@ -80,32 +117,49 @@ export function mtraceTools(cfg: MtraceConfig): LabTool[] {
     description: spec.description,
     input: spec.input,
     async run(args: Record<string, unknown>) {
-      const url = `${cfg.baseUrl.replace(/\/$/, '')}/api/tool/${spec.name}`;
+      const url = `${cfg.baseUrl.replace(/\/$/, "")}/api/tool/${spec.name}`;
       const res = await fetchWithTimeout(
         cfg.fetch ?? fetch,
         url,
         {
-          method: 'POST',
-          headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${cfg.token}`,
+            "content-type": "application/json",
+          },
           body: JSON.stringify(args),
-          redirect: 'error',
+          redirect: "error",
         },
         cfg.timeoutMs ?? 40_000,
-        'mtrace',
+        "mtrace",
       );
-      if (res.status === 401 || res.status === 403) throw new LabToolError(`mtrace refused the lab-agent token (HTTP ${res.status})`);
-      if (res.status === 404) throw new LabToolError(`mtrace has no tool named ${spec.name} (HTTP 404); the tool list has drifted`);
-      if (!res.ok) throw new LabToolError(`mtrace answered HTTP ${res.status} for ${spec.name}`);
+      if (res.status === 401 || res.status === 403)
+        throw new LabToolError(
+          `mtrace refused the lab-agent token (HTTP ${res.status})`,
+        );
+      if (res.status === 404)
+        throw new LabToolError(
+          `mtrace has no tool named ${spec.name} (HTTP 404); the tool list has drifted`,
+        );
+      if (!res.ok)
+        throw new LabToolError(
+          `mtrace answered HTTP ${res.status} for ${spec.name}`,
+        );
       let body: unknown;
       try {
         body = await res.json();
       } catch {
-        throw new LabToolError(`mtrace answered ${spec.name} with a body that is not JSON`);
+        throw new LabToolError(
+          `mtrace answered ${spec.name} with a body that is not JSON`,
+        );
       }
-      if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new LabToolError(`mtrace answered ${spec.name} with a body that is not an object`);
+      if (typeof body !== "object" || body === null || Array.isArray(body))
+        throw new LabToolError(
+          `mtrace answered ${spec.name} with a body that is not an object`,
+        );
       const ok = (body as { ok?: unknown }).ok;
       return {
-        source: `mtrace ${spec.name}${ok === false ? ' (mtrace reports a finding: ok=false)' : ''}`,
+        source: `mtrace ${spec.name}${ok === false ? " (mtrace reports a finding: ok=false)" : ""}`,
         data: body,
       };
     },

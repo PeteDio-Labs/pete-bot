@@ -25,9 +25,9 @@
  * WHY NO SDK. The loop keeps the Messages shape, and ollama.ts translates it. One POST and
  * four response fields need only native fetch, so the dependency list stays as it is.
  */
-import { callTool, type LabTool } from './tools/index.js';
-import { toolDefinitions } from './tools/index.js';
-import { PROPOSE_TOOL, type Proposal } from './tools/propose.js';
+import { callTool, type LabTool } from "./tools/index.js";
+import { toolDefinitions } from "./tools/index.js";
+import { PROPOSE_TOOL, type Proposal } from "./tools/propose.js";
 
 export const MAX_TURNS = 8;
 /** A tool error longer than this is cut before it reaches the journal. */
@@ -68,7 +68,7 @@ Rules:
 - Name the tools you read. Answer in at most 8 short lines, for a phone screen. No preamble.`;
 
 export interface HistoryTurn {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -90,10 +90,17 @@ export interface ContentBlock {
 export interface ModelResponse {
   content: ContentBlock[];
   stop_reason: string | null;
-  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
-export type CallModel = (body: Record<string, unknown>, signal?: AbortSignal) => Promise<ModelResponse>;
+export type CallModel = (
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<ModelResponse>;
 
 export interface AskResult {
   answer: string;
@@ -120,20 +127,28 @@ export async function ask(
   // Cache the stable prefix: the system prompt and the tool list. Below the model's minimum
   // cacheable length this costs nothing and caches nothing; the ledger row shows which.
   const toolsParam = definitions.map((d, i) =>
-    i === definitions.length - 1 ? { ...d, cache_control: { type: 'ephemeral' } } : d,
+    i === definitions.length - 1
+      ? { ...d, cache_control: { type: "ephemeral" } }
+      : d,
   );
-  const system = [{ type: 'text', text: opts.system ?? SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [
-    ...(opts.history ?? []),
-    { role: 'user', content: question },
+  const system = [
+    {
+      type: "text",
+      text: opts.system ?? SYSTEM_PROMPT,
+      cache_control: { type: "ephemeral" },
+    },
   ];
-  const toolCalls: AskResult['toolCalls'] = [];
-  const toolErrors: NonNullable<AskResult['toolErrors']> = [];
+  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
+    ...(opts.history ?? []),
+    { role: "user", content: question },
+  ];
+  const toolCalls: AskResult["toolCalls"] = [];
+  const toolErrors: NonNullable<AskResult["toolErrors"]> = [];
   const usage = { input: 0, output: 0, cacheRead: 0 };
   const proposals: Proposal[] = [];
 
   const stopped = (turns: number, why: string): AskResult => ({
-    answer: `${why} Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' (failed)'}`).join(', ') || 'none'}.`,
+    answer: `${why} Tools called: ${toolCalls.map((t) => `${t.name}${t.ok ? "" : " (failed)"}`).join(", ") || "none"}.`,
     turns,
     toolCalls,
     toolErrors,
@@ -143,70 +158,115 @@ export async function ask(
   });
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
-    if (signal?.aborted) return stopped(turn - 1, 'I stopped before a final answer: the deadline passed.');
+    if (signal?.aborted)
+      return stopped(
+        turn - 1,
+        "I stopped before a final answer: the deadline passed.",
+      );
     const last = turn === MAX_TURNS;
     let res: ModelResponse;
     try {
       res = await callModel(
-        { model, max_tokens: MAX_TOKENS, system, tools: toolsParam, messages, ...(last ? { tool_choice: { type: 'none' } } : {}) },
+        {
+          model,
+          max_tokens: MAX_TOKENS,
+          system,
+          tools: toolsParam,
+          messages,
+          ...(last ? { tool_choice: { type: "none" } } : {}),
+        },
         signal,
       );
     } catch (err) {
-      if (signal?.aborted) return stopped(turn - 1, 'I stopped before a final answer: the deadline passed.');
+      if (signal?.aborted)
+        return stopped(
+          turn - 1,
+          "I stopped before a final answer: the deadline passed.",
+        );
       throw err;
     }
     usage.input += num(res.usage?.input_tokens);
     usage.output += num(res.usage?.output_tokens);
     usage.cacheRead += num(res.usage?.cache_read_input_tokens);
-    const text = res.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
-    const uses = res.content.filter((b) => b.type === 'tool_use');
+    const text = res.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
+      .join("\n")
+      .trim();
+    const uses = res.content.filter((b) => b.type === "tool_use");
 
-    if (res.stop_reason !== 'tool_use' || uses.length === 0) {
+    if (res.stop_reason !== "tool_use" || uses.length === 0) {
       const note =
-        res.stop_reason === 'max_tokens' ? '\n\n(Answer cut at the output limit.)'
-        : res.stop_reason === 'refusal' ? '\n\n(The model refused to answer.)'
-        : '';
+        res.stop_reason === "max_tokens"
+          ? "\n\n(Answer cut at the output limit.)"
+          : res.stop_reason === "refusal"
+            ? "\n\n(The model refused to answer.)"
+            : "";
       if (RAW_TOOL_CALL.test(text)) {
         // The model wrote a tool call as text instead of calling it. That is not an answer.
-        return stopped(turn, 'I could not finish: the model ended on an unfinished tool call, so I have no answer to give you.');
+        return stopped(
+          turn,
+          "I could not finish: the model ended on an unfinished tool call, so I have no answer to give you.",
+        );
       }
       const incomplete = Boolean(note) || !text;
-      return { answer: (text || '(The model returned no text.)') + note, turns: turn, toolCalls, toolErrors, proposals, incomplete, usage };
+      return {
+        answer: (text || "(The model returned no text.)") + note,
+        turns: turn,
+        toolCalls,
+        toolErrors,
+        proposals,
+        incomplete,
+        usage,
+      };
     }
     if (last) {
       // tool_choice none should prevent this; if the model still asks, it gets no more reads.
-      return stopped(turn, `I stopped after ${MAX_TURNS} model turns without a final answer.${text && !RAW_TOOL_CALL.test(text) ? ` Last note: ${text}` : ''}`);
+      return stopped(
+        turn,
+        `I stopped after ${MAX_TURNS} model turns without a final answer.${text && !RAW_TOOL_CALL.test(text) ? ` Last note: ${text}` : ""}`,
+      );
     }
 
-    messages.push({ role: 'assistant', content: res.content });
+    messages.push({ role: "assistant", content: res.content });
     const results = [];
     for (const use of uses) {
-      const tool = tools.get(use.name ?? '');
+      const tool = tools.get(use.name ?? "");
       const result = tool
         ? await callTool(tool, use.input)
         : ({ ok: false, error: `no tool named ${use.name}` } as const);
-      toolCalls.push({ name: use.name ?? '?', ok: result.ok });
-      if (!result.ok) toolErrors.push({ name: use.name ?? '?', error: result.error.slice(0, MAX_ERROR_CHARS) });
+      toolCalls.push({ name: use.name ?? "?", ok: result.ok });
+      if (!result.ok)
+        toolErrors.push({
+          name: use.name ?? "?",
+          error: result.error.slice(0, MAX_ERROR_CHARS),
+        });
       if (result.ok && use.name === PROPOSE_TOOL) {
         // The proposal is read from the tool's own JSON output, not from anything the model wrote.
         try {
-          const p = (JSON.parse(result.text) as { data?: { proposal?: Proposal } }).data?.proposal;
+          const p = (
+            JSON.parse(result.text) as { data?: { proposal?: Proposal } }
+          ).data?.proposal;
           if (p) proposals.push(p);
         } catch {
           // A truncated or malformed result carries no proposal; the model's text still says what happened.
         }
       }
       results.push({
-        type: 'tool_result',
+        type: "tool_result",
         tool_use_id: use.id,
         content: result.ok ? result.text : result.error,
         ...(result.ok ? {} : { is_error: true }),
       });
     }
-    messages.push({ role: 'user', content: results });
+    messages.push({ role: "user", content: results });
   }
 
-  return stopped(MAX_TURNS, `I stopped after ${MAX_TURNS} model turns without a final answer.`);
+  return stopped(
+    MAX_TURNS,
+    `I stopped after ${MAX_TURNS} model turns without a final answer.`,
+  );
 }
 
-const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const num = (v: unknown): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : 0;

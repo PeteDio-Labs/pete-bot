@@ -9,11 +9,11 @@
  * rule), so every answer carries the note's `verified:` date and the commit it was read at.
  * To see what is running, a caller asks pve_guests.
  */
-import { z } from 'zod';
-import { GitClone } from './git.js';
-import { LabToolError, type LabTool } from './types.js';
+import { z } from "zod";
+import { GitClone } from "./git.js";
+import { LabToolError, type LabTool } from "./types.js";
 
-const HOSTS_DIR = 'Hosts';
+const HOSTS_DIR = "Hosts";
 const INVENTORY = `${HOSTS_DIR}/hosts-inventory.md`;
 const MAX_NOTE_BYTES = 12 * 1024;
 
@@ -32,15 +32,20 @@ export interface InventoryRow {
 }
 
 /** Parse flat `key: value` frontmatter. The vault's host frontmatter has no nesting. */
-export function parseFrontmatter(text: string): { frontmatter: Record<string, string>; body: string } {
+export function parseFrontmatter(text: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!match) return { frontmatter: {}, body: text };
   const frontmatter: Record<string, string> = {};
-  for (const line of (match[1] ?? '').split(/\r?\n/)) {
+  for (const line of (match[1] ?? "").split(/\r?\n/)) {
     const kv = /^([A-Za-z_][\w-]*):\s*(.*?)\s*$/.exec(line);
     if (!kv?.[1]) continue;
     // Drop a trailing comment, then matching quotes.
-    const value = (kv[2] ?? '').replace(/\s+#.*$/, '').replace(/^(['"])(.*)\1$/, '$2');
+    const value = (kv[2] ?? "")
+      .replace(/\s+#.*$/, "")
+      .replace(/^(['"])(.*)\1$/, "$2");
     frontmatter[kv[1]] = value;
   }
   return { frontmatter, body: text.slice(match[0].length) };
@@ -61,15 +66,18 @@ export function parseInventory(text: string): InventoryRow[] {
  * cell would drop out of the table, and the drift check would then report a clean lab for it.
  * The caller must surface `skipped`. A header or separator line is not a row and not skipped.
  */
-export function parseInventoryChecked(text: string): { rows: InventoryRow[]; skipped: string[] } {
+export function parseInventoryChecked(text: string): {
+  rows: InventoryRow[];
+  skipped: string[];
+} {
   const rows: InventoryRow[] = [];
   const skipped: string[] = [];
   let inLive = false;
-  let node = '';
+  let node = "";
   for (const line of text.split(/\r?\n/)) {
-    if (line.startsWith('## ')) {
+    if (line.startsWith("## ")) {
       inLive = /^## Live inventory/i.test(line);
-      node = '';
+      node = "";
       continue;
     }
     if (!inLive) continue;
@@ -82,25 +90,36 @@ export function parseInventoryChecked(text: string): { rows: InventoryRow[]; ski
     const cells = line.split(/(?<!\\)\|/).map((c) => c.trim());
     const trimmed = line.trim();
     // A table line, or a line that begins like a row without its leading pipe.
-    const looksLikeRow = trimmed.startsWith('|') || /^\d+\s*\|/.test(trimmed);
+    const looksLikeRow = trimmed.startsWith("|") || /^\d+\s*\|/.test(trimmed);
     const isSeparator = /^\|[\s:|-]*$/.test(trimmed);
-    const isHeader = /^vmid$/i.test(cells[1] ?? '') || /^vmid$/i.test(cells[0] ?? '');
-    const parsed = node !== '' && trimmed.startsWith('|') && cells.length >= 5 && /^\d+$/.test(cells[1] ?? '');
+    const isHeader =
+      /^vmid$/i.test(cells[1] ?? "") || /^vmid$/i.test(cells[0] ?? "");
+    const parsed =
+      node !== "" &&
+      trimmed.startsWith("|") &&
+      cells.length >= 5 &&
+      /^\d+$/.test(cells[1] ?? "");
     if (!parsed) {
       if (looksLikeRow && !isSeparator && !isHeader) {
-        const where = node ? `under ${node}` : 'above the first ### node heading';
-        skipped.push(`${INVENTORY} ${where}: cannot read the row "${trimmed.slice(0, 80)}"`);
+        const where = node
+          ? `under ${node}`
+          : "above the first ### node heading";
+        skipped.push(
+          `${INVENTORY} ${where}: cannot read the row "${trimmed.slice(0, 80)}"`,
+        );
       }
       continue;
     }
-    const nameCell = cells[2] ?? '';
-    const alias = /\[\[[^\]]*?\\\|([^\]]+)\]\]/.exec(nameCell) ?? /\[\[([^\]|]+)\]\]/.exec(nameCell);
+    const nameCell = cells[2] ?? "";
+    const alias =
+      /\[\[[^\]]*?\\\|([^\]]+)\]\]/.exec(nameCell) ??
+      /\[\[([^\]|]+)\]\]/.exec(nameCell);
     rows.push({
       vmid: Number(cells[1]),
       name: (alias?.[1] ?? nameCell).trim(),
-      state: cells[3] ?? '',
+      state: cells[3] ?? "",
       node,
-      block: (cells[4] ?? '').split(/\s+[—-]\s+/)[0]?.trim() ?? '',
+      block: (cells[4] ?? "").split(/\s+[—-]\s+/)[0]?.trim() ?? "",
     });
   }
   return { rows, skipped };
@@ -126,14 +145,21 @@ export class HostIndex {
     const state = await this.clone.state();
     if (this.cached?.sha === state.sha) {
       // Same commit, but the fetch state may have changed: rebuild only the source line.
-      return { ...this.cached, source: GitClone.describe(this.clone.name, state) };
+      return {
+        ...this.cached,
+        source: GitClone.describe(this.clone.name, state),
+      };
     }
 
     let files: string[];
     try {
-      files = (await this.clone.listFiles(HOSTS_DIR)).filter((f) => f.endsWith('.md'));
+      files = (await this.clone.listFiles(HOSTS_DIR)).filter((f) =>
+        f.endsWith(".md"),
+      );
     } catch (err) {
-      throw new LabToolError(`cannot list ${HOSTS_DIR}/ in ${this.clone.name}: ${(err as Error).message}`);
+      throw new LabToolError(
+        `cannot list ${HOSTS_DIR}/ in ${this.clone.name}: ${(err as Error).message}`,
+      );
     }
     const notes: HostNote[] = [];
     const unparsed: string[] = [];
@@ -144,7 +170,9 @@ export class HostIndex {
       try {
         text = await this.clone.readFile(file);
       } catch (err) {
-        throw new LabToolError(`cannot read ${file} in ${this.clone.name}: ${(err as Error).message}`);
+        throw new LabToolError(
+          `cannot read ${file} in ${this.clone.name}: ${(err as Error).message}`,
+        );
       }
       if (file === INVENTORY) {
         const checked = parseInventoryChecked(text);
@@ -153,17 +181,31 @@ export class HostIndex {
         continue;
       }
       const { frontmatter, body } = parseFrontmatter(text);
-      if (frontmatter.type !== 'host') {
-        unparsed.push(`${file} has no \`type: host\` frontmatter, so it is not read as a host note`);
+      if (frontmatter.type !== "host") {
+        unparsed.push(
+          `${file} has no \`type: host\` frontmatter, so it is not read as a host note`,
+        );
         continue;
       }
       notes.push({ file, frontmatter, body });
     }
     // An empty read is a failure, never "no such host" (see types.ts).
-    if (notes.length === 0) throw new LabToolError(`read 0 host notes from ${this.clone.name}/${HOSTS_DIR}`);
-    if (inventory.length === 0) throw new LabToolError(`read 0 rows from the live inventory in ${INVENTORY}`);
+    if (notes.length === 0)
+      throw new LabToolError(
+        `read 0 host notes from ${this.clone.name}/${HOSTS_DIR}`,
+      );
+    if (inventory.length === 0)
+      throw new LabToolError(
+        `read 0 rows from the live inventory in ${INVENTORY}`,
+      );
 
-    this.cached = { sha: state.sha, source: GitClone.describe(this.clone.name, state), notes, inventory, unparsed };
+    this.cached = {
+      sha: state.sha,
+      source: GitClone.describe(this.clone.name, state),
+      notes,
+      inventory,
+      unparsed,
+    };
     return this.cached;
   }
 }
@@ -180,29 +222,36 @@ const QUERY = z
   .string()
   .min(1)
   .max(64)
-  .describe('A VMID such as "235", or part of a host name, note name or address such as "plane" or ".235"');
+  .describe(
+    'A VMID such as "235", or part of a host name, note name or address such as "plane" or ".235"',
+  );
 
 export function findHostTool(index: HostIndex): LabTool {
   const input = z.object({ query: QUERY });
   return {
-    name: 'find_host',
+    name: "find_host",
     description:
       "Look up a machine in the knowledge vault: its host note's frontmatter (VMID, node, address, status, " +
-      'verified date) and its row in the live inventory table. The vault is a document; ask pve_guests for live state.',
+      "verified date) and its row in the live inventory table. The vault is a document; ask pve_guests for live state.",
     input,
     async run({ query }: z.infer<typeof input>) {
       const idx = await index.load();
       const hits = idx.notes.filter((n) => matches(n, query));
       const vmids = new Set(hits.map((n) => n.frontmatter.vmid));
       const rows = idx.inventory.filter(
-        (r) => vmids.has(String(r.vmid)) || r.name.toLowerCase().includes(query.toLowerCase()) || String(r.vmid) === query,
+        (r) =>
+          vmids.has(String(r.vmid)) ||
+          r.name.toLowerCase().includes(query.toLowerCase()) ||
+          String(r.vmid) === query,
       );
       return {
         source: `${idx.notes.length} host notes and ${idx.inventory.length} inventory rows from ${idx.source}`,
         data: {
           notes: hits.map((n) => ({ file: n.file, ...n.frontmatter })),
           inventory: rows,
-          ...(hits.length === 0 && rows.length === 0 ? { note: `no host note or inventory row matches "${query}"` } : {}),
+          ...(hits.length === 0 && rows.length === 0
+            ? { note: `no host note or inventory row matches "${query}"` }
+            : {}),
         },
       };
     },
@@ -212,23 +261,28 @@ export function findHostTool(index: HostIndex): LabTool {
 export function hostNoteTool(index: HostIndex): LabTool {
   const input = z.object({ query: QUERY });
   return {
-    name: 'host_note',
+    name: "host_note",
     description:
       "Read one host note's full text from the knowledge vault, by VMID or name. Fails when the query " +
-      'matches more than one note; narrow it with find_host first.',
+      "matches more than one note; narrow it with find_host first.",
     input,
     async run({ query }: z.infer<typeof input>) {
       const idx = await index.load();
       const hits = idx.notes.filter((n) => matches(n, query));
-      if (hits.length === 0) throw new LabToolError(`no host note matches "${query}" (searched ${idx.notes.length})`);
+      if (hits.length === 0)
+        throw new LabToolError(
+          `no host note matches "${query}" (searched ${idx.notes.length})`,
+        );
       if (hits.length > 1) {
-        throw new LabToolError(`"${query}" matches ${hits.length} notes: ${hits.map((n) => n.file).join(', ')}`);
+        throw new LabToolError(
+          `"${query}" matches ${hits.length} notes: ${hits.map((n) => n.file).join(", ")}`,
+        );
       }
       const note = hits[0]!;
-      const bytes = Buffer.byteLength(note.body, 'utf8');
+      const bytes = Buffer.byteLength(note.body, "utf8");
       const body =
         bytes > MAX_NOTE_BYTES
-          ? `${Buffer.from(note.body, 'utf8').subarray(0, MAX_NOTE_BYTES).toString('utf8')}\n… note cut at ${MAX_NOTE_BYTES} of ${bytes} bytes`
+          ? `${Buffer.from(note.body, "utf8").subarray(0, MAX_NOTE_BYTES).toString("utf8")}\n… note cut at ${MAX_NOTE_BYTES} of ${bytes} bytes`
           : note.body;
       return {
         source: `${note.file} from ${idx.source}`,

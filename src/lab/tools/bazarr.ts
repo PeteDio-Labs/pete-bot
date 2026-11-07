@@ -15,8 +15,8 @@
  * reads as "no subtitles missing". OpenSubtitles.com's free tier stops at 20 downloads a
  * day (vault 222-bazarr), so a search that finds nothing may be a spent quota; status says so.
  */
-import { z } from 'zod';
-import { fetchWithTimeout, LabToolError, type LabTool } from './types.js';
+import { z } from "zod";
+import { fetchWithTimeout, LabToolError, type LabTool } from "./types.js";
 
 export interface BazarrConfig {
   /** Such as http://192.168.50.222:6767 */
@@ -26,22 +26,30 @@ export interface BazarrConfig {
   fetch?: typeof fetch;
 }
 
-export type BazarrKind = 'series' | 'movie';
+export type BazarrKind = "series" | "movie";
 
 async function get(cfg: BazarrConfig, path: string): Promise<unknown> {
   const res = await fetchWithTimeout(
     cfg.fetch ?? fetch,
-    `${cfg.baseUrl.replace(/\/$/, '')}${path}`,
-    { method: 'GET', headers: { 'x-api-key': cfg.apiKey }, redirect: 'error' },
+    `${cfg.baseUrl.replace(/\/$/, "")}${path}`,
+    { method: "GET", headers: { "x-api-key": cfg.apiKey }, redirect: "error" },
     cfg.timeoutMs ?? 15_000,
-    'bazarr',
+    "bazarr",
   );
-  if (res.status === 401 || res.status === 403) throw new LabToolError(`bazarr refused the lab-agent key (HTTP ${res.status})`);
-  if (!res.ok) throw new LabToolError(`bazarr answered HTTP ${res.status} for ${path.split('?')[0]}`);
+  if (res.status === 401 || res.status === 403)
+    throw new LabToolError(
+      `bazarr refused the lab-agent key (HTTP ${res.status})`,
+    );
+  if (!res.ok)
+    throw new LabToolError(
+      `bazarr answered HTTP ${res.status} for ${path.split("?")[0]}`,
+    );
   try {
     return await res.json();
   } catch {
-    throw new LabToolError(`bazarr answered ${path.split('?')[0]} with a body that is not JSON`);
+    throw new LabToolError(
+      `bazarr answered ${path.split("?")[0]} with a body that is not JSON`,
+    );
   }
 }
 
@@ -54,28 +62,48 @@ interface Item {
 
 function rows(body: unknown, what: string): Array<Record<string, unknown>> {
   const data = (body as { data?: unknown })?.data;
-  if (!Array.isArray(data)) throw new LabToolError(`bazarr answered ${what} with no data list`);
+  if (!Array.isArray(data))
+    throw new LabToolError(`bazarr answered ${what} with no data list`);
   return data as Array<Record<string, unknown>>;
 }
 
 /** Every series and movie, with its missing-subtitle count. Bazarr holds under 200 here. */
 export async function listItems(cfg: BazarrConfig): Promise<Item[]> {
-  const [series, movies] = await Promise.all([get(cfg, '/api/series?start=0&length=-1'), get(cfg, '/api/movies?start=0&length=-1')]);
+  const [series, movies] = await Promise.all([
+    get(cfg, "/api/series?start=0&length=-1"),
+    get(cfg, "/api/movies?start=0&length=-1"),
+  ]);
   const out: Item[] = [];
-  for (const r of rows(series, '/api/series')) {
-    if (typeof r.sonarrSeriesId === 'number' && typeof r.title === 'string') {
-      out.push({ kind: 'series', id: r.sonarrSeriesId, title: r.title, missing: Number(r.episodeMissingCount ?? 0) });
+  for (const r of rows(series, "/api/series")) {
+    if (typeof r.sonarrSeriesId === "number" && typeof r.title === "string") {
+      out.push({
+        kind: "series",
+        id: r.sonarrSeriesId,
+        title: r.title,
+        missing: Number(r.episodeMissingCount ?? 0),
+      });
     }
   }
-  for (const r of rows(movies, '/api/movies')) {
-    if (typeof r.radarrId === 'number' && typeof r.title === 'string') {
-      out.push({ kind: 'movie', id: r.radarrId, title: r.title, missing: Array.isArray(r.missing_subtitles) ? r.missing_subtitles.length : 0 });
+  for (const r of rows(movies, "/api/movies")) {
+    if (typeof r.radarrId === "number" && typeof r.title === "string") {
+      out.push({
+        kind: "movie",
+        id: r.radarrId,
+        title: r.title,
+        missing: Array.isArray(r.missing_subtitles)
+          ? r.missing_subtitles.length
+          : 0,
+      });
     }
   }
   return out;
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
 export function matchTitle(items: Item[], query: string): Item[] {
   const q = norm(query);
@@ -85,25 +113,44 @@ export function matchTitle(items: Item[], query: string): Item[] {
 }
 
 export function bazarrFindTool(cfg: BazarrConfig): LabTool {
-  const input = z
-    .object({
-      title: z.string().min(2).max(200).optional().describe('Part or all of the title, such as "Survivor". Never a phrase like "subtitles" or "movies".'),
-      missingOnly: z.boolean().optional().describe('true lists the series and movies that lack subtitles. Use it with no title to answer "which titles are missing subtitles".'),
-    })
-    .refine((v) => v.title !== undefined || v.missingOnly === true, { message: 'give a title, or set missingOnly to true' });
+  const input = z.object({
+    title: z
+      .string()
+      .min(2)
+      .max(200)
+      .optional()
+      .describe(
+        'Part or all of the title, such as "Survivor". Never a phrase like "subtitles" or "movies".',
+      ),
+    missingOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        'true lists the series and movies that lack subtitles. Use it with no title to answer "which titles are missing subtitles".',
+      ),
+  });
   return {
-    name: 'bazarr_find',
+    name: "bazarr_find",
     description:
-      'Find a series or movie in Bazarr and see how many subtitles it is missing, or list every title that lacks subtitles (missingOnly). Use it before proposing a subtitle search.',
+      "Find a series or movie in Bazarr and see how many subtitles it is missing, or list every title that lacks subtitles (missingOnly). Use it before proposing a subtitle search.",
     input,
     async run({ title, missingOnly }: z.infer<typeof input>) {
+      if (title === undefined && missingOnly !== true)
+        throw new LabToolError("give a title, or set missingOnly to true");
       const items = await listItems(cfg);
       const pool = missingOnly ? items.filter((i) => i.missing > 0) : items;
       const matched = title ? matchTitle(pool, title) : pool;
       const hits = matched.slice(0, 10);
-      const scope = missingOnly ? `${pool.length} have missing subtitles, ` : '';
-      const what = title ? `${matched.length} match "${title.slice(0, 60)}"` : `${matched.length} listed`;
-      return { source: `${items.length} titles read from Bazarr, ${scope}${what}`, data: { matches: hits } };
+      const scope = missingOnly
+        ? `${pool.length} have missing subtitles, `
+        : "";
+      const what = title
+        ? `${matched.length} match "${title.slice(0, 60)}"`
+        : `${matched.length} listed`;
+      return {
+        source: `${items.length} titles read from Bazarr, ${scope}${what}`,
+        data: { matches: hits },
+      };
     },
   };
 }
@@ -111,13 +158,18 @@ export function bazarrFindTool(cfg: BazarrConfig): LabTool {
 export function bazarrStatusTool(cfg: BazarrConfig): LabTool {
   const input = z.object({});
   return {
-    name: 'bazarr_status',
-    description: 'Bazarr health: its problems, how many episodes and movies lack subtitles, and whether a subtitle provider is throttled.',
+    name: "bazarr_status",
+    description:
+      "Bazarr health: its problems, how many episodes and movies lack subtitles, and whether a subtitle provider is throttled.",
     input,
     async run() {
-      const [badges, health, providers] = await Promise.all([get(cfg, '/api/badges'), get(cfg, '/api/system/health'), get(cfg, '/api/providers')]);
+      const [badges, health, providers] = await Promise.all([
+        get(cfg, "/api/badges"),
+        get(cfg, "/api/system/health"),
+        get(cfg, "/api/providers"),
+      ]);
       return {
-        source: 'Bazarr /api/badges, /api/system/health and /api/providers',
+        source: "Bazarr /api/badges, /api/system/health and /api/providers",
         data: { badges, health, providers },
       };
     },
@@ -125,23 +177,41 @@ export function bazarrStatusTool(cfg: BazarrConfig): LabTool {
 }
 
 /** The write. Only the confirmed action route calls this. */
-export async function searchMissing(cfg: BazarrConfig, kind: BazarrKind, id: number): Promise<string> {
-  if (!Number.isInteger(id) || id < 0) throw new LabToolError('bazarr: the id must be a whole number');
-  const body = new URLSearchParams(kind === 'series' ? { seriesid: String(id), action: 'search-missing' } : { radarrid: String(id), action: 'search-missing' });
+export async function searchMissing(
+  cfg: BazarrConfig,
+  kind: BazarrKind,
+  id: number,
+): Promise<string> {
+  if (!Number.isInteger(id) || id < 0)
+    throw new LabToolError("bazarr: the id must be a whole number");
+  const body = new URLSearchParams(
+    kind === "series"
+      ? { seriesid: String(id), action: "search-missing" }
+      : { radarrid: String(id), action: "search-missing" },
+  );
   const res = await fetchWithTimeout(
     cfg.fetch ?? fetch,
-    `${cfg.baseUrl.replace(/\/$/, '')}/api/${kind === 'series' ? 'series' : 'movies'}`,
+    `${cfg.baseUrl.replace(/\/$/, "")}/api/${kind === "series" ? "series" : "movies"}`,
     {
-      method: 'PATCH',
-      headers: { 'x-api-key': cfg.apiKey, 'content-type': 'application/x-www-form-urlencoded' },
+      method: "PATCH",
+      headers: {
+        "x-api-key": cfg.apiKey,
+        "content-type": "application/x-www-form-urlencoded",
+      },
       body,
-      redirect: 'error',
+      redirect: "error",
     },
     cfg.timeoutMs ?? 15_000,
-    'bazarr',
+    "bazarr",
   );
-  if (res.status === 401 || res.status === 403) throw new LabToolError(`bazarr refused the lab-agent key (HTTP ${res.status})`);
+  if (res.status === 401 || res.status === 403)
+    throw new LabToolError(
+      `bazarr refused the lab-agent key (HTTP ${res.status})`,
+    );
   // 204 is Bazarr's accepted answer: the search runs in its own task queue.
-  if (res.status !== 204 && !res.ok) throw new LabToolError(`bazarr answered HTTP ${res.status} to the subtitle search`);
+  if (res.status !== 204 && !res.ok)
+    throw new LabToolError(
+      `bazarr answered HTTP ${res.status} to the subtitle search`,
+    );
   return `Bazarr accepted the search (HTTP ${res.status}). It runs in Bazarr's task queue; new subtitles land beside the media and Bazarr refreshes Plex after each one.`;
 }

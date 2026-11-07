@@ -24,8 +24,8 @@
  * COST. Keys are capped at MAX_KEYS and each item is cut to three fields, so a call adds
  * a few hundred tokens to the model's context. The token is never sent anywhere but Plane.
  */
-import { z } from 'zod';
-import { fetchWithTimeout, LabToolError, type LabTool } from './types.js';
+import { z } from "zod";
+import { fetchWithTimeout, LabToolError, type LabTool } from "./types.js";
 
 export const MAX_KEYS = 10;
 export const KEY_PATTERN = /^[A-Z][A-Z0-9]{1,9}-\d{1,5}$/;
@@ -56,70 +56,107 @@ export interface PlaneItem {
 }
 
 /** A 404, apart from any JSON body: a 200 with a body of `null` is a fault, not a missing item. */
-const NOT_FOUND = Symbol('not found');
+const NOT_FOUND = Symbol("not found");
 
 export class PlaneClient {
   private projectIds: Map<string, PlaneProject> | null = null;
   private states = new Map<string, Map<string, string>>();
 
   constructor(private readonly cfg: PlaneConfig) {
-    if (!/^https?:\/\//.test(cfg.baseUrl)) throw new Error('Plane URL must be http:// or https://');
+    if (!/^https?:\/\//.test(cfg.baseUrl))
+      throw new Error("Plane URL must be http:// or https://");
   }
 
-  private async get(path: string, allow404 = false): Promise<unknown | typeof NOT_FOUND> {
-    const base = this.cfg.baseUrl.replace(/\/$/, '');
+  private async get(
+    path: string,
+    allow404 = false,
+  ): Promise<unknown | typeof NOT_FOUND> {
+    const base = this.cfg.baseUrl.replace(/\/$/, "");
     const res = await fetchWithTimeout(
       this.cfg.fetch ?? fetch,
       `${base}/api/v1/workspaces/${encodeURIComponent(this.cfg.workspace)}${path}`,
-      { method: 'GET', headers: { 'X-API-Key': this.cfg.token }, redirect: 'error' },
+      {
+        method: "GET",
+        headers: { "X-API-Key": this.cfg.token },
+        redirect: "error",
+      },
       this.cfg.timeoutMs ?? 8_000,
       `Plane ${path}`,
     );
     if (res.status === 404 && allow404) return NOT_FOUND;
-    if (res.status === 401 || res.status === 403) throw new LabToolError(`Plane refused the lab-agent token for ${path} (HTTP ${res.status})`);
-    if (!res.ok) throw new LabToolError(`Plane ${path} answered HTTP ${res.status}`);
+    if (res.status === 401 || res.status === 403)
+      throw new LabToolError(
+        `Plane refused the lab-agent token for ${path} (HTTP ${res.status})`,
+      );
+    if (!res.ok)
+      throw new LabToolError(`Plane ${path} answered HTTP ${res.status}`);
     try {
       return await res.json();
     } catch {
-      throw new LabToolError(`Plane ${path} answered with a body that is not JSON`);
+      throw new LabToolError(
+        `Plane ${path} answered with a body that is not JSON`,
+      );
     }
   }
 
   /** Identifier to project, read once. A project created later reads as a miss; refetch once. */
   async projects(refresh = false): Promise<Map<string, PlaneProject>> {
     if (this.projectIds && !refresh) return this.projectIds;
-    const body = (await this.get('/projects/?per_page=100')) as
+    const body = (await this.get("/projects/?per_page=100")) as
       | { results?: Array<{ id?: string; identifier?: string; name?: string }> }
       | Array<{ id?: string; identifier?: string; name?: string }>;
     const rows = Array.isArray(body) ? body : (body?.results ?? []);
     const map = new Map<string, PlaneProject>();
-    for (const r of rows) if (r.id && r.identifier && this.cfg.identifiers.includes(r.identifier)) map.set(r.identifier, { identifier: r.identifier, name: String(r.name ?? ''), id: r.id });
+    for (const r of rows)
+      if (r.id && r.identifier && this.cfg.identifiers.includes(r.identifier))
+        map.set(r.identifier, {
+          identifier: r.identifier,
+          name: String(r.name ?? ""),
+          id: r.id,
+        });
     // With no projects, every key would read as unknown. That is a failed read.
-    if (map.size === 0) throw new LabToolError(`Plane listed none of the allowed projects (${this.cfg.identifiers.join(', ')})`);
+    if (map.size === 0)
+      throw new LabToolError(
+        `Plane listed none of the allowed projects (${this.cfg.identifiers.join(", ")})`,
+      );
     this.projectIds = map;
     return map;
   }
 
   async project(identifier: string): Promise<PlaneProject> {
     if (!this.cfg.identifiers.includes(identifier)) {
-      throw new LabToolError(`Project ${identifier} is not readable here; allowed: ${[...this.cfg.identifiers].sort().join(', ')}`);
+      throw new LabToolError(
+        `Project ${identifier} is not readable here; allowed: ${[...this.cfg.identifiers].sort().join(", ")}`,
+      );
     }
-    const found = (await this.projects()).get(identifier) ?? (await this.projects(true)).get(identifier);
+    const found =
+      (await this.projects()).get(identifier) ??
+      (await this.projects(true)).get(identifier);
     if (found) return found;
-    const known = [...(this.projectIds ?? []).keys()].sort().join(', ');
-    throw new LabToolError(`Plane has no project with identifier ${identifier}; it lists: ${known}`);
+    const known = [...(this.projectIds ?? []).keys()].sort().join(", ");
+    throw new LabToolError(
+      `Plane has no project with identifier ${identifier}; it lists: ${known}`,
+    );
   }
 
-  private async stateNames(projectId: string, refresh = false): Promise<Map<string, string>> {
+  private async stateNames(
+    projectId: string,
+    refresh = false,
+  ): Promise<Map<string, string>> {
     const cached = this.states.get(projectId);
     if (cached && !refresh) return cached;
-    const body = (await this.get(`/projects/${projectId}/states/?per_page=100`)) as
+    const body = (await this.get(
+      `/projects/${projectId}/states/?per_page=100`,
+    )) as
       | { results?: Array<{ id?: string; name?: string }> }
       | Array<{ id?: string; name?: string }>;
     const rows = Array.isArray(body) ? body : (body?.results ?? []);
-    const map = new Map(rows.filter((s) => s.id && s.name).map((s) => [s.id!, s.name!]));
+    const map = new Map(
+      rows.filter((s) => s.id && s.name).map((s) => [s.id!, s.name!]),
+    );
     // With no states, every item would read as an unknown state. That is a failed read.
-    if (map.size === 0) throw new LabToolError(`Plane listed 0 states for project ${projectId}`);
+    if (map.size === 0)
+      throw new LabToolError(`Plane listed 0 states for project ${projectId}`);
     this.states.set(projectId, map);
     return map;
   }
@@ -127,23 +164,48 @@ export class PlaneClient {
   /** Fill the project and state caches once, before the parallel item reads. */
   async warm(keys: string[]): Promise<void> {
     await this.projects();
-    await Promise.all([...new Set(keys.map((k) => k.split('-')[0]!))].map(async (identifier) => this.stateNames((await this.project(identifier)).id)));
+    await Promise.all(
+      [...new Set(keys.map((k) => k.split("-")[0]!))].map(async (identifier) =>
+        this.stateNames((await this.project(identifier)).id),
+      ),
+    );
   }
 
   async item(key: string): Promise<PlaneItem> {
-    const project = await this.project(key.split('-')[0]!);
+    const project = await this.project(key.split("-")[0]!);
     const states = await this.stateNames(project.id);
     const got = await this.get(`/work-items/${key}/`, true);
     if (got === NOT_FOUND) return { key, found: false };
-    const w = got as { id?: string; name?: string; state?: unknown; project?: unknown; updated_at?: string } | null;
-    if (!w || typeof w !== 'object' || !w.id) throw new LabToolError(`Plane answered ${key} with a body that is not a work item`);
-    const ref = (v: unknown) => (v && typeof v === 'object' ? (v as { id?: string }).id : (v as string | undefined));
-    if (ref(w.project) !== project.id) throw new LabToolError(`Plane answered ${key} from a project other than ${project.identifier}`);
+    const w = got as {
+      id?: string;
+      name?: string;
+      state?: unknown;
+      project?: unknown;
+      updated_at?: string;
+    } | null;
+    if (!w || typeof w !== "object" || !w.id)
+      throw new LabToolError(
+        `Plane answered ${key} with a body that is not a work item`,
+      );
+    const ref = (v: unknown) =>
+      v && typeof v === "object"
+        ? (v as { id?: string }).id
+        : (v as string | undefined);
+    if (ref(w.project) !== project.id)
+      throw new LabToolError(
+        `Plane answered ${key} from a project other than ${project.identifier}`,
+      );
     const stateId = ref(w.state);
     // A state added or renamed since the cache filled reads as a miss; refetch once.
-    const name = stateId ? (states.get(stateId) ?? (await this.stateNames(project.id, true)).get(stateId)) : undefined;
+    const name = stateId
+      ? (states.get(stateId) ??
+        (await this.stateNames(project.id, true)).get(stateId))
+      : undefined;
     // An item whose state Plane does not list is a fault in what was read, not a state.
-    if (!name || !w.name) throw new LabToolError(`Plane answered ${key} with ${!w.name ? 'no title' : `state ${stateId ?? 'none'} that project ${project.identifier} does not list`}`);
+    if (!name || !w.name)
+      throw new LabToolError(
+        `Plane answered ${key} with ${!w.name ? "no title" : `state ${stateId ?? "none"} that project ${project.identifier} does not list`}`,
+      );
     return {
       key,
       found: true,
@@ -157,16 +219,16 @@ export class PlaneClient {
 export function planeItemTool(plane: PlaneClient): LabTool {
   const input = z.object({
     keys: z
-      .array(z.string().regex(KEY_PATTERN, 'must look like PET-123 or FOL-12'))
+      .array(z.string().regex(KEY_PATTERN, "must look like PET-123 or FOL-12"))
       .min(1)
       .max(MAX_KEYS),
   });
   return {
-    name: 'plane_item',
+    name: "plane_item",
     description:
       `The title, state and last update of up to ${MAX_KEYS} work items in Plane, by key such as "PET-672" or "FOL-12". ` +
-      'The project comes from the key, so you never pass a project id. Use plane_projects to see the identifiers. ' +
-      'Use it to name the items a git_history result cites.',
+      "The project comes from the key, so you never pass a project id. Use plane_projects to see the identifiers. " +
+      "Use it to name the items a git_history result cites.",
     input,
     async run({ keys }: z.infer<typeof input>) {
       const unique = [...new Set(keys)];
@@ -191,14 +253,19 @@ export function planeItemTool(plane: PlaneClient): LabTool {
 export function planeProjectsTool(plane: PlaneClient): LabTool {
   const input = z.object({});
   return {
-    name: 'plane_projects',
+    name: "plane_projects",
     description:
-      'The Plane projects this server may read, by identifier, with name and project id. ' +
-      'Use it to learn which identifiers plane_item accepts.',
+      "The Plane projects this server may read, by identifier, with name and project id. " +
+      "Use it to learn which identifiers plane_item accepts.",
     input,
     async run() {
-      const projects = [...(await plane.projects()).values()].sort((a, b) => a.identifier.localeCompare(b.identifier));
-      return { source: `${projects.length} projects listed by Plane`, data: { projects } };
+      const projects = [...(await plane.projects()).values()].sort((a, b) =>
+        a.identifier.localeCompare(b.identifier),
+      );
+      return {
+        source: `${projects.length} projects listed by Plane`,
+        data: { projects },
+      };
     },
   };
 }
