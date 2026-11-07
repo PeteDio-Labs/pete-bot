@@ -21,12 +21,13 @@ export function deskStatusTool(cfg: DeskConfig): LabTool {
     name: 'desk_status',
     description:
       "The merge desk's state from pete-bot's /health: its mode, the repos it watches, when it last polled, how many " +
-      'PRs that poll read, any poll error, and how many PRs it has merged.',
+      'PRs that poll read, any poll error, and how many PRs it has merged. It also returns the weekly reports runner state and ' +
+      'its report backup state (weekly.state, weekly.backup), and nothing else from the weekly block.',
     input,
     async run() {
       const res = await fetchWithTimeout(cfg.fetch ?? fetch, cfg.healthUrl, { method: 'GET' }, 5_000, 'pete-bot /health');
       if (!res.ok) throw new LabToolError(`pete-bot /health answered HTTP ${res.status}`);
-      let body: { desk?: unknown; uptimeSeconds?: unknown };
+      let body: { desk?: unknown; uptimeSeconds?: unknown; weekly?: { state?: unknown; backup?: unknown } };
       try {
         body = (await res.json()) as typeof body;
       } catch {
@@ -35,7 +36,12 @@ export function deskStatusTool(cfg: DeskConfig): LabTool {
       if (!body?.desk) throw new LabToolError('pete-bot /health carries no desk field');
       return {
         source: `pete-bot /health at ${cfg.healthUrl}`,
-        data: { desk: body.desk, peteBotUptimeSec: body.uptimeSeconds ?? null },
+        data: {
+          desk: body.desk,
+          peteBotUptimeSec: body.uptimeSeconds ?? null,
+          // Only the runner and backup state: the report text and the hub jobs stay out of this tool.
+          weekly: body.weekly ? { state: body.weekly.state ?? null, backup: body.weekly.backup ?? null } : null,
+        },
       };
     },
   };
