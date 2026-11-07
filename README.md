@@ -371,3 +371,18 @@ and installs it to media-dash-237 by running `configure-pete-bot.yml` from
 `petedio-iac`. Secrets come from Vault over GitHub OIDC. The play proves the process
 reached Discord by grepping the journal for `logged in as`, because a bad token leaves
 `/health` perfectly green.
+
+## Weekly PR report and dashboard (PET-868)
+
+Every Sunday after 22:30 Eastern, pete-bot stores one record per Monday-to-Sunday week: the PRs merged across `REPORT_REPOS`, counts by repo and author, and a two-sentence focus summary from `qwen3:8b` on ollama-host. A past week that has no record is built at the next check. Weeks before 2026-11-02 are not back-filled.
+
+To turn it on, set `REPORTS_MODE=on` and these variables:
+
+| Variable | Meaning |
+|---|---|
+| `WEEKLY_REPORT_DIR` | Directory for the `<monday>.json` files. Empty turns the feature off. |
+| `WEEKLY_ACCESS_TEAM_DOMAIN`, `WEEKLY_ACCESS_AUD`, `WEEKLY_ACCESS_EMAILS` | The Cloudflare Access application that fronts the dashboard. All three are required: the dashboard never starts without them. |
+| `WEEKLY_DASH_HOST`, `WEEKLY_DASH_PORT` | Listener address. Default `127.0.0.1:3018`. |
+| `WEEKLY_OLLAMA_URL` | Default `http://192.168.50.12:11434`. |
+
+If Qwen cannot answer, the week keeps its count and shows "Summary not generated" with the reason. `/health` on the bot reports `weekly`, and `/health` on port 3018 reports the stored weeks and the last attempt.
