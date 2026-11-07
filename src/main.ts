@@ -10,10 +10,11 @@
  * over asking mtrace with its own token. The Mission Control, ArgoCD and Kubernetes
  * clients this started as are gone with the cluster they queried.
  */
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { config } from './config.js';
 import { registerCommands } from './commands/registerCommands.js';
 import { createInteractionHandler } from './events/interactionCreate.js';
+import { createDmHandler } from './media/dmHandler.js';
 import { startMetricsServer } from './metrics/server.js';
 import { startHttpServer } from './server/index.js';
 import { discordBotUp, discordWebsocketLatency } from './metrics/index.js';
@@ -24,12 +25,14 @@ import packageJson from '../package.json' with { type: 'json' };
 
 const VERSION = packageJson.version;
 
-// No privileged intent and no partials. The app reads no messages since PET-518: slash
-// commands arrive as interactions, and alert DMs go out over REST. MessageContent and
-// Partials.Channel existed only for plain-DM questions. Requesting MessageContent again
-// makes login fail outright if the Developer Portal has it off.
+// No privileged intent. Discord delivers a DM's content to the app it is addressed to
+// without MessageContent, which is why the media assistant (PET-869) can read the owner's
+// DMs. Partials.Channel is needed because a DM channel is not cached until it speaks;
+// without it discord.js drops the first DM. Requesting MessageContent would make login
+// fail outright if the Developer Portal has it off, so this app does not.
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
+  partials: [Partials.Channel],
 });
 
 client.once('clientReady', async () => {
@@ -60,6 +63,15 @@ client.on('error', (error) => {
 });
 
 client.on('interactionCreate', createInteractionHandler());
+
+// The media assistant answers the owner's DMs only when MEDIA_CHAT=on (PET-869).
+if (config.media.chatEnabled) {
+  const onMessage = createDmHandler({ ownerUserId: config.discord.ownerUserId }, { ...config.lab, timeoutMs: config.media.timeoutMs });
+  client.on('messageCreate', (message) => {
+    onMessage(message).catch((error) => logger.error('[media] handler error:', error));
+  });
+  logger.info('[media] chat is on: the owner can DM questions');
+}
 
 export async function start(): Promise<void> {
   logger.info(`Starting Pete Bot v${VERSION}`);

@@ -14,9 +14,17 @@ something to tell the owner. It adds no incident state.
 **The merge desk** merges low-risk PRs after a clean Codex review, and DMs a Merge button
 for the rest (PET-645).
 
-It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing. `/ask`
-and plain-DM questions went in PET-518, when Muse took over asking mtrace with its own
-token. The bot reads no messages, so it requests no privileged intent.
+It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing itself.
+`/ask` and plain-DM questions went in PET-518, when Muse took over asking mtrace.
+
+**The media assistant (PET-869)** brings plain DMs back, behind `MEDIA_CHAT=on` and off by
+default. The owner's DM text goes to lab-agent's `POST /v1/media/ask` with the last six turns, and the
+answer comes back with the tools it read. A message from anyone else, from a bot or from a
+server channel gets no answer. Discord delivers a DM's content to the app it is addressed to
+without the `MessageContent` privileged intent, so the app still requests none. It does
+request `Partials.Channel`, because discord.js drops the first DM from an uncached channel
+without it. Until lab-agent serves `/v1/media/ask`, a question answers `No answer: lab-agent
+answered HTTP 404`, which is why the switch stays off.
 
 ## It is a user-installed app, not a server bot
 

@@ -70,6 +70,14 @@ interface Config {
     token: string;
     timeoutMs: number;
   };
+  /**
+   * The chat front for the media assistant (PET-869). Off until MEDIA_CHAT=on, so a deploy
+   * of this code changes nothing by itself. It reuses the /lab URL and ask bearer.
+   */
+  media: {
+    chatEnabled: boolean;
+    timeoutMs: number;
+  };
   /** PB.6 — HTTP server for inbound alerts and the notify/edit-message pair. */
   httpServer: {
     enabled: boolean;
@@ -143,6 +151,10 @@ export const config: Config = {
     token: getEnvVar('LAB_ASK_TOKEN', ''),
     // Eight model turns with tool calls between them; past this the answer is not coming.
     timeoutMs: parseInt(getEnvVar('LAB_TIMEOUT_MS', '120000'), 10),
+  },
+  media: {
+    chatEnabled: getEnvVar('MEDIA_CHAT', '') === 'on',
+    timeoutMs: parseInt(getEnvVar('MEDIA_TIMEOUT_MS', '120000'), 10),
   },
   httpServer: {
     enabled: getEnvVar('HTTP_SERVER_ENABLED', 'true') === 'true',
