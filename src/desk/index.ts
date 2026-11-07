@@ -12,6 +12,20 @@ import { GitHubApp } from './github.js';
 import { DeskStore } from './store.js';
 import { CodexGradeStore } from './codex-grades.js';
 import { logger } from '../utils/index.js';
+import type { Notifier } from './desk.js';
+
+/**
+ * Discord is for alerts only, so the desk sends no DM unless DESK_DM=on. Each message it would
+ * have sent goes to the log, which says it was withheld. The desk's decisions are on the PR
+ * (its comments and the merge itself) and in /health.
+ */
+function logNotifier(): Notifier {
+  return {
+    async dm(content) {
+      logger.info(`[Desk] DM withheld (DESK_DM is not on): ${content.slice(0, 300).replace(/\n/g, ' ')}`);
+    },
+  };
+}
 
 let desk: MergeDesk | null = null;
 let deskState: DeskState = { state: 'off' };
@@ -52,7 +66,7 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
     qwen: s.fallback ? ollamaReviewer(s.fallback.qwen) : undefined,
     store,
     grades,
-    notifier: discordNotifier(client, ownerUserId),
+    notifier: (env.DESK_DM ?? '').trim() === 'on' ? discordNotifier(client, ownerUserId) : logNotifier(),
     log: logger,
   });
   desk.start();

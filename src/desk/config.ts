@@ -58,6 +58,8 @@ export type DeskState =
 
 export interface DeskEnv {
   DESK_MODE?: string;
+  /** `on` sends the desk's DMs to the owner. Anything else logs them instead. */
+  DESK_DM?: string;
   DESK_ORG?: string;
   DESK_REPOS?: string;
   DESK_NO_CI_REPOS?: string;
