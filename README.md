@@ -167,6 +167,26 @@ the tools, any failed reads and the tokens. pete-bot runs no model for it and gi
 `lab-agent` none of its own credentials. With `LAB_ASK_TOKEN` empty, `/lab` answers "not
 configured". `lab-agent` refuses to start on a missing or malformed setting.
 
+## The media assistant's lab-agent side (PET-869)
+
+`POST /v1/media/ask` on lab-agent takes `{"question", "history"}` (at most 12 turns) with the ask bearer
+and runs the same Qwen loop and limits as `/v1/ask`, over the media tools only. It shares the
+one-question slot with `/v1/ask`, so a second request gets 429. With `LAB_MTRACE_TOKEN` empty it
+answers 404, and `lab-agent` starts without the route.
+
+| Tool | Reads |
+|---|---|
+| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `stale_versions`, `partial_files` | mtrace on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
+| `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
+
+`LAB_MTRACE_TOKEN` is lab-agent's own mtrace caller (`token_lab-agent`), never pete-bot's. 237 reaches mtrace on
+its own LAN address through the `lo` rule in the nftables allowlist. `LAB_OLLAMA_URL` now defaults to
+CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the port.
+
+`scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
+mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
+ten tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
+
 ## The nightly drift check (PET-671)
 
 `lab-agent` compares live Proxmox guests with the vault's `Hosts/hosts-inventory.md` and the

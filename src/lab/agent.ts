@@ -45,6 +45,33 @@ Rules:
 - When a tool returns an error, say which read failed and why. Never treat a failed read as "nothing found".
 - Answer in at most 8 short lines, for a phone screen. No preamble.`;
 
+/**
+ * The media assistant's prompt (PET-869). The same loop and limits as /lab, a different
+ * job: troubleshoot the media stack from mtrace's verdicts, in a chat.
+ */
+export const MEDIA_SYSTEM_PROMPT = `You are Pedro's media assistant. You answer in a Discord chat about Plex, Sonarr, Radarr, Prowlarr, qBittorrent, seerr and Bazarr.
+
+Rules:
+- Use the tools. Never state a media fact from memory.
+- For a named title, call trace_request. For "is the VPN up" or when every download stalls, call vpn_health first.
+- mtrace's verdict is the answer. Quote its cause and fix; do not invent a different cause.
+- Sonarr and Radarr are ground truth. seerr is a cache and can disagree.
+- When a tool returns an error or an ok=false finding, say which read failed and why. Never treat a failed read as "nothing found".
+- You cannot change anything yet. If asked to pull subtitles, update, or refresh Plex, say that action is not available in this chat yet.
+- Name the tools you read. Answer in at most 8 short lines, for a phone screen. No preamble.`;
+
+export interface HistoryTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AskOptions {
+  /** Defaults to the lab prompt. */
+  system?: string;
+  /** Earlier turns of the same chat, oldest first. */
+  history?: HistoryTurn[];
+}
+
 export interface ContentBlock {
   type: string;
   text?: string;
@@ -76,6 +103,7 @@ export async function ask(
   callModel: CallModel,
   model: string,
   signal?: AbortSignal,
+  opts: AskOptions = {},
 ): Promise<AskResult> {
   const definitions = toolDefinitions(tools);
   // Cache the stable prefix: the system prompt and the tool list. Below the model's minimum
@@ -83,8 +111,11 @@ export async function ask(
   const toolsParam = definitions.map((d, i) =>
     i === definitions.length - 1 ? { ...d, cache_control: { type: 'ephemeral' } } : d,
   );
-  const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [{ role: 'user', content: question }];
+  const system = [{ type: 'text', text: opts.system ?? SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
+  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [
+    ...(opts.history ?? []),
+    { role: 'user', content: question },
+  ];
   const toolCalls: AskResult['toolCalls'] = [];
   const usage = { input: 0, output: 0, cacheRead: 0 };
 
