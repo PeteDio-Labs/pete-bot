@@ -52,12 +52,13 @@ label.mute{display:block;width:100%}
 button.chip{min-height:34px;padding:5px 12px}
 .bar span:first-child{width:96px}
 #trend{height:64px}
-table.rt thead,table.rt tr:has(th){display:none}
+table.rt thead{display:none}
 table.rt,table.rt tbody{display:block}
 table.rt tr{display:block;padding:8px 0;border-top:1px solid var(--line)}
 table.rt td{display:flex;justify-content:space-between;gap:12px;border:0;padding:2px 0;overflow-wrap:anywhere}
 table.rt td::before{content:attr(data-label);flex:none;color:var(--mute);font-size:12px;padding-top:2px}
 table.rt td>a,table.rt td{text-align:right}
+table.rt td:not([data-label]){display:block;text-align:left}
 table.rt td[data-label=Title]{display:block;text-align:left;font-weight:600;padding:3px 0}
 table.rt td[data-label=Title]::before{display:none}
 dl{grid-template-columns:1fr}
@@ -136,8 +137,8 @@ var title=function(k){return k==='weekly'?'Weekly PRs':(TITLES[k]||k)};
 function plain(v){if(v==null)return'none';if(typeof v==='object')return JSON.stringify(v);return String(v)}
 function recDefault(box,rec){var dl=el('dl');Object.keys(rec).forEach(function(k){dl.appendChild(el('dt',k));dl.appendChild(el('dd',plain(rec[k])))});box.appendChild(dl)}
 var RENDER={};
-function rtable(heads,rows){var t=el('table',null,{class:'rt'}),h=el('tr');heads.forEach(function(x){h.appendChild(el('th',x))});t.appendChild(h);
- rows.forEach(function(r){var tr=el('tr');r.forEach(function(x,i){tr.appendChild(el('td',x,{'data-label':heads[i]}))});t.appendChild(tr)});return t}
+function rtable(heads,rows){var t=el('table',null,{class:'rt'}),th=el('thead'),h=el('tr'),tb=el('tbody');heads.forEach(function(x){h.appendChild(el('th',x))});th.appendChild(h);t.appendChild(th);
+ rows.forEach(function(r){var tr=el('tr');r.forEach(function(x,i){tr.appendChild(el('td',x,{'data-label':heads[i]}))});tb.appendChild(tr)});t.appendChild(tb);return t}
 RENDER.cve=function(box,r){var e=r.examined||{},un=e.hostsUnread||[],gaps=r.gaps||[];
  box.appendChild(el('div',String(r.findings),{class:'big'}));
  box.appendChild(el('div','findings: '+r.actionable+' actionable, '+r.exploited+' exploited, by severity '+Object.keys(r.bySeverity||{}).map(function(k){return k+' '+r.bySeverity[k]}).join(', '),{class:'mute'}));
