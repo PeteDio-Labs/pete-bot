@@ -47,6 +47,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       <label class="mute">Week <select id="weekSel"></select></label>
       <div><div class="big" id="total">0</div><div class="mute">merged</div></div>
       <div><div class="big" id="open">0</div><div class="mute">open when generated</div></div>
+      <div><div class="big" id="lead">–</div><div class="mute">median hours open → merged</div></div>
+      <div><div class="big" id="bot">–</div><div class="mute">% by threads bot</div></div>
     </div>
     <p id="focus"></p>
     <div id="cover" class="warn"></div>
@@ -74,7 +76,9 @@ function bars(box,obj){clear(box);var ent=Object.keys(obj).map(function(k){retur
  if(!ent.length)box.appendChild(el('div','none',{class:'mute'}));
  ent.forEach(function(p){var r=el('div',null,{class:'bar'});r.appendChild(el('span',p[0]));var b=el('i');b.style.width=Math.max(4,Math.round(p[1]/max*100))+'%';r.appendChild(b);r.appendChild(el('span',String(p[1])));box.appendChild(r)})}
 function render(){
- var w=cur;$('total').textContent=String(w.total);$('open').textContent=String(w.openNow);
+ var w=cur;$('total').textContent=String(w.total);
+ var ml=w.medianLeadHours;$('lead').textContent=(typeof ml==='number')?(ml<10?ml.toFixed(1):String(Math.round(ml))):'–';
+ var bt=(w.byAuthor&&w.byAuthor['threads bot'])||0;$('bot').textContent=w.total?String(Math.round(bt/w.total*100)):'–';$('open').textContent=String(w.openNow);
  var f=$('focus');
  if(w.summary&&w.summary.text)f.textContent=w.summary.text+(w.summary.source==='ollama'?'':'');else f.textContent='Summary not generated'+(w.summary&&w.summary.reason?' ('+w.summary.reason+')':'')+'.';
  var c=w.coverage,notes=[];

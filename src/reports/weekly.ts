@@ -37,6 +37,8 @@ export interface WeekPr {
   url: string;
   author: string;
   mergedAt: string;
+  /** Hours from opened to merged. Absent when the open time was not read. */
+  leadHours?: number;
   petKeys: number[];
 }
 
@@ -49,6 +51,8 @@ export interface WeekRecord {
   byAuthor: Record<string, number>;
   /** PRs still open when the report ran, across the repos that were read. */
   openNow: number;
+  /** Median hours from opened to merged, over the PRs that carry an open time. Absent on records stored before PET-868 follow-up. */
+  medianLeadHours?: number | null;
   merged: WeekPr[];
   coverage: { reposRead: number; reposTotal: number; unread: string[]; floorRepos: string[] };
   summary: { source: 'ollama' | 'none'; model?: string; text: string; reason?: string };
@@ -57,6 +61,18 @@ export interface WeekRecord {
 export type Summarize = (prs: WeekPr[], week: string) => Promise<string>;
 
 const addDays = (date: string, n: number): string => new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+
+const leadOf = (created: string | undefined, merged: string): { leadHours?: number } => {
+  const ms = created ? Date.parse(merged) - Date.parse(created) : NaN;
+  return Number.isFinite(ms) && ms >= 0 ? { leadHours: Math.round((ms / 3_600_000) * 100) / 100 } : {};
+};
+
+export function medianLead(prs: WeekPr[]): number | null {
+  const xs = prs.flatMap((p) => (p.leadHours === undefined ? [] : [p.leadHours])).sort((a, b) => a - b);
+  if (xs.length === 0) return null;
+  const m = xs.length >> 1;
+  return xs.length % 2 ? xs[m]! : Math.round(((xs[m - 1]! + xs[m]!) / 2) * 100) / 100;
+}
 
 /** Builds the record for the week starting `week`. Nothing is written. */
 export async function buildWeek(gh: GithubReads, org: string, repos: string[], week: string, at: Date, summarize: Summarize): Promise<WeekRecord> {
@@ -73,6 +89,7 @@ export async function buildWeek(gh: GithubReads, org: string, repos: string[], w
       url: p.url,
       author: (Object.hasOwn(AUTHOR_LABELS, p.author) ? AUTHOR_LABELS[p.author] : undefined) ?? (p.author || 'unknown'),
       mergedAt: p.mergedAt!,
+      ...leadOf(p.createdAt, p.mergedAt!),
       petKeys: p.petKeys,
     }))
     .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
@@ -96,6 +113,7 @@ export async function buildWeek(gh: GithubReads, org: string, repos: string[], w
     total: count.total,
     byRepo: Object.fromEntries(count.byRepo),
     byAuthor: Object.fromEntries(count.byAuthor),
+    medianLeadHours: medianLead(merged),
     openNow: read.reduce((n, r) => n + (r.ok ? r.open.length : 0), 0),
     merged,
     coverage: { reposRead: read.length, reposTotal: reads.length, unread, floorRepos: count.floorRepos },

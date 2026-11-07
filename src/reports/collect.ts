@@ -41,6 +41,8 @@ export interface ClosedPr {
   url: string;
   headSha: string;
   headRef: string;
+  /** When the PR was opened. */
+  createdAt?: string;
   closedAt: string;
   mergedAt: string | null;
   /** The login that opened the PR. */
@@ -62,6 +64,7 @@ interface RawPr {
   user: { login: string } | null;
   head: { sha: string; ref: string };
   updated_at: string;
+  created_at?: string;
   closed_at?: string | null;
   merged_at?: string | null;
 }
@@ -147,6 +150,7 @@ export async function collectRepo(
         url: r.html_url,
         headSha: r.head.sha,
         headRef: r.head.ref,
+        createdAt: r.created_at,
         closedAt: r.closed_at ?? '',
         mergedAt: r.merged_at ?? null,
         author: r.user?.login ?? '',
