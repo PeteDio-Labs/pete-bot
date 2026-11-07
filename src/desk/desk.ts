@@ -23,6 +23,7 @@ import { codexReviews } from './codex.js';
 import type { ClassifierSource, RunPython } from './classify.js';
 import { classify } from './classify.js';
 import type { QwenReviewer } from './qwen.js';
+import type { CodexGradeStore, GradeSummary } from './codex-grades.js';
 import { checkGate, decide, blockingRounds, MAX_ROUNDS, QUEUE_MAX_TRIES, type Decision, type Facts } from './decide.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp } from './github.js';
@@ -52,6 +53,8 @@ export interface DeskDeps {
   /** The Codex-out fallback reviewer (PET-751). Absent keeps the Codex-only gate. */
   qwen?: QwenReviewer;
   store: DeskStore;
+  /** Codex's grades of Qwen's verdicts (PET-899). Absent turns grading off. Never read into a Qwen prompt. */
+  grades?: CodexGradeStore;
   notifier: Notifier;
   log: DeskLog;
   runPython?: RunPython;
@@ -367,6 +370,7 @@ export class MergeDesk {
     this.busy.add(key);
     try {
       const f = await this.facts(repo, n);
+      this.gradeQwen(repo, n, f);
       const d = decide(f);
       await this.act(repo, f, d);
       return d;
@@ -493,6 +497,34 @@ export class MergeDesk {
       }
     }
     return { checked: open.length, reverted, read };
+  }
+
+  /**
+   * Records Codex's verdict beside Qwen's on each head both read (PET-899). It stores verdict
+   * words only. Nothing here feeds a Qwen prompt; see `codex-grades.ts`.
+   */
+  private gradeQwen(repo: string, n: number, f: Facts): void {
+    const { grades, store, log } = this.deps;
+    if (!grades || f.codex.length === 0) return;
+    try {
+      // A row made by the merge alone (judged_at equals merged_at) holds a placeholder word, not a Qwen verdict.
+      const judged = store.ledgerForPr(repo, n).filter((r) => r.judgedAt !== r.mergedAt);
+      for (const row of judged) {
+        const review = f.codex
+          .filter((r) => r.commitId === row.sha)
+          .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
+        if (review && grades.record({ repo, pr: n, sha: row.sha, qwen: row.verdict, codex: review.verdict, codexUrl: review.url })) {
+          log.info(`merge desk: Codex graded the Qwen verdict on ${repo}#${n} at ${short(row.sha)}`);
+        }
+      }
+    } catch (err) {
+      log.warn(`merge desk: recording a Codex grade for ${repo}#${n} failed: ${String(err)}`);
+    }
+  }
+
+  /** Agreement between Codex and Qwen, for a person to read. Null when grading is off. */
+  codexGrades(): GradeSummary | null {
+    return this.deps.grades?.summary() ?? null;
   }
 
   /** What the Insight tab shows about the fallback: every count says what it covers. */

@@ -35,6 +35,8 @@ export interface DeskSettings {
   privateKeyPem: string;
   pollMs: number;
   statePath: string;
+  /** Where Codex's grades of Qwen's verdicts go (PET-899). Empty turns grading off. A file apart from `statePath`, on purpose. */
+  codexGradesPath?: string;
   /** Where the tier rules live: one file on the default branch of one repository. */
   classifierRepo: string;
   classifierPath: string;
@@ -72,6 +74,7 @@ export interface DeskEnv {
   DESK_CODEX_SSH_KEY?: string;
   DESK_CODEX_KNOWN_HOSTS?: string;
   DESK_CODEX_TIMEOUT_MS?: string;
+  DESK_CODEX_GRADES_PATH?: string;
   DESK_QWEN_URL?: string;
   DESK_QWEN_MODEL?: string;
   DESK_FALLBACK_AFTER_MS?: string;
@@ -183,6 +186,7 @@ export function loadDeskSettings(
       privateKeyPem,
       pollMs,
       statePath,
+      codexGradesPath: (env.DESK_CODEX_GRADES_PATH ?? '').trim(),
       classifierRepo: (env.DESK_CLASSIFIER_REPO ?? '').trim() || 'petedio-iac',
       classifierPath: (env.DESK_CLASSIFIER_PATH ?? '').trim() || 'scripts/pr-blast-radius.py',
       python: (env.DESK_PYTHON ?? '').trim() || 'python3',

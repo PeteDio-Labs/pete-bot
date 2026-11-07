@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MergeDesk, buttonId, parseButtonId, TIER2_CANARIES, type Button } from './desk.js';
 import { DeskStore } from './store.js';
+import { CodexGradeStore } from './codex-grades.js';
 import { CodexQueue } from './codex.js';
 import type { DeskSettings } from './config.js';
 import type { GitHubApp, PullDetail, Review } from './github.js';
@@ -145,7 +146,7 @@ let queueOk: boolean;
 let queueOutput: string;
 let dmFailures: number;
 
-function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memory:')) {
+function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memory:'), grades?: CodexGradeStore) {
   const codex = new CodexQueue({
     ...settings().codex,
     spawn: async (argv) => {
@@ -158,6 +159,7 @@ function makeDesk(over: Partial<DeskSettings> = {}, store = new DeskStore(':memo
     github: gh as unknown as GitHubApp,
     codex,
     store,
+    grades,
     notifier: {
       dm: async (content, buttons) => {
         if (dmFailures > 0) {
@@ -362,6 +364,38 @@ describe('review fixes (Codex round 1)', () => {
     expect(desk.qwenLedger()).toMatchObject({ judged: 1, clean: 1, mergedByQwen: 1, mergedByCiOnly: 1, reverted: 1 });
     // A checked row is not checked again, and a head with no ledger row changes nothing.
     expect((await desk.checkLedgerOutcomes()).checked).toBe(1);
+  });
+
+  it('grades a Qwen verdict when Codex reviews the same head, once, and stores no review text', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    const grades = new CodexGradeStore(':memory:');
+    gh.reviews = [codexReview('Changes requested')];
+    const desk = makeDesk({}, store, grades);
+    await desk.poll();
+    await desk.poll();
+    expect(desk.codexGrades()).toMatchObject({ graded: 1, agree: 0, disagree: 1, missed: 1 });
+  });
+
+  it('grades against the latest Codex review of a head', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    const grades = new CodexGradeStore(':memory:');
+    gh.reviews = [
+      codexReview('Changes requested', HEAD, '2026-10-16T01:00:00Z'),
+      codexReview('No blocking findings', HEAD, '2026-10-16T02:00:00Z'),
+    ];
+    const desk = makeDesk({}, store, grades);
+    await desk.poll();
+    expect(desk.codexGrades()).toMatchObject({ graded: 1, agree: 1, disagree: 0 });
+  });
+
+  it('grades nothing when no grade store is set', async () => {
+    const store = new DeskStore(':memory:');
+    store.ledgerJudge({ repo: REPO, pr: 5, sha: HEAD, tier: 1, by: 'qwen', verdict: 'clean' });
+    const desk = makeDesk({}, store);
+    await desk.poll();
+    expect(desk.codexGrades()).toBeNull();
   });
 
   it('queues again after a restart interrupted the queue, without a report', async () => {

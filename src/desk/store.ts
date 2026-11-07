@@ -131,12 +131,18 @@ export class DeskStore {
     return this.ledger('WHERE merged_at IS NOT NULL AND outcome IS NULL');
   }
 
+  /** The Qwen rows for one PR. A query with parameters, so the poll never loads the whole table. */
+  ledgerForPr(repo: string, pr: number): LedgerRow[] {
+    const rows = this.ledger('WHERE by = ? AND repo = ? AND pr = ?', ['qwen', repo, pr]);
+    return rows;
+  }
+
   ledgerOutcome(id: number, outcome: 'reverted' | 'held'): void {
     this.db.query('UPDATE qwen_ledger SET outcome = ? WHERE id = ?').run(outcome, id);
   }
 
-  ledger(where = ''): LedgerRow[] {
-    const rows = this.db.query(`SELECT * FROM qwen_ledger ${where} ORDER BY id DESC`).all() as Record<string, unknown>[];
+  ledger(where = '', params: (string | number)[] = []): LedgerRow[] {
+    const rows = this.db.query(`SELECT * FROM qwen_ledger ${where} ORDER BY id DESC`).all(...params) as Record<string, unknown>[];
     return rows.map((r) => ({
       id: r.id as number,
       repo: r.repo as string,
