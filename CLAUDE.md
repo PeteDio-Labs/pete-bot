@@ -12,8 +12,8 @@ each subsystem; this file holds only the rules. The repo is `pete-bot`, not `pet
   DMs stay off unless `DESK_DM=on` (`pete-bot#101`). Do not add a channel that pings Pedro for
   routine status.
 - **The merge desk decides from facts GitHub reports.** No model decides a merge. A tier comes
-  from `scripts/pr-blast-radius.py` in `petedio-iac`. Qwen is a fallback reviewer after Codex
-  stays silent, and Codex grades of Qwen go to a separate store only. Keep `src/desk/` tests
+  from `scripts/pr-blast-radius.py` in `petedio-iac`. The Qwen fallback follows section 5 of the
+  vault's working agreement, and Codex grades of Qwen go to a separate store only. Keep `src/desk/` tests
   passing; they guard the gate.
 - **Never log a token, a query's text or a DM's body.** Log lengths and ids.
 - **Secrets come from Vault at deploy time** through `deploy.yml` (OIDC). Write a new secret as
