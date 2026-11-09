@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { parseAgents } from './access.js';
 
 /** 32 base64 characters carry 192 bits. Anything shorter was not minted by the seed script. */
 const TOKEN = z.string().min(32, 'must be at least 32 characters').regex(/^\S+$/, 'must not contain whitespace');
@@ -46,6 +47,8 @@ const EnvSchema = z.object({
   LAB_ACCESS_TEAM_DOMAIN: z.string().regex(/^[a-z0-9-]+\.cloudflareaccess\.com$/, 'must look like <team>.cloudflareaccess.com').optional(),
   LAB_ACCESS_AUD: z.string().regex(/^[0-9a-f]{64}$/, 'must be the 64-hex AUD tag').optional(),
   LAB_ACCESS_EMAILS: z.string().optional(),
+  // Agent service tokens for the lab MCP, `<client id>=<name>,...` (PET-904).
+  LAB_ACCESS_AGENTS: z.string().optional(),
   // plane_item (PET-672). The tool is offered only when the token is set, so a deploy that
   // runs before the seed still starts.
   LAB_PLANE_URL: z.string().url().default('http://192.168.50.235:8080'),
@@ -95,7 +98,7 @@ export interface LabConfig {
   bazarr: { baseUrl: string; apiKey: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
-  mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[] } | null;
+  mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[]; agents: Record<string, string> } | null;
 }
 
 export function loadLabConfig(env: Record<string, string | undefined>, readFile = (p: string) => readFileSync(p, 'utf8')): LabConfig {
@@ -124,14 +127,20 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
   let mcp: LabConfig['mcp'] = null;
   if (e.LAB_ACCESS_AUD) {
     const emails = (e.LAB_ACCESS_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    let agents: Record<string, string>;
+    try {
+      agents = parseAgents(e.LAB_ACCESS_AGENTS);
+    } catch (err) {
+      throw new Error(`lab-agent settings are invalid: LAB_ACCESS_AGENTS: ${(err as Error).message}`);
+    }
     const missing = [
       !e.LAB_MCP_HOST && 'LAB_MCP_HOST',
       !e.LAB_ACCESS_TEAM_DOMAIN && 'LAB_ACCESS_TEAM_DOMAIN',
-      emails.length === 0 && 'LAB_ACCESS_EMAILS',
+      emails.length === 0 && Object.keys(agents).length === 0 && 'LAB_ACCESS_EMAILS',
     ].filter(Boolean);
     if (missing.length) throw new Error(`lab-agent settings are invalid: LAB_ACCESS_AUD is set, so ${missing.join(', ')} must be too`);
     if (e.LAB_MCP_PORT === e.LAB_PORT) throw new Error('lab-agent settings are invalid: LAB_MCP_PORT must differ from LAB_PORT');
-    mcp = { host: e.LAB_MCP_HOST!, port: e.LAB_MCP_PORT, peer: e.LAB_MCP_PEER, teamDomain: e.LAB_ACCESS_TEAM_DOMAIN!, aud: e.LAB_ACCESS_AUD, emails };
+    mcp = { host: e.LAB_MCP_HOST!, port: e.LAB_MCP_PORT, peer: e.LAB_MCP_PEER, teamDomain: e.LAB_ACCESS_TEAM_DOMAIN!, aud: e.LAB_ACCESS_AUD, emails, agents };
   }
   let privateKeyPem: string;
   try {

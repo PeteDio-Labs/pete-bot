@@ -70,7 +70,17 @@ describe('loadLabConfig', () => {
       { ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'Pedelgadillo@gmail.com' },
       read,
     );
-    expect(cfg.mcp).toEqual({ host: '192.168.50.237', port: 3017, peer: '192.168.50.112', teamDomain: 'petedio.cloudflareaccess.com', aud, emails: ['pedelgadillo@gmail.com'] });
+    expect(cfg.mcp).toEqual({ host: '192.168.50.237', port: 3017, peer: '192.168.50.112', teamDomain: 'petedio.cloudflareaccess.com', aud, emails: ['pedelgadillo@gmail.com'], agents: {} });
+    // PET-904: an agents list parses into client id -> name, and a malformed one stops startup.
+    const cid = `${'c'.repeat(32)}.access`;
+    const withAgents = loadLabConfig(
+      { ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'pedelgadillo@gmail.com', LAB_ACCESS_AGENTS: `${cid}=bobbert` },
+      read,
+    );
+    expect(withAgents.mcp?.agents).toEqual({ [cid]: 'bobbert' });
+    expect(() =>
+      loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'pedelgadillo@gmail.com', LAB_ACCESS_AGENTS: 'bad' }, read),
+    ).toThrow('LAB_ACCESS_AGENTS');
   });
 
   it('refuses to start without a PEM key for the vault App (PET-670)', () => {

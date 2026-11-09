@@ -6,6 +6,12 @@
  * team's keys. This module verifies that JWT at the origin: its signature against the team's
  * JWKS, its `aud` against the lab app's AUD tag, its issuer, its expiry, and its email.
  *
+ * AGENTS (PET-904). An agent such as Pedro's Muse passes Access with a service token, not a
+ * login. Its JWT carries no email; it carries `common_name`, the token's client id. `agents`
+ * maps each known client id to a caller name, and the result names the agent as
+ * `agent:<name>`. A JWT with an email never takes the agent path, so a person cannot borrow an
+ * agent's scope, and an unknown client id is refused like an unknown email.
+ *
  * ⚠ TWO CHECKS, BECAUSE EITHER ALONE HAS FAILED OPEN. The origin also accepts only the
  * tunnel's address (LXC 112), and nftables on 237 drops every other source (PET-670). The
  * Plane shim relies on the firewall alone; a firewall rule that a deploy forgets leaves that
@@ -20,11 +26,31 @@ export interface AccessConfig {
   aud: string;
   /** Emails allowed through, lower-case. */
   emails: string[];
+  /** Agent service tokens allowed through: client id -> caller name (PET-904). */
+  agents?: Record<string, string>;
   fetch?: typeof fetch;
   now?: () => number;
 }
 
-export type AccessResult = { ok: true; email: string } | { ok: false; reason: string };
+/** `email` is the person's email, or `agent:<name>` for an agent's service token. */
+export type AccessResult = { ok: true; email: string; kind?: 'person' | 'agent' } | { ok: false; reason: string };
+
+const CLIENT_ID = /^[0-9a-f]{32}\.access$/;
+const AGENT_NAME = /^[a-z][a-z0-9-]{1,30}$/;
+
+/** Parse `<client id>=<name>,...` (LAB_ACCESS_AGENTS) and refuse anything malformed. */
+export function parseAgents(raw: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    const [id, name, extra] = pair.split('=');
+    if (extra !== undefined || !id || !name || !CLIENT_ID.test(id) || !AGENT_NAME.test(name)) {
+      throw new Error('Access agents must look like <32 hex>.access=<name>, comma-separated');
+    }
+    if (out[id]) throw new Error('Access agents list one client id twice');
+    out[id] = name;
+  }
+  return out;
+}
 
 interface Jwk extends JsonWebKey {
   kid?: string;
@@ -46,7 +72,10 @@ export class AccessVerifier {
   constructor(private readonly cfg: AccessConfig) {
     if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(cfg.teamDomain)) throw new Error('Access team domain must look like <team>.cloudflareaccess.com');
     if (!/^[0-9a-f]{64}$/.test(cfg.aud)) throw new Error('Access AUD tag must be 64 hex characters');
-    if (cfg.emails.length === 0) throw new Error('Access needs at least one allowed email');
+    if (cfg.emails.length === 0 && Object.keys(cfg.agents ?? {}).length === 0) throw new Error('Access needs at least one allowed email or agent');
+    for (const [id, name] of Object.entries(cfg.agents ?? {})) {
+      if (!CLIENT_ID.test(id) || !AGENT_NAME.test(name)) throw new Error('Access agents must map <32 hex>.access to a caller name');
+    }
     this.fetchImpl = cfg.fetch ?? fetch;
     this.now = cfg.now ?? Date.now;
   }
@@ -126,7 +155,14 @@ export class AccessVerifier {
     if (typeof payload.exp !== 'number' || payload.exp + CLOCK_SKEW_SEC < nowSec) return { ok: false, reason: 'JWT expired' };
     if (typeof payload.nbf === 'number' && payload.nbf - CLOCK_SKEW_SEC > nowSec) return { ok: false, reason: 'JWT not yet valid' };
     const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : '';
-    if (!email || !this.cfg.emails.includes(email)) return { ok: false, reason: 'email not allowed' };
-    return { ok: true, email };
+    if (email) {
+      if (!this.cfg.emails.includes(email)) return { ok: false, reason: 'email not allowed' };
+      return { ok: true, email, kind: 'person' };
+    }
+    // No email: a service token. Only a client id in the agents map gets through.
+    const cn = typeof payload.common_name === 'string' ? payload.common_name : '';
+    const agent = cn ? Object.hasOwn(this.cfg.agents ?? {}, cn) ? this.cfg.agents![cn] : undefined : undefined;
+    if (!agent) return { ok: false, reason: cn ? 'service token not allowed' : 'email not allowed' };
+    return { ok: true, email: `agent:${agent}`, kind: 'agent' };
   }
 }
