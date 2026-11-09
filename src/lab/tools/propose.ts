@@ -32,10 +32,10 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined): LabTool {
   return {
     name: PROPOSE_TOOL,
     description:
-      'Ask the user to confirm a change. This does not run it. Use action "subtitles" with a title to search for missing subtitles, ' +
+      'Propose an action. For subtitles and update_apply this only asks the user to confirm and does not run it. Use action "subtitles" with a title to search for missing subtitles, ' +
       '"update_check" with a target only to look (it needs no confirmation), or "update_apply" with a target to install. ' +
       'When the user says update, install or upgrade, call update_apply for the named service, not update_check. ' +
-      'Tell the user what you proposed and that a Confirm button will follow.',
+      'Tell the user what you proposed. For subtitles and update_apply, say a Confirm button will follow. For update_check, say the check is starting.',
     input,
     async run({ action, title, target }: z.infer<typeof input>) {
       if (action === 'subtitles') {
