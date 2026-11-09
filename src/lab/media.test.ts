@@ -105,10 +105,46 @@ describe('the media loop', () => {
   });
 });
 
+describe('download ETA follow-ups', () => {
+  for (const q of ["how long until it's downloaded", 'show me the latest downloads', 'what finished downloading recently']) {
+    it(`offers list_queue and carries the earlier turns for "${q}"`, async () => {
+      const seen: Array<Record<string, unknown>> = [];
+      const run = vi.fn(async () => ({ source: 'mtrace list_queue', data: { text: 'Coco 37.8%, ETA 45m' } }));
+      const tool: LabTool = { name: 'list_queue', description: 'd', input: z.object({}), run };
+      const out = await ask(
+        q,
+        new Map([[tool.name, tool]]),
+        scripted([{ content: [{ type: 'tool_use', id: 't1', name: 'list_queue', input: {} }], stop_reason: 'tool_use' }, final('Coco: ETA 45m.')], seen),
+        'm',
+        undefined,
+        { system: MEDIA_SYSTEM_PROMPT, history: [{ role: 'user', content: 'How long until coco is finished?' }, { role: 'assistant', content: 'Coco is at 37.8%.' }] },
+      );
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(out.toolCalls).toEqual([{ name: 'list_queue', ok: true }]);
+      expect(out.answer).toContain('ETA 45m');
+      expect((seen[0]!.messages as unknown[]).length).toBe(3);
+    });
+  }
+});
+
 describe('the media prompt', () => {
-  it('tells the model there is no recently-added tool and bans the queue as a stand-in', () => {
-    expect(MEDIA_SYSTEM_PROMPT).toContain('No tool lists recently added titles');
-    expect(MEDIA_SYSTEM_PROMPT).toContain('never answer it with the download queue');
+  it('sends ETA, follow-up and latest-download questions to list_queue and never says it cannot check', () => {
+    expect(MEDIA_SYSTEM_PROMPT).toContain('call list_queue');
+    expect(MEDIA_SYSTEM_PROMPT).toContain("how long until it is downloaded");
+    expect(MEDIA_SYSTEM_PROMPT).toContain('refers to the title from the earlier turns');
+    expect(MEDIA_SYSTEM_PROMPT).toContain('Never say you cannot check download times');
+    expect(MEDIA_SYSTEM_PROMPT).toContain('latest finished downloads');
+  });
+
+  it('still says no tool lists library additions, and labels finished downloads as downloads', () => {
+    expect(MEDIA_SYSTEM_PROMPT).toContain('No tool lists titles added to the Plex library');
+    expect(MEDIA_SYSTEM_PROMPT).toContain('downloads, not library additions');
+  });
+
+  it('describes list_queue with ETA and latest finished downloads', () => {
+    const q = mtraceTools({ baseUrl: 'http://x', token: 't'.repeat(40) }).find((t) => t.name === 'list_queue');
+    expect(q?.description).toContain('ETA');
+    expect(q?.description).toContain('latest finished downloads');
   });
 
   it('tells the model to state only what a tool returned', () => {

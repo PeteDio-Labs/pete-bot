@@ -56,7 +56,7 @@ export const MTRACE_SPECS: Spec[] = [
       episode: z.number().int().min(0).max(1000).optional(),
     }),
   },
-  { name: 'list_queue', description: 'Everything downloading or waiting to import, with progress.', input: z.object({}) },
+  { name: 'list_queue', description: 'Everything downloading or waiting to import, including torrents added by hand, with progress, speed and ETA, then the latest finished downloads. Use it for "how long until it is downloaded" and "latest downloads".', input: z.object({}) },
   { name: 'queue_errors', description: 'Queue items that fail, block, stick or fail to import, with each message.', input: z.object({}) },
   { name: 'why_is_it_dead', description: 'Why individual torrents do not move: seed counts and tracker messages. Check vpn_health first when everything is at zero seeds.', input: z.object({}) },
   {
