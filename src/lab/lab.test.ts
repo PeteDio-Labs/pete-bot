@@ -65,7 +65,7 @@ describe('loadLabConfig', () => {
 
   it('turns the MCP door on only with every Access setting', () => {
     const aud = 'a1'.repeat(32);
-    expect(() => loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud }, read)).toThrow('LAB_MCP_HOST, LAB_ACCESS_TEAM_DOMAIN, LAB_ACCESS_EMAILS must be too');
+    expect(() => loadLabConfig({ ...baseEnv, LAB_ACCESS_AUD: aud }, read)).toThrow('LAB_MCP_HOST, LAB_ACCESS_TEAM_DOMAIN, LAB_ACCESS_EMAILS or LAB_ACCESS_AGENTS must be too');
     const cfg = loadLabConfig(
       { ...baseEnv, LAB_ACCESS_AUD: aud, LAB_MCP_HOST: '192.168.50.237', LAB_ACCESS_TEAM_DOMAIN: 'petedio.cloudflareaccess.com', LAB_ACCESS_EMAILS: 'Pedelgadillo@gmail.com' },
       read,

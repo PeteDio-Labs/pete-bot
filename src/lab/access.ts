@@ -9,8 +9,9 @@
  * AGENTS (PET-904). An agent such as Pedro's Muse passes Access with a service token, not a
  * login. Its JWT carries no email; it carries `common_name`, the token's client id. `agents`
  * maps each known client id to a caller name, and the result names the agent as
- * `agent:<name>`. A JWT with an email never takes the agent path, so a person cannot borrow an
- * agent's scope, and an unknown client id is refused like an unknown email.
+ * `agent:<name>`. A JWT with an email never takes the agent path, so a person's login cannot
+ * pass as an agent, and an unknown client id is refused like an unknown email. An agent gets
+ * the same tools as a person; the door does not scope by `kind`.
  *
  * ⚠ TWO CHECKS, BECAUSE EITHER ALONE HAS FAILED OPEN. The origin also accepts only the
  * tunnel's address (LXC 112), and nftables on 237 drops every other source (PET-670). The

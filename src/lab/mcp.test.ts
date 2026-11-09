@@ -189,6 +189,13 @@ describe('AccessVerifier agents (PET-904)', () => {
     expect(await verifier().verify(service())).toEqual({ ok: false, reason: 'service token not allowed' });
   });
 
+  it('admits an agent when no emails are configured, and refuses an empty email claim with no client id', async () => {
+    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [], agents: { [CID]: 'bobbert' }, now: () => NOW, fetch: (async () => json(jwks)) as unknown as typeof fetch });
+    expect(await v.verify(service())).toEqual({ ok: true, email: 'agent:bobbert', kind: 'agent' });
+    expect(await v.verify(service({ email: '', common_name: undefined }))).toEqual({ ok: false, reason: 'email not allowed' });
+    expect(() => new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [] })).toThrow();
+  });
+
   it('parses LAB_ACCESS_AGENTS and refuses anything malformed', () => {
     expect(parseAgents(` ${CID}=bobbert , `)).toEqual({ [CID]: 'bobbert' });
     expect(parseAgents(undefined)).toEqual({});

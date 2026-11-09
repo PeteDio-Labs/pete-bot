@@ -136,7 +136,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     const missing = [
       !e.LAB_MCP_HOST && 'LAB_MCP_HOST',
       !e.LAB_ACCESS_TEAM_DOMAIN && 'LAB_ACCESS_TEAM_DOMAIN',
-      emails.length === 0 && Object.keys(agents).length === 0 && 'LAB_ACCESS_EMAILS',
+      emails.length === 0 && Object.keys(agents).length === 0 && 'LAB_ACCESS_EMAILS or LAB_ACCESS_AGENTS',
     ].filter(Boolean);
     if (missing.length) throw new Error(`lab-agent settings are invalid: LAB_ACCESS_AUD is set, so ${missing.join(', ')} must be too`);
     if (e.LAB_MCP_PORT === e.LAB_PORT) throw new Error('lab-agent settings are invalid: LAB_MCP_PORT must differ from LAB_PORT');
