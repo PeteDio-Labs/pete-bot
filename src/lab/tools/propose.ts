@@ -32,9 +32,10 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined): LabTool {
   return {
     name: PROPOSE_TOOL,
     description:
-      'Ask the user to confirm a change. This does not run it. Use action "subtitles" with a title to search for missing subtitles, ' +
-      '"update_check" with a target to see which updates are available, or "update_apply" with a target to install them. ' +
-      'Tell the user what you proposed and that a Confirm button will follow.',
+      'Propose an action. For subtitles and update_apply this only asks the user to confirm and does not run it. Use action "subtitles" with a title to search for missing subtitles, ' +
+      '"update_check" with a target only to look (it needs no confirmation), or "update_apply" with a target to install. ' +
+      'When the user says update, install or upgrade, call update_apply for the named service, not update_check. ' +
+      'Tell the user what you proposed. For subtitles and update_apply, say a Confirm button will follow. For update_check, say the check is starting.',
     input,
     async run({ action, title, target }: z.infer<typeof input>) {
       if (action === 'subtitles') {
@@ -65,7 +66,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined): LabTool {
           : { action, target, label: `Install updates for ${target}`, confirm: true };
       return {
         source: 'media-updates.yml targets',
-        data: { proposal, pending: proposal.confirm ? 'The user must tap Confirm. Nothing has run.' : 'The check starts now and its report follows.' },
+        data: { proposal, pending: proposal.confirm ? 'The user must tap Confirm. Nothing has run.' : 'This is a read-only check with nothing to confirm. It runs as soon as you answer, and its report follows. Do not tell the user to confirm.' },
       };
     },
   };

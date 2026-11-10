@@ -131,6 +131,8 @@ describe('propose_action', () => {
     const c = await callTool(tool(), { action: 'update_check', target: 'plex' });
     const a = await callTool(tool(), { action: 'update_apply', target: 'plex-and-arr' });
     expect(c.ok && proposalOf(c.text)).toMatchObject({ action: 'update_check', confirm: false });
+    expect(c.ok && c.text).not.toMatch(/must tap Confirm/);
+    expect(c.ok && c.text).toMatch(/Do not tell the user to confirm/);
     expect(a.ok && proposalOf(a.text)).toMatchObject({ action: 'update_apply', confirm: true });
   });
   it('refuses an update without a target and a target outside the list', async () => {
