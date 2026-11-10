@@ -5,7 +5,7 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { generateKeyPairSync, createSign, type KeyObject } from 'node:crypto';
 import { z } from 'zod';
-import { AccessVerifier } from './access.js';
+import { AccessVerifier, parseAgents } from './access.js';
 import { createMcpHandler, MCP_PATH, normalizePeer } from './mcp.js';
 import { deskStatusTool, parseShow, systemdStatusTool } from './tools/local.js';
 import { callTool, LabToolError, type LabTool, type ToolResult } from './tools/types.js';
@@ -60,8 +60,8 @@ describe('AccessVerifier', () => {
   it("accepts Pedro's token and caches the keys", async () => {
     const count = { n: 0 };
     const v = verifier(count);
-    expect(await v.verify(good())).toEqual({ ok: true, email: 'pedelgadillo@gmail.com' });
-    expect(await v.verify(good())).toEqual({ ok: true, email: 'pedelgadillo@gmail.com' });
+    expect(await v.verify(good())).toEqual({ ok: true, email: 'pedelgadillo@gmail.com', kind: 'person' });
+    expect(await v.verify(good())).toEqual({ ok: true, email: 'pedelgadillo@gmail.com', kind: 'person' });
     expect(count.n).toBe(1);
   });
 
@@ -146,6 +146,62 @@ describe('AccessVerifier', () => {
   it('refuses everything when the certs cannot be read', async () => {
     const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: ['a@b.c'], now: () => NOW, fetch: (async () => json({}, 500)) as unknown as typeof fetch });
     expect(await v.verify(good())).toEqual({ ok: false, reason: 'cannot read Access certs: Access certs answered HTTP 500' });
+  });
+});
+
+describe('AccessVerifier agents (PET-904)', () => {
+  const CID = `${'a'.repeat(32)}.access`;
+  const agentVerifier = () =>
+    new AccessVerifier({
+      teamDomain: TEAM,
+      aud: AUD,
+      emails: ['pedelgadillo@gmail.com'],
+      agents: { [CID]: 'bobbert' },
+      now: () => NOW,
+      fetch: (async () => json(jwks)) as unknown as typeof fetch,
+    });
+  // A service-token JWT carries common_name, the client id, and no email.
+  const service = (over: Record<string, unknown> = {}) =>
+    sign({ aud: [AUD], iss: `https://${TEAM}`, common_name: CID, type: 'app', exp: NOW / 1000 + 300, ...over });
+
+  it('admits a known agent token as agent:<name>', async () => {
+    expect(await agentVerifier().verify(service())).toEqual({ ok: true, email: 'agent:bobbert', kind: 'agent' });
+  });
+
+  it('still admits a person, and marks them as one', async () => {
+    expect(await agentVerifier().verify(good())).toEqual({ ok: true, email: 'pedelgadillo@gmail.com', kind: 'person' });
+  });
+
+  it('refuses an unknown client id, a prototype key, and an email JWT that names an agent', async () => {
+    const v = agentVerifier();
+    expect(await v.verify(service({ common_name: `${'b'.repeat(32)}.access` }))).toEqual({ ok: false, reason: 'service token not allowed' });
+    expect(await v.verify(service({ common_name: '__proto__' }))).toEqual({ ok: false, reason: 'service token not allowed' });
+    expect(await v.verify(good({ email: 'someone@else.com', common_name: CID }))).toEqual({ ok: false, reason: 'email not allowed' });
+  });
+
+  it('refuses an agent token that is expired or for another app, like any JWT', async () => {
+    const v = agentVerifier();
+    expect(await v.verify(service({ exp: NOW / 1000 - 3600 }))).toEqual({ ok: false, reason: 'JWT expired' });
+    expect(await v.verify(service({ aud: ['f'.repeat(64)] }))).toEqual({ ok: false, reason: 'JWT is for another Access application' });
+  });
+
+  it('refuses a verifier with no agents when the token has no email', async () => {
+    expect(await verifier().verify(service())).toEqual({ ok: false, reason: 'service token not allowed' });
+  });
+
+  it('admits an agent when no emails are configured, and refuses an empty email claim with no client id', async () => {
+    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [], agents: { [CID]: 'bobbert' }, now: () => NOW, fetch: (async () => json(jwks)) as unknown as typeof fetch });
+    expect(await v.verify(service())).toEqual({ ok: true, email: 'agent:bobbert', kind: 'agent' });
+    expect(await v.verify(service({ email: '', common_name: undefined }))).toEqual({ ok: false, reason: 'email not allowed' });
+    expect(() => new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [] })).toThrow();
+  });
+
+  it('parses LAB_ACCESS_AGENTS and refuses anything malformed', () => {
+    expect(parseAgents(` ${CID}=bobbert , `)).toEqual({ [CID]: 'bobbert' });
+    expect(parseAgents(undefined)).toEqual({});
+    for (const bad of ['nope=bobbert', `${CID}=Bad_Name`, `${CID}=a=b`, `${CID}=bobbert,${CID}=batsy`]) {
+      expect(() => parseAgents(bad)).toThrow();
+    }
   });
 });
 

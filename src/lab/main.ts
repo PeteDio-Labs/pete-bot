@@ -188,7 +188,7 @@ log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...too
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.
 if (cfg.mcp) {
   const mcpCfg = cfg.mcp;
-  const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails });
+  const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails, agents: mcpCfg.agents });
   const mcpHandler = createMcpHandler({ tools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
   const mcpServer = Bun.serve({
     hostname: mcpCfg.host,
