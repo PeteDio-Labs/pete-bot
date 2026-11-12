@@ -88,6 +88,21 @@ export function chunk(text: string, max = 1900): string[] {
   return out;
 }
 
+/**
+ * Names why a report is INCOMPLETE, from its own "Not checked" or "Not read" block, so /health and
+ * the journal say it without opening the Discord DM. A report that marks itself incomplete but
+ * lists no gap says so instead of saying nothing.
+ */
+export function incompleteReason(text: string): string {
+  const lines = text.split('\n');
+  const at = lines.findIndex((l) => /Not checked\*\*|Not read, so these results are incomplete/.test(l));
+  const gaps = at < 0 ? [] : lines.slice(at + 1).filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim());
+  if (gaps.length === 0) return 'no gap line found in the report';
+  const first = gaps.slice(0, 2).join('; ');
+  const more = gaps.length > 2 ? ` (+${gaps.length - 2} more)` : '';
+  return `${first}${more}`.slice(0, 220);
+}
+
 export class ReportRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
@@ -160,6 +175,7 @@ export class ReportRunner {
       const built = await this.build(name, at);
       text = built;
       incomplete = built.includes('INCOMPLETE');
+      if (incomplete) detail = `sent, incomplete: ${incompleteReason(built)}`;
     } catch (err) {
       ok = false;
       const reason = err instanceof Error ? err.message : String(err);
@@ -190,7 +206,7 @@ export class ReportRunner {
       this.dates[name] = localTime(at).date;
       this.save();
     }
-    this.d.log.info(`[Reports] ${name} sent (${ok ? (incomplete ? 'incomplete' : 'complete') : 'failed'})`);
+    this.d.log.info(`[Reports] ${name} sent (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
     return true;
   }
 
