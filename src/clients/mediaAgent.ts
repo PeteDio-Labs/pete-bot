@@ -20,6 +20,8 @@ export interface MediaAnswer {
   proposals: Proposal[];
   /** The answer hit a limit, was cut, or came back empty. */
   incomplete: boolean;
+  /** Why each failed read failed, as lab-agent logged it. */
+  toolErrors?: Array<{ name: string; error: string }>;
 }
 
 export type MediaOutcome = { kind: 'answer'; result: MediaAnswer } | { kind: 'not-configured' } | { kind: 'failed'; reason: string };
@@ -69,6 +71,9 @@ export async function askMedia(
       toolCalls: Array.isArray(a.toolCalls) ? a.toolCalls : [],
       proposals: parseProposals(a.proposals),
       incomplete: Boolean(a.incomplete),
+      toolErrors: Array.isArray(a.toolErrors)
+        ? a.toolErrors.filter((e) => typeof e?.name === 'string' && typeof e?.error === 'string')
+        : [],
     },
   };
 }
