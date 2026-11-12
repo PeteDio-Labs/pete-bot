@@ -65,7 +65,7 @@ const EnvSchema = z.object({
   // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
   LAB_MEDIA_TOOLKITS: z.string().optional(),
   LAB_METRICS_HOST: z.string().ip({ version: 'v4' }).optional(),
-  LAB_METRICS_PORT: z.coerce.number().int().min(1024).max(65535).default(3018),
+  LAB_METRICS_PORT: z.coerce.number().int().min(1024).max(65535).default(3019),
   LAB_METRICS_PEER: z.string().ip({ version: 'v4' }).default('192.168.50.240'),
   LAB_MTRACE_URL: z.string().url().default('http://192.168.50.237:8237'),
   LAB_MTRACE_TOKEN: TOKEN.optional(),
