@@ -156,7 +156,7 @@ describe('AccessVerifier agents (PET-904)', () => {
       teamDomain: TEAM,
       aud: AUD,
       emails: ['pedelgadillo@gmail.com'],
-      agents: { [CID]: 'bobbert' },
+      agents: { [CID]: 'muse' },
       now: () => NOW,
       fetch: (async () => json(jwks)) as unknown as typeof fetch,
     });
@@ -165,7 +165,7 @@ describe('AccessVerifier agents (PET-904)', () => {
     sign({ aud: [AUD], iss: `https://${TEAM}`, common_name: CID, type: 'app', exp: NOW / 1000 + 300, ...over });
 
   it('admits a known agent token as agent:<name>', async () => {
-    expect(await agentVerifier().verify(service())).toEqual({ ok: true, email: 'agent:bobbert', kind: 'agent' });
+    expect(await agentVerifier().verify(service())).toEqual({ ok: true, email: 'agent:muse', kind: 'agent' });
   });
 
   it('still admits a person, and marks them as one', async () => {
@@ -190,16 +190,16 @@ describe('AccessVerifier agents (PET-904)', () => {
   });
 
   it('admits an agent when no emails are configured, and refuses an empty email claim with no client id', async () => {
-    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [], agents: { [CID]: 'bobbert' }, now: () => NOW, fetch: (async () => json(jwks)) as unknown as typeof fetch });
-    expect(await v.verify(service())).toEqual({ ok: true, email: 'agent:bobbert', kind: 'agent' });
+    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [], agents: { [CID]: 'muse' }, now: () => NOW, fetch: (async () => json(jwks)) as unknown as typeof fetch });
+    expect(await v.verify(service())).toEqual({ ok: true, email: 'agent:muse', kind: 'agent' });
     expect(await v.verify(service({ email: '', common_name: undefined }))).toEqual({ ok: false, reason: 'email not allowed' });
     expect(() => new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: [] })).toThrow();
   });
 
   it('parses LAB_ACCESS_AGENTS and refuses anything malformed', () => {
-    expect(parseAgents(` ${CID}=bobbert , `)).toEqual({ [CID]: 'bobbert' });
+    expect(parseAgents(` ${CID}=muse , `)).toEqual({ [CID]: 'muse' });
     expect(parseAgents(undefined)).toEqual({});
-    for (const bad of ['nope=bobbert', `${CID}=Bad_Name`, `${CID}=a=b`, `${CID}=bobbert,${CID}=batsy`]) {
+    for (const bad of ['nope=muse', `${CID}=Bad_Name`, `${CID}=a=b`, `${CID}=muse,${CID}=batsy`]) {
       expect(() => parseAgents(bad)).toThrow();
     }
   });
