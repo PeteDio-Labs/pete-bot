@@ -52,7 +52,7 @@ const tools = buildLabTools({
   search: cfg.search ?? undefined,
   units: LAB_UNITS,
 });
-// The media assistant's tools (PET-869): mtrace's eleven reads, plus search when it is set.
+// The media assistant's tools (PET-869): mtrace's thirteen reads, plus search when it is set.
 // With no mtrace token the map stays undefined and /v1/media/ask answers 404, so a host
 // that has not been seeded says so instead of answering without its tools.
 const bazarrCfg = cfg.bazarr ?? undefined;

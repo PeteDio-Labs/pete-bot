@@ -11,13 +11,13 @@
  *   1. mtrace /health.
  *   2. The tool list on mtrace (GET /api/tools) against MTRACE_SPECS: a missing, extra or
  *      re-shaped tool is drift, and the probe says which.
- *   3. All eleven tools through the code the assistant uses (src/lab/tools/mtrace.ts), with
+ *   3. All thirteen tools through the code the assistant uses (src/lab/tools/mtrace.ts), with
  *      timings. An `ok=false` finding is printed as a finding, not a failure.
  *   4. With BAZARR_API_KEY set (read the key in Bazarr's config.yaml on 222, never print it):
  *      bazarr_status, bazarr_find for PROBE_TITLE, and propose_action for it. These only read
  *      and resolve. The probe never runs the subtitle search, which only a Confirm tap runs.
  *   5. With --ask, the whole loop: the question goes to Ollama (OLLAMA_URL, default
- *      http://192.168.50.246:11434) with the eleven tools, and the probe prints which tools the
+ *      http://192.168.50.246:11434) with the thirteen tools, and the probe prints which tools the
  *      model chose and its answer. The first call after the model unloads takes about 22 s.
  *
  * The token comes from MTRACE_TOKEN or the 0600 file MTRACE_TOKEN_FILE. It is never printed.

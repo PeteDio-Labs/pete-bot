@@ -176,7 +176,7 @@ answers 404, and `lab-agent` starts without the route.
 
 | Tool | Reads |
 |---|---|
-| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `stale_versions`, `partial_files` | mtrace on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
+| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | mtrace on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
 | `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
 `LAB_MTRACE_TOKEN` is lab-agent's own mtrace caller (`token_lab-agent`), never pete-bot's. 237 reaches mtrace on
@@ -185,7 +185,7 @@ CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the
 
 `scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
 mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
-eleven tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
+thirteen tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
 
 ### Changes need your tap (PET-869)
 
