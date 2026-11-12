@@ -9,6 +9,7 @@ import { loadLabConfig } from './config.js';
 import { createLabHandler } from './server.js';
 import { callTool, inputJsonSchema, type LabTool } from './tools/index.js';
 import { MTRACE_SPECS, mtraceTools } from './tools/mtrace.js';
+import { createLabMetrics } from './metrics.js';
 
 const ASK = 'a'.repeat(40);
 const CFG = { baseUrl: 'http://192.168.50.237:8237/', token: 'm'.repeat(40) };
@@ -187,6 +188,18 @@ describe('POST /v1/media/ask', () => {
     const names = (seen[0]!.tools as Array<{ name: string }>).map((t) => t.name);
     expect(names).toEqual(['list_queue']);
     expect((seen[0]!.messages as unknown[]).length).toBe(3);
+  });
+
+  it('records the question in /metrics against the tool count, and serves no /metrics without them', async () => {
+    const metrics = createLabMetrics();
+    const handler = make({ metrics });
+    await handler(post({ question: 'what is in the queue' }));
+    const res = await handler(new Request('http://127.0.0.1:3016/metrics'));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('lab_agent_media_asks_total{outcome="answered",tools="1"} 1');
+    expect(text).toContain('lab_agent_media_no_tool_total{tools="1"} 1');
+    expect((await make()(new Request('http://127.0.0.1:3016/metrics'))).status).toBe(404);
   });
 
   it('answers 404 when no media tools are configured, never an answer from the lab tools', async () => {

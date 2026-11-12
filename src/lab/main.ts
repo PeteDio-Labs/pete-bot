@@ -14,6 +14,7 @@ import { loadLabConfig, type LabConfig } from './config.js';
 import { AccessVerifier } from './access.js';
 import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
+import { createLabMetrics } from './metrics.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
@@ -167,6 +168,9 @@ function scheduleDrift(): void {
 }
 scheduleDrift();
 
+const metrics = createLabMetrics();
+metrics.setToolsOffered(mediaTools?.size ?? 0);
+
 const handler = createLabHandler({
   askToken: cfg.askToken,
   tools,
@@ -177,6 +181,7 @@ const handler = createLabHandler({
   checks,
   log,
   runDrift,
+  metrics,
 });
 
 // Bun closes an idle connection after 10 s by default. An answer can take 80 s, and a drift
