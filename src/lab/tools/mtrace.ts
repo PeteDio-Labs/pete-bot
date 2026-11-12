@@ -79,6 +79,8 @@ export function mtraceTools(cfg: MtraceConfig): LabTool[] {
     name: spec.name,
     description: spec.description,
     input: spec.input,
+    // The model passes `title` to no-argument tools. mtrace is read-only, so drop that key only.
+    ...(Object.keys(spec.input.shape).includes('title') ? {} : { ignoredKeys: ['title'] }),
     async run(args: Record<string, unknown>) {
       const url = `${cfg.baseUrl.replace(/\/$/, '')}/api/tool/${spec.name}`;
       const res = await fetchWithTimeout(
