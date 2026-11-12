@@ -167,7 +167,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         const result: AskResult = isMedia
           ? await ask(body.question, deps.mediaTools!, deps.callModel, deps.model, signal, { system: MEDIA_SYSTEM_PROMPT, history: body.history })
           : await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
-        const derived = isMedia && deps.metrics ? deps.metrics.recordAsk(result, deps.mediaTools!.size) : undefined;
+        const derived = isMedia && deps.metrics ? deps.metrics.recordAsk(result, [...deps.mediaTools!.keys()]) : undefined;
         log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, toolErrors: result.toolErrors, usage: result.usage, incomplete: result.incomplete, ...(derived && { toolsOffered: deps.mediaTools!.size, retries: derived.retries, noTool: derived.noTool }) });
         return json(result);
       } catch (err) {

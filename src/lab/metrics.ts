@@ -30,20 +30,22 @@ export function createLabMetrics() {
     register,
     setToolsOffered: (n: number) => offered.set(n),
     /** Record one finished media question. Returns the derived fields for the journal line. */
-    recordAsk(result: AskResult, toolsOffered: number): { retries: number; noTool: boolean } {
-      const t = String(toolsOffered);
+    recordAsk(result: AskResult, offered: readonly string[]): { retries: number; noTool: boolean } {
+      const t = String(offered.length);
+      // A name the model invented is one `unknown` series, so garbage cannot grow the label set.
+      const known = (n: string) => (offered.includes(n) ? n : 'unknown');
       asks.inc({ outcome: result.incomplete ? 'incomplete' : 'answered', tools: t });
       turns.observe({ tools: t }, result.turns);
       let retried = 0;
       result.toolCalls.forEach((c, i) => {
-        calls.inc({ tool: c.name, result: c.ok ? 'ok' : 'error', tools: t });
+        calls.inc({ tool: known(c.name), result: c.ok ? 'ok' : 'error', tools: t });
         const prev = result.toolCalls[i - 1];
         if (prev && !prev.ok && prev.name === c.name) {
           retried++;
           retries.inc({ tools: t });
         }
       });
-      for (const e of result.toolErrors ?? []) if (/invalid input/.test(e.error)) invalid.inc({ tool: e.name, tools: t });
+      for (const e of result.toolErrors ?? []) if (/invalid input/.test(e.error)) invalid.inc({ tool: known(e.name), tools: t });
       const none = result.toolCalls.length === 0;
       if (none) noTool.inc({ tools: t });
       return { retries: retried, noTool: none };

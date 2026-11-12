@@ -10,10 +10,11 @@ describe('lab routing metrics', () => {
     m.setToolsOffered(13);
     const a = m.recordAsk(
       result({ toolCalls: [{ name: 'list_queue', ok: false }, { name: 'list_queue', ok: true }], toolErrors: [{ name: 'list_queue', error: "list_queue: invalid input: input: Unrecognized key(s) in object: 'title'" }] }),
-      13,
+      Array.from({ length: 13 }, (_, i) => (i === 0 ? 'list_queue' : `t${i}`)),
     );
     expect(a).toEqual({ retries: 1, noTool: false });
-    expect(m.recordAsk(result({}), 13)).toEqual({ retries: 0, noTool: true });
+    expect(m.recordAsk(result({}), Array.from({ length: 13 }, (_, i) => `t${i}`))).toEqual({ retries: 0, noTool: true });
+    m.recordAsk(result({ toolCalls: [{ name: 'made_up_tool', ok: false }], toolErrors: [] }), Array.from({ length: 13 }, (_, i) => `t${i}`));
     m.recordFailure(13);
     const text = await m.register.metrics();
     expect(text).toContain('lab_agent_media_tools_offered 13');
@@ -21,6 +22,8 @@ describe('lab routing metrics', () => {
     expect(text).toContain('lab_agent_media_no_tool_total{tools="13"} 1');
     expect(text).toContain('lab_agent_media_invalid_input_total{tool="list_queue",tools="13"} 1');
     expect(text).toContain('lab_agent_media_tool_calls_total{tool="list_queue",result="error",tools="13"} 1');
+    expect(text).toContain('tool="unknown"');
+    expect(text).not.toContain('made_up_tool');
     expect(text).toContain('lab_agent_media_asks_total{outcome="failed",tools="13"} 1');
   });
 });
