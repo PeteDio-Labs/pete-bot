@@ -23,6 +23,7 @@ import { ask, ASK_DEADLINE_MS, MEDIA_SYSTEM_PROMPT, type AskResult, type CallMod
 import { ModelError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
 import type { LabTool } from './tools/index.js';
+import type { LabMetrics } from './metrics.js';
 
 export type Check = () => Promise<string>;
 
@@ -42,6 +43,8 @@ export interface LabServerDeps {
   actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
+  /** Media routing metrics. Absent, GET /metrics answers 404. */
+  metrics?: LabMetrics;
 }
 
 const AskBody = z.object({ question: z.string().trim().min(3).max(500) }).strict();
@@ -107,6 +110,11 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       return json({ status: result.ok ? 'ok' : 'degraded', ...result }, result.ok ? 200 : 503);
     }
 
+    // Counts only: no question text, no tool output. Bound to 127.0.0.1 with the rest of the server.
+    if (req.method === 'GET' && url.pathname === '/metrics' && deps.metrics) {
+      return new Response(await deps.metrics.register.metrics(), { headers: { 'content-type': deps.metrics.register.contentType } });
+    }
+
     if (url.pathname === '/v1/media/act' && deps.actBazarr) {
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
@@ -159,10 +167,12 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         const result: AskResult = isMedia
           ? await ask(body.question, deps.mediaTools!, deps.callModel, deps.model, signal, { system: MEDIA_SYSTEM_PROMPT, history: body.history })
           : await ask(body.question, deps.tools, deps.callModel, deps.model, signal);
-        log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, toolErrors: result.toolErrors, usage: result.usage, incomplete: result.incomplete });
+        const derived = isMedia && deps.metrics ? deps.metrics.recordAsk(result, [...deps.mediaTools!.keys()]) : undefined;
+        log(isMedia ? 'media ask answered' : 'ask answered', { ms: Date.now() - started, turns: result.turns, tools: result.toolCalls, toolErrors: result.toolErrors, usage: result.usage, incomplete: result.incomplete, ...(derived && { toolsOffered: deps.mediaTools!.size, retries: derived.retries, noTool: derived.noTool }) });
         return json(result);
       } catch (err) {
         const message = err instanceof ModelError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        if (isMedia) deps.metrics?.recordFailure(deps.mediaTools!.size);
         log(isMedia ? 'media ask failed' : 'ask failed', { ms: Date.now() - started, error: message });
         return json({ error: message }, 502);
       } finally {

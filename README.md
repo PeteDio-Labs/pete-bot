@@ -187,6 +187,15 @@ CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the
 mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
 thirteen tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
 
+### Routing metrics
+
+To see whether routing degrades as the tool count grows, `lab-agent` serves `GET /metrics` on `127.0.0.1:3016`.
+Every series carries a `tools` label, the number of tools offered to the model: `lab_agent_media_asks_total`,
+`lab_agent_media_tool_calls_total`, `lab_agent_media_invalid_input_total`, `lab_agent_media_retries_total`,
+`lab_agent_media_no_tool_total` and `lab_agent_media_turns`. They count what the model did, not whether it was right.
+`scripts/media-routing-eval.ts` asks a fixed question set and prints the wrong-tool rate with the tool count. Each
+answered question also writes `toolsOffered`, `retries` and `noTool` to the journal line `media ask answered`.
+
 ### Changes need your tap (PET-869)
 
 The model cannot change anything. Its `propose_action` tool validates a request and returns a
