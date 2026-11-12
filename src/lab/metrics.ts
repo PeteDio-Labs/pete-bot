@@ -2,7 +2,7 @@
  * Routing metrics for the media assistant (Pedro, 2026-11-12: "see if too many tools make it
  * start acting up").
  *
- * Every series carries a `tools` label, the number of tools the model was offered, so one
+ * Every series carries a `toolkits` label (the kits switched on, joined with +) and a `tools` label, the number of tools the model was offered, so one
  * query compares routing at 10 tools with routing at 13. A tool added later shows as a new
  * `tools` value.
  *
@@ -14,8 +14,10 @@
 import { Counter, Gauge, Histogram, Registry } from 'prom-client';
 import type { AskResult } from './agent.js';
 
-export function createLabMetrics() {
+export function createLabMetrics(toolkits = 'all') {
   const register = new Registry();
+  // Which kits were on, so two runs with the same tool count but different kits stay apart.
+  register.setDefaultLabels({ toolkits });
   const labels = ['tools'];
 
   const asks = new Counter({ name: 'lab_agent_media_asks_total', help: 'Media questions, by outcome and tools offered', labelNames: ['outcome', ...labels], registers: [register] });
@@ -57,3 +59,20 @@ export function createLabMetrics() {
 }
 
 export type LabMetrics = ReturnType<typeof createLabMetrics>;
+
+/**
+ * The scrape door: its own listener on the LAN address, answering GET /metrics to one peer
+ * (Prometheus on 240) and nothing else. Any other source gets 403 and any other path 404, so
+ * the route on the loopback server stays the only wider surface. Counts and tool names only.
+ */
+export function createMetricsHandler(deps: { metrics: LabMetrics; allowedPeer: string; log?: (msg: string, fields?: Record<string, unknown>) => void }) {
+  return async (req: Request, peer: string | undefined): Promise<Response> => {
+    const source = (peer ?? '').replace(/^::ffff:/, '');
+    if (source !== deps.allowedPeer) {
+      deps.log?.('metrics refused', { source: source || 'unknown' });
+      return new Response('forbidden', { status: 403 });
+    }
+    if (req.method !== 'GET' || new URL(req.url).pathname !== '/metrics') return new Response('not found', { status: 404 });
+    return new Response(await deps.metrics.register.metrics(), { headers: { 'content-type': deps.metrics.register.contentType } });
+  };
+}
