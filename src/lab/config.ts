@@ -151,6 +151,10 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     if (e.LAB_MCP_PORT === e.LAB_PORT) throw new Error('lab-agent settings are invalid: LAB_MCP_PORT must differ from LAB_PORT');
     mcp = { host: e.LAB_MCP_HOST!, port: e.LAB_MCP_PORT, peer: e.LAB_MCP_PEER, teamDomain: e.LAB_ACCESS_TEAM_DOMAIN!, aud: e.LAB_ACCESS_AUD, emails, agents };
   }
+  if (e.LAB_METRICS_HOST) {
+    if (e.LAB_METRICS_PORT === e.LAB_PORT) throw new Error('lab-agent settings are invalid: LAB_METRICS_PORT must differ from LAB_PORT');
+    if (mcp && e.LAB_METRICS_PORT === e.LAB_MCP_PORT) throw new Error('lab-agent settings are invalid: LAB_METRICS_PORT must differ from LAB_MCP_PORT');
+  }
   let privateKeyPem: string;
   try {
     privateKeyPem = readFile(e.LAB_GITHUB_APP_KEY_FILE);

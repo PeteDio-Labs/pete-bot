@@ -26,7 +26,7 @@ export const ALL_TOOLKITS = Object.keys(MEDIA_TOOLKITS);
 export function parseToolkits(raw: string | undefined): string[] {
   const names = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (names.length === 0) return [...ALL_TOOLKITS];
-  const unknown = names.filter((n) => !(n in MEDIA_TOOLKITS));
+  const unknown = names.filter((n) => !Object.hasOwn(MEDIA_TOOLKITS, n));
   if (unknown.length) throw new Error(`LAB_MEDIA_TOOLKITS names no such toolkit: ${unknown.join(', ')}. Valid: ${ALL_TOOLKITS.join(', ')}`);
   return [...new Set(names)].sort();
 }

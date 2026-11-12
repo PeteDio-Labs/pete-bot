@@ -15,7 +15,7 @@ import { AccessVerifier } from './access.js';
 import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
 import { createLabMetrics, createMetricsHandler } from './metrics.js';
-import { selectMediaTools } from './toolkits.js';
+import { ALL_TOOLKITS, selectMediaTools } from './toolkits.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
@@ -69,6 +69,12 @@ const mediaTools = cfg.mtrace
       cfg.mediaToolkits,
     )
   : undefined;
+// A kit can be valid and still select nothing (search with no search token, subtitles with no Bazarr key).
+// Refuse, so the route is not live with no tools behind it.
+if (mediaTools && mediaTools.size === 0) {
+  log('lab-agent refused to start', { error: `LAB_MEDIA_TOOLKITS=${cfg.mediaToolkits.join(',')} selects no tool: the kits' tools are not configured` });
+  process.exit(1);
+}
 const pve = new ProxmoxClient(cfg.proxmox);
 const secrets = new VaultMetadataClient(cfg.vault);
 
@@ -170,7 +176,7 @@ function scheduleDrift(): void {
 }
 scheduleDrift();
 
-const metrics = createLabMetrics(cfg.mediaToolkits.join('+'));
+const metrics = createLabMetrics(cfg.mediaToolkits.length === ALL_TOOLKITS.length ? 'all' : cfg.mediaToolkits.join('+'));
 metrics.setToolsOffered(mediaTools?.size ?? 0);
 
 const handler = createLabHandler({
@@ -194,7 +200,6 @@ log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...too
 
 // The scrape door: the LAN address, Prometheus on 240 only. Off while LAB_METRICS_HOST is unset.
 if (cfg.metrics) {
-  if (cfg.metrics.port === cfg.port) throw new Error('lab-agent settings are invalid: LAB_METRICS_PORT must differ from LAB_PORT');
   const metricsHandler = createMetricsHandler({ metrics, allowedPeer: cfg.metrics.peer, log });
   const metricsServer = Bun.serve({ hostname: cfg.metrics.host, port: cfg.metrics.port, fetch: (req, srv) => metricsHandler(req, srv.requestIP(req)?.address) });
   log('lab metrics listening', { address: `${cfg.metrics.host}:${metricsServer.port}`, peer: cfg.metrics.peer });

@@ -19,6 +19,13 @@ describe('toolkits', () => {
     const all = ['library', 'vpn_health', 'seerr_drift', 'propose_action', 'search_lab'].map(tool);
     expect([...selectMediaTools(all, ['core', 'audit']).keys()]).toEqual(['library', 'seerr_drift']);
   });
+  it('refuses names that only exist on Object.prototype', () => {
+    expect(() => parseToolkits('constructor')).toThrow(/no such toolkit/);
+  });
+  it('places the bazarr, search and propose tools in a kit', () => {
+    const placed = Object.values(MEDIA_TOOLKITS).flat();
+    for (const n of ['bazarr_status', 'bazarr_find', 'search_lab', 'propose_action']) expect(placed).toContain(n);
+  });
   it('places every mtrace tool in exactly one kit', () => {
     const placed = Object.values(MEDIA_TOOLKITS).flat();
     expect(new Set(placed).size).toBe(placed.length);
