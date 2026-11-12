@@ -392,3 +392,20 @@ describe('ReportRunner', () => {
     expect(sent.join('\n')).toContain('INCOMPLETE');
   });
 });
+
+describe('incompleteReason', () => {
+  it('names the first gaps of a CVE report', async () => {
+    const { incompleteReason } = await import('./runner.js');
+    const text = ['⚠ INCOMPLETE **CVE check**', '', '**Not checked**', '- pi1 was not scanned: no key', '- OSV paged', '- third'].join('\n');
+    expect(incompleteReason(text)).toBe('pi1 was not scanned: no key; OSV paged (+1 more)');
+  });
+  it('reads the snapshot gap block', async () => {
+    const { incompleteReason } = await import('./runner.js');
+    const text = ['x', '**⚠ Not read, so these results are incomplete:**', '- Plane was not read'].join('\n');
+    expect(incompleteReason(text)).toBe('Plane was not read');
+  });
+  it('says so when a report is incomplete with no gap line', async () => {
+    const { incompleteReason } = await import('./runner.js');
+    expect(incompleteReason('⚠ INCOMPLETE only')).toBe('no gap line found in the report');
+  });
+});
