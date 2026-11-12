@@ -1,5 +1,5 @@
 /**
- * The media tools (PET-869): mtrace's ten read-only tools as lab tools, so the media
+ * The media tools (PET-869): mtrace's thirteen read-only tools as lab tools, so the media
  * assistant's Qwen loop can ask "where is X stuck" and read the verdict mtrace computed.
  *
  * mtrace picks nothing here. The model picks a tool by its description and mtrace's
@@ -15,7 +15,7 @@
  * returns that text as data so the model reports it. A non-2xx, a non-JSON body or an
  * unreachable mtrace throws, because then mtrace itself did not answer.
  *
- * ⚠ READ-ONLY BY CONSTRUCTION. Only POST /api/tool/<name> for the ten names below is
+ * ⚠ READ-ONLY BY CONSTRUCTION. Only POST /api/tool/<name> for the thirteen names below is
  * called. mtrace has no write tool, and this module has no other route.
  */
 import { z } from 'zod';
@@ -66,6 +66,21 @@ export const MTRACE_SPECS: Spec[] = [
   },
   { name: 'seerr_drift', description: 'What seerr claims against what Sonarr and Radarr hold on disk. The arr apps are ground truth.', input: z.object({}) },
   { name: 'now_playing', description: 'Plex as a whole: who is watching, which libraries exist, whether it answers. Not a title lookup.', input: z.object({}) },
+  {
+    name: 'pool_health',
+    description: 'State of the ZFS pools on pve02 (media and downloads), read from inside the plex guest. Use it when many titles fail to play at once, or to check the pools after the USB enclosure reset. Not for one named title. It reports the pool state, not free space.',
+    input: z.object({}),
+  },
+  {
+    name: 'disk_free',
+    description: 'Free space on the volumes Sonarr and Radarr can see, such as the library and download disks, with a low or critical verdict. Use it for "how much space is left" and "is the disk full". Not for ZFS pool state and not for one title.',
+    input: z.object({}),
+  },
+  {
+    name: 'indexer_health',
+    description: "Prowlarr's indexers: which are enabled, which are backed off after failures, and its health warnings. Use it for \"are the indexers working\" and \"why is search returning nothing\". Not for a stuck download.",
+    input: z.object({}),
+  },
   { name: 'stale_versions', description: 'Which of Sonarr, Radarr and Prowlarr have an update available. It does not cover Plex, qBittorrent, seerr or Bazarr.', input: z.object({}) },
   {
     name: 'partial_files',

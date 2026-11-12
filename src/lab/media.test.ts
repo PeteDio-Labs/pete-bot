@@ -16,9 +16,9 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const find = (name: string, fetchImpl: typeof fetch) => mtraceTools({ ...CFG, fetch: fetchImpl }).find((t) => t.name === name)!;
 
 describe('mtrace tools', () => {
-  it('offers exactly the ten read tools', () => {
+  it('offers exactly the thirteen read tools', () => {
     expect(MTRACE_SPECS.map((s) => s.name).sort()).toEqual(
-      ['library', 'list_queue', 'now_playing', 'partial_files', 'queue_errors', 'seerr_drift', 'stale_versions', 'trace_request', 'vpn_health', 'why_is_it_dead'],
+      ['disk_free', 'indexer_health', 'library', 'list_queue', 'now_playing', 'partial_files', 'pool_health', 'queue_errors', 'seerr_drift', 'stale_versions', 'trace_request', 'vpn_health', 'why_is_it_dead'],
     );
   });
 
