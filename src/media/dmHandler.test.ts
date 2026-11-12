@@ -68,6 +68,10 @@ describe('failures are said', () => {
     expect(t).toContain('incomplete');
     expect(t).toContain('1 read(s) failed');
   });
+  it('names why a read failed in the footer', () => {
+    const t = describeOutcome({ kind: 'answer', result: { answer: 'x', toolCalls: [{ name: 'list_queue', ok: false }], toolErrors: [{ name: 'list_queue', error: 'mtrace answered HTTP 502 for list_queue' }], proposals: [], incomplete: false } } as never);
+    expect(t).toContain('1 read(s) failed (list_queue: mtrace answered HTTP 502 for list_queue)');
+  });
   it('does not show an empty answer as silence', () => {
     expect(describeOutcome(answer('  '))).toContain('(empty answer)');
   });

@@ -49,7 +49,9 @@ export function describe(outcome: MediaOutcome): string {
   const r = outcome.result;
   const failed = r.toolCalls.filter((t) => !t.ok).length;
   const tools = [...new Set(r.toolCalls.map((t) => t.name))].join(', ') || 'none';
-  const notes = [r.incomplete ? 'incomplete' : '', failed ? `${failed} read(s) failed` : ''].filter(Boolean).join(', ');
+  // Name why a read failed, in the footer, so a failure can be read without the journal.
+  const why = (r.toolErrors ?? []).slice(0, 2).map((e) => `${e.name}: ${e.error.replace(/\s+/g, ' ').slice(0, 120)}`).join('; ');
+  const notes = [r.incomplete ? 'incomplete' : '', failed ? `${failed} read(s) failed${why ? ` (${why})` : ''}` : ''].filter(Boolean).join(', ');
   const footer = `-# read: ${tools}${notes ? ` · ${notes}` : ''}`;
   return `${r.answer.trim() || '(empty answer)'}\n${footer}`;
 }
