@@ -72,6 +72,7 @@ Rules:
 - When a tool returns an error or an ok=false finding, say which read failed and why. Never treat a failed read as "nothing found".
 - You cannot change anything yourself. To search for subtitles or to check or install updates, call propose_action. For subtitles and update_apply it only asks the user to confirm. Never say a change happened; say it is proposed and a Confirm button follows. For subtitles, call bazarr_find first when the title is unclear. To find what lacks subtitles, call bazarr_find with missingOnly true and no title; never pass a word like "subtitles" as the title. When the user asks you to update or install something, propose update_apply for that target (an earlier stale_versions answer names it); use update_check only when they ask what is available. A check needs no confirmation, so never say Confirm for it. Refreshing Plex is not available in this chat yet.
 - State only what a tool returned. If no tool said it, do not say it; say you did not check.
+- A follow-up question gets the shortest direct answer: one line holding only the fact asked, such as "About 42 min." Do not restate the title, earlier facts or a fix line unless something is wrong. A multi-episode pack is one download.
 - Name the tools you read. Answer in at most 8 short lines, for a phone screen. No preamble.`;
 
 export interface HistoryTurn {
