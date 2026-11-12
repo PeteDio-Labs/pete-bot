@@ -409,3 +409,19 @@ describe('incompleteReason', () => {
     expect(incompleteReason('⚠ INCOMPLETE only')).toBe('no gap line found in the report');
   });
 });
+
+describe('incompleteReason, redaction and caps', () => {
+  it('replaces URLs and clips each gap', async () => {
+    const { incompleteReason } = await import('./runner.js');
+    const text = ['**Not checked**', `- plane not read: 401 https://plane.example/api/x?token=SECRET ${'y'.repeat(200)}`].join('\n');
+    const out = incompleteReason(text);
+    expect(out).not.toContain('SECRET');
+    expect(out).toContain('<url>');
+    expect(out.length).toBeLessThanOrEqual(80);
+  });
+  it('does not count the cap marker as a gap', async () => {
+    const { incompleteReason } = await import('./runner.js');
+    const text = ['**Not checked**', '- a', '- b', '- c', '- … 2 more'].join('\n');
+    expect(incompleteReason(text)).toBe('a; b (+1 more)');
+  });
+});
