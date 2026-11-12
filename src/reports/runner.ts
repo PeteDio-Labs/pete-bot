@@ -96,11 +96,15 @@ export function chunk(text: string, max = 1900): string[] {
 export function incompleteReason(text: string): string {
   const lines = text.split('\n');
   const at = lines.findIndex((l) => /Not checked\*\*|Not read, so these results are incomplete/.test(l));
-  const gaps = at < 0 ? [] : lines.slice(at + 1).filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim());
+  // The "… N more" and "and N more" tail lines are the report's own cap marker, not gaps.
+  const gaps = at < 0 ? [] : lines.slice(at + 1).filter((l) => l.startsWith('- ') && !/^- (… |and )\d+ more$/.test(l)).map((l) => l.slice(2).trim());
   if (gaps.length === 0) return 'no gap line found in the report';
-  const first = gaps.slice(0, 2).join('; ');
+  // /health and the journal are read through public run logs, so a gap's error text must not carry
+  // a URL, a query string or a long response body. Keep the first 80 characters of its words.
+  const safe = (g: string) => g.replace(/https?:\/\/\S+/g, '<url>').slice(0, 80);
+  const first = gaps.slice(0, 2).map(safe).join('; ');
   const more = gaps.length > 2 ? ` (+${gaps.length - 2} more)` : '';
-  return `${first}${more}`.slice(0, 220);
+  return `${first}${more}`;
 }
 
 export class ReportRunner {
