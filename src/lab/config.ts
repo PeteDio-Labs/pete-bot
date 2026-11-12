@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { parseAgents } from './access.js';
+import { parseToolkits } from './toolkits.js';
 
 /** 32 base64 characters carry 192 bits. Anything shorter was not minted by the seed script. */
 const TOKEN = z.string().min(32, 'must be at least 32 characters').regex(/^\S+$/, 'must not contain whitespace');
@@ -62,6 +63,10 @@ const EnvSchema = z.object({
   // mtrace, for the media assistant (PET-869). 237 reaches its own LAN address through the
   // `lo` allowlist rule. The tools are offered only when the token is set, and the token is
   // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
+  LAB_MEDIA_TOOLKITS: z.string().optional(),
+  LAB_METRICS_HOST: z.string().ip({ version: 'v4' }).optional(),
+  LAB_METRICS_PORT: z.coerce.number().int().min(1024).max(65535).default(3018),
+  LAB_METRICS_PEER: z.string().ip({ version: 'v4' }).default('192.168.50.240'),
   LAB_MTRACE_URL: z.string().url().default('http://192.168.50.237:8237'),
   LAB_MTRACE_TOKEN: TOKEN.optional(),
   // Bazarr, for the subtitle search the owner confirms (PET-869). Offered only when the key is set.
@@ -92,6 +97,10 @@ export interface LabConfig {
   plane: { baseUrl: string; workspace: string; identifiers: string[]; token: string } | null;
   /** null while no search token is set. */
   search: { baseUrl: string; token: string } | null;
+  /** The toolkits the media assistant offers (LAB_MEDIA_TOOLKITS). Every kit when unset. */
+  mediaToolkits: string[];
+  /** null while LAB_METRICS_HOST is unset: /metrics then answers on loopback only. */
+  metrics: { host: string; port: number; peer: string } | null;
   /** null while no mtrace token is set: the media assistant then answers 404. */
   mtrace: { baseUrl: string; token: string } | null;
   /** null while no Bazarr key is set: no subtitle tools, no subtitle action. */
@@ -171,6 +180,8 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
       ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, identifiers: e.LAB_PLANE_PROJECTS.split(','), token: e.LAB_PLANE_TOKEN }
       : null,
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
+    mediaToolkits: parseToolkits(e.LAB_MEDIA_TOOLKITS),
+    metrics: e.LAB_METRICS_HOST ? { host: e.LAB_METRICS_HOST, port: e.LAB_METRICS_PORT, peer: e.LAB_METRICS_PEER } : null,
     mtrace: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
     bazarr: e.LAB_BAZARR_KEY ? { baseUrl: e.LAB_BAZARR_URL.replace(/\/$/, ''), apiKey: e.LAB_BAZARR_KEY } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },

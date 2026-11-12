@@ -197,8 +197,8 @@ describe('POST /v1/media/ask', () => {
     const res = await handler(new Request('http://127.0.0.1:3016/metrics'));
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain('lab_agent_media_asks_total{outcome="answered",tools="1"} 1');
-    expect(text).toContain('lab_agent_media_no_tool_total{tools="1"} 1');
+    expect(text).toContain('lab_agent_media_asks_total{outcome="answered",tools="1",toolkits="all"} 1');
+    expect(text).toContain('lab_agent_media_no_tool_total{tools="1",toolkits="all"} 1');
     expect((await make()(new Request('http://127.0.0.1:3016/metrics'))).status).toBe(404);
   });
 

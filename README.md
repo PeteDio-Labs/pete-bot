@@ -189,12 +189,24 @@ thirteen tools, and with `--ask "<question>"` runs the model loop. A Mac session
 
 ### Routing metrics
 
-To see whether routing degrades as the tool count grows, `lab-agent` serves `GET /metrics` on `127.0.0.1:3016`.
-Every series carries a `tools` label, the number of tools offered to the model: `lab_agent_media_asks_total`,
-`lab_agent_media_tool_calls_total`, `lab_agent_media_invalid_input_total`, `lab_agent_media_retries_total`,
-`lab_agent_media_no_tool_total` and `lab_agent_media_turns`. They count what the model did, not whether it was right.
-`scripts/media-routing-eval.ts` asks a fixed question set and prints the wrong-tool rate with the tool count. Each
-answered question also writes `toolsOffered`, `retries` and `noTool` to the journal line `media ask answered`.
+To see whether routing degrades as the tool count grows, `lab-agent` serves `GET /metrics`. Every series carries
+`tools` (the number of tools offered to the model) and `toolkits` (the kits switched on) labels:
+`lab_agent_media_asks_total`, `lab_agent_media_tool_calls_total`, `lab_agent_media_invalid_input_total`,
+`lab_agent_media_retries_total`, `lab_agent_media_no_tool_total` and `lab_agent_media_turns`. They count what the
+model did, not whether it was right. `scripts/media-routing-eval.ts` asks a fixed question set and prints the
+wrong-tool rate with the tool count. Each answered question also writes `toolsOffered`, `retries` and `noTool` to
+the journal line `media ask answered`.
+
+**Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (library, trace_request, list_queue,
+queue_errors), `health` (vpn_health, why_is_it_dead, pool_health, disk_free, indexer_health), `audit` (seerr_drift,
+stale_versions, partial_files, now_playing), `subtitles` (bazarr_status, bazarr_find, propose_action) and `search`
+(search_lab). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
+To compare tool counts, restart with a different list and read the `tools` and `toolkits` labels.
+
+**Scrape door.** `/metrics` answers on `127.0.0.1:LAB_PORT` for local probes. To let Prometheus read it, set
+`LAB_METRICS_HOST` to the LAN address. A second listener then serves only `GET /metrics` on `LAB_METRICS_PORT`
+(3018), and answers 403 to any peer other than `LAB_METRICS_PEER` (192.168.50.240, Prometheus). It is off while
+`LAB_METRICS_HOST` is unset.
 
 ### Changes need your tap (PET-869)
 

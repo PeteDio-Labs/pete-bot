@@ -14,7 +14,8 @@ import { loadLabConfig, type LabConfig } from './config.js';
 import { AccessVerifier } from './access.js';
 import { createMcpHandler } from './mcp.js';
 import { createLabHandler, type Check } from './server.js';
-import { createLabMetrics } from './metrics.js';
+import { createLabMetrics, createMetricsHandler } from './metrics.js';
+import { selectMediaTools } from './toolkits.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
@@ -58,13 +59,14 @@ const tools = buildLabTools({
 // that has not been seeded says so instead of answering without its tools.
 const bazarrCfg = cfg.bazarr ?? undefined;
 const mediaTools = cfg.mtrace
-  ? new Map(
+  ? selectMediaTools(
       [
         ...mtraceTools(cfg.mtrace),
         ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
         ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
         proposeActionTool(bazarrCfg),
-      ].map((t) => [t.name, t] as const),
+      ],
+      cfg.mediaToolkits,
     )
   : undefined;
 const pve = new ProxmoxClient(cfg.proxmox);
@@ -168,7 +170,7 @@ function scheduleDrift(): void {
 }
 scheduleDrift();
 
-const metrics = createLabMetrics();
+const metrics = createLabMetrics(cfg.mediaToolkits.join('+'));
 metrics.setToolsOffered(mediaTools?.size ?? 0);
 
 const handler = createLabHandler({
@@ -188,7 +190,17 @@ const handler = createLabHandler({
 // run with a failing DM waits through two retries (75 s) after three 15 s tries, so the
 // caller would lose the reply to a run that still sends a DM. 255 s is Bun's maximum.
 const server = Bun.serve({ hostname: '127.0.0.1', port: cfg.port, idleTimeout: 255, fetch: handler });
-log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], mediaTools: mediaTools ? [...mediaTools.keys()] : 'off: LAB_MTRACE_TOKEN is not set', model: cfg.model });
+log('lab-agent listening', { address: `127.0.0.1:${server.port}`, tools: [...tools.keys()], mediaTools: mediaTools ? [...mediaTools.keys()] : 'off: LAB_MTRACE_TOKEN is not set', toolkits: cfg.mediaToolkits, model: cfg.model });
+
+// The scrape door: the LAN address, Prometheus on 240 only. Off while LAB_METRICS_HOST is unset.
+if (cfg.metrics) {
+  if (cfg.metrics.port === cfg.port) throw new Error('lab-agent settings are invalid: LAB_METRICS_PORT must differ from LAB_PORT');
+  const metricsHandler = createMetricsHandler({ metrics, allowedPeer: cfg.metrics.peer, log });
+  const metricsServer = Bun.serve({ hostname: cfg.metrics.host, port: cfg.metrics.port, fetch: (req, srv) => metricsHandler(req, srv.requestIP(req)?.address) });
+  log('lab metrics listening', { address: `${cfg.metrics.host}:${metricsServer.port}`, peer: cfg.metrics.peer });
+} else {
+  log('lab metrics door off: LAB_METRICS_HOST is not set');
+}
 
 // The MCP door (PET-667): on the LAN address, for the tunnel host only, behind Access.
 if (cfg.mcp) {
