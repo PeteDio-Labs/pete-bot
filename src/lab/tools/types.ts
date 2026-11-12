@@ -30,6 +30,13 @@ export interface LabTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
   description: string;
   input: S;
+  /**
+   * Drop keys the schema does not name instead of refusing the call. Set it only on a
+   * read-only tool whose extra key cannot change what it reads: the media assistant's
+   * model adds `title` to no-argument tools such as list_queue, and the refusal cost a
+   * retry and a "1 read(s) failed" note on every follow-up (2026-11-12).
+   */
+  dropUnknownKeys?: boolean;
   run(input: z.infer<S>): Promise<ToolOutput>;
 }
 
@@ -62,7 +69,7 @@ export async function callTool(
   capBytes = DEFAULT_OUTPUT_CAP_BYTES,
 ): Promise<ToolResult> {
   // Unknown keys are refused, as the advertised schema says (additionalProperties: false).
-  const schema = tool.input instanceof z.ZodObject ? tool.input.strict() : tool.input;
+  const schema = tool.input instanceof z.ZodObject ? (tool.dropUnknownKeys ? tool.input.strip() : tool.input.strict()) : tool.input;
   const parsed = schema.safeParse(rawInput ?? {});
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`);

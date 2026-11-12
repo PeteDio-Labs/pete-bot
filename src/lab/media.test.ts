@@ -27,6 +27,13 @@ describe('mtrace tools', () => {
     expect(inputJsonSchema(find('trace_request', fetch).input)).toMatchObject({ required: ['title'] });
   });
 
+  it('drops an extra key on a no-argument tool instead of refusing the call', async () => {
+    const f = vi.fn().mockResolvedValue(json({ ok: true, text: 'queue empty', toolMs: 1 }));
+    const res = await callTool(find('list_queue', f as never), { title: 'The Body' });
+    expect(res.ok).toBe(true);
+    expect(JSON.parse((f.mock.calls[0]![1] as RequestInit).body as string)).toEqual({});
+  });
+
   it('posts to the tool route with the bearer and the arguments, and names what it read', async () => {
     const f = vi.fn().mockResolvedValue(json({ ok: true, text: 'Survivor — partially-available (190 of 192 on disk)', toolMs: 1183 }));
     const res = await callTool(find('trace_request', f as never), { title: 'Survivor', season: 50 });
