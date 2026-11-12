@@ -185,7 +185,7 @@ CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the
 
 `scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
 mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
-ten tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
+eleven tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
 
 ### Changes need your tap (PET-869)
 
