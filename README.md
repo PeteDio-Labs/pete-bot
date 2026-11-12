@@ -205,7 +205,7 @@ To compare tool counts, restart with a different list and read the `tools` and `
 
 **Scrape door.** `/metrics` answers on `127.0.0.1:LAB_PORT` for local probes. To let Prometheus read it, set
 `LAB_METRICS_HOST` to the LAN address. A second listener then serves only `GET /metrics` on `LAB_METRICS_PORT`
-(3018), and answers 403 to any peer other than `LAB_METRICS_PEER` (192.168.50.240, Prometheus). It is off while
+(3019), and answers 403 to any peer other than `LAB_METRICS_PEER` (192.168.50.240, Prometheus). It is off while
 `LAB_METRICS_HOST` is unset.
 
 ### Changes need your tap (PET-869)

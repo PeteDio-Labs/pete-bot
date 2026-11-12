@@ -29,7 +29,7 @@ describe('lab routing metrics', () => {
 
   it('serves /metrics to the one allowed peer and nothing else', async () => {
     const handler = createMetricsHandler({ metrics: createLabMetrics('core'), allowedPeer: '192.168.50.240' });
-    const get = (path: string, peer: string | undefined, method = 'GET') => handler(new Request(`http://192.168.50.237:3018${path}`, { method }), peer);
+    const get = (path: string, peer: string | undefined, method = 'GET') => handler(new Request(`http://192.168.50.237:3019${path}`, { method }), peer);
     const ok = await get('/metrics', '::ffff:192.168.50.240');
     expect(ok.status).toBe(200);
     expect(await ok.text()).toContain('toolkits="core"');
