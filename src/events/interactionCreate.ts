@@ -302,13 +302,20 @@ async function handlePick(interaction: ButtonInteraction, proposal: Proposal | u
     return;
   }
   await interaction.update({ content: `**${proposal!.label}**\nYou chose: ${option.label}`, components: [] });
-  const outcome = await askMedia(option.reply, [], { ...config.lab, timeoutMs: config.media.timeoutMs });
-  if (outcome.kind === 'failed') logger.error(`[media] pick failed: ${outcome.reason}`);
-  for (const part of chunk(describe(outcome))) await interaction.followUp(part);
-  if (outcome.kind === 'answer' && outcome.result.proposals.length > 0) {
-    // A re-ask from a button runs no update check on its own: that path needs a typed message.
-    const offered = outcome.result.proposals.filter((p) => p.action !== 'update_check');
-    await createPresenter(store)({ reply: (o) => interaction.followUp(o as never) } as Replier, offered);
+  try {
+    const outcome = await askMedia(option.reply, [], { ...config.lab, timeoutMs: config.media.timeoutMs });
+    if (outcome.kind === 'failed') logger.error(`[media] pick failed: ${outcome.reason}`);
+    for (const part of chunk(describe(outcome))) await interaction.followUp(part);
+    if (outcome.kind === 'answer' && outcome.result.proposals.length > 0) {
+      // A re-ask from a button runs no update check on its own: that path needs a typed message.
+      const offered = outcome.result.proposals.filter((p) => p.action !== 'update_check');
+      await createPresenter(store)({ reply: (o) => interaction.followUp(o as never) } as Replier, offered);
+    }
+  } catch (err) {
+    // The follow-up token lasts fifteen minutes. Say the failure in a DM instead of leaving a spent card in silence.
+    const text = err instanceof Error ? err.message : String(err);
+    logger.error(`[media] pick follow-up failed: ${text}`);
+    await interaction.user.send(`I could not finish "${option.label}": ${text.slice(0, 300)}. Ask again.`).catch(() => undefined);
   }
 }
 
@@ -329,7 +336,12 @@ async function handleMediaButton(interaction: ButtonInteraction, store: PendingS
     return;
   }
   // A pick tap on a Confirm card, or a Confirm tap on a choice card, must not consume the stored proposal.
-  if ((button.pick !== undefined) !== (store.peek(button.id)?.action === 'choose')) {
+  const held = store.peek(button.id);
+  if (!held) {
+    await interaction.update({ content: 'That request expired or already ran, so nothing ran. Ask again.', components: [] });
+    return;
+  }
+  if ((button.pick !== undefined) !== (held.action === 'choose')) {
     await interaction.update({ content: 'That button does not match its request, so nothing ran. Ask again.', components: [] });
     return;
   }
