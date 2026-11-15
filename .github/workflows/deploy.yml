@@ -153,6 +153,27 @@ jobs:
             kv/data/services/pete-bot desk_installation_id | PB_DESK_INSTALLATION_ID ;
             kv/data/services/pete-bot desk_app_pem | PB_DESK_APP_PEM
 
+      # The Codex review bearer, optional in the same way as the desk App and placed after the
+      # strict step for the same reason. ⚠ IT MUST ARRIVE HERE TOO. The play rewrites
+      # /etc/pete-bot.env and lab-agent's env from its extra vars on every deploy, so a push to
+      # main that omitted this field would blank CODEX_REVIEW_BEARER_TOKEN and switch off both of
+      # lab-agent's Codex review tools without a failed check. scripts/seed-pete-bot-codex-review-token.sh
+      # in petedio-iac writes the field.
+      - name: Vault — the optional Codex review bearer, absent is allowed
+        continue-on-error: true
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4.0.0
+        with:
+          url: https://192.168.50.223:8200
+          method: jwt
+          path: jwt-github # non-default mount — must be explicit or Vault 403s
+          role: pete-bot-cd
+          jwtGithubAudience: https://github.com/PeteDio-Labs
+          caCertificate: ${{ steps.vault_ca.outputs.b64 }}
+          exportToken: false
+          ignoreNotFound: true
+          secrets: |
+            kv/data/services/pete-bot codex_review_bearer_token | PB_CODEX_REVIEW_BEARER
+
       # The scheduled reports' read-only Plane token (PET-701), optional in the same way and
       # placed after the strict step for the same reason. ⚠ IT MUST ARRIVE HERE TOO. The play
       # rewrites /etc/pete-bot.env from its extra vars on every deploy, so a push to main
@@ -306,6 +327,8 @@ jobs:
               # Required, in the strict step above (PET-584): /v1/notify is how every
               # session reaches Pedro, so a deploy without its token must fail, not ship.
               "pete_bot_notify_bearer":     os.environ["PB_NOTIFY_BEARER"],
+              # .get for the same reason. Empty leaves /v1/codex-review closed and lab-agent without its Codex tools.
+              "pete_bot_codex_review_bearer": os.environ.get("PB_CODEX_REVIEW_BEARER", ""),
               # .get, not [] — with ignoreNotFound above, an absent field means the env
               # var is never set at all, and indexing would KeyError one layer below the
               # thing that was just made tolerant. Empty is the documented state.
