@@ -255,6 +255,9 @@ describe('searchMissingViaTracerr', () => {
     expect(await searchMissingViaTracerr(cfg({ ok: true, result: { tool: 'search_missing', timing: { toolMs: 12 }, text: 'Sonarr accepted a search for season 3 of "Yellowjackets". It has queued the search, not finished it.' } }), 'Yellowjackets', 3)).toContain('accepted a search');
     await expect(searchMissingViaTracerr(cfg({ ok: true, result: { tool: 'search_missing', timing: { toolMs: 12 }, text: 'No library item is titled "X". Nothing was changed.' } }), 'X')).rejects.toThrow('did not start');
     await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'forbidden' }, 403), 'X')).rejects.toThrow('write callers');
+    await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'Sonarr 500 on command' }, 502), 'X')).rejects.toThrow('Sonarr 500 on command');
+    await expect(searchMissingViaTracerr(cfg({ result: { text: 'Sonarr accepted a search for "X".' } }), 'X')).rejects.toThrow('without ok:true');
+    await expect(searchMissingViaTracerr(cfg({ ok: true, result: { text: 'No library item is titled "accepted a search"; Nothing was changed.' } }), 'X')).rejects.toThrow('did not start');
   });
 });
 
