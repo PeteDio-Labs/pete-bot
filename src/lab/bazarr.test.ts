@@ -24,6 +24,23 @@ const router = (extra: Record<string, () => Response> = {}) =>
     return json({}, 404);
   });
 
+describe('matchTitle loose resolution', () => {
+  const items = [
+    { kind: 'series' as const, id: 1, title: 'Yellowjackets', missing: 0 },
+    { kind: 'series' as const, id: 2, title: 'Up Here', missing: 0 },
+  ];
+  it('joins and splits words, and forgives a typo', () => {
+    expect(matchTitle(items, 'Yellow Jackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'yellow-jackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'Yelowjackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'Yellowjacket').map((i) => i.id)).toEqual([1]);
+  });
+  it('does not match a short or unrelated query', () => {
+    expect(matchTitle(items, 'Upp')).toEqual([]);
+    expect(matchTitle(items, 'Breaking Bad')).toEqual([]);
+  });
+});
+
 describe('matchTitle', () => {
   const items = [
     { kind: 'series' as const, id: 12, title: 'Survivor', missing: 4 },
@@ -118,9 +135,27 @@ describe('propose_action', () => {
     expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'subtitles', kind: 'movie', id: 7, confirm: true });
     expect(res.ok && res.text).toContain('Nothing has run');
   });
-  it('refuses an ambiguous title and lists the candidates', async () => {
+  it('turns an ambiguous title into a choose card of the candidates, and runs nothing', async () => {
     const res = await callTool(tool(), { action: 'subtitles', title: 'surviv' });
-    expect(!res.ok && res.error).toContain('matches 2 titles');
+    const p = res.ok && (proposalOf(res.text) as { action: string; confirm: boolean; options: Array<{ label: string; reply: string }> });
+    expect(p).toMatchObject({ action: 'choose', confirm: false });
+    expect(p && p.options.map((o) => o.reply)).toEqual(['Search subtitles for Survivor', 'Search subtitles for Survivor: Edge of Extinction']);
+  });
+  it('proposes a download for one show and season, resolving a split spelling', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'Sur vivor', season: 3 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'download', kind: 'series', title: 'Survivor', season: 3, confirm: true });
+  });
+  it('makes a movie download with no season and refuses an unknown title', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'never after dark', season: 2 });
+    const p = res.ok && (proposalOf(res.text) as Record<string, unknown>);
+    expect(p).toMatchObject({ action: 'download', kind: 'movie', confirm: true });
+    expect(p && 'season' in p).toBe(false);
+    expect((await callTool(tool(), { action: 'download', title: 'Zzzzzz Qqqqqq' })).ok).toBe(false);
+  });
+  it('builds a choose card from the model\'s own question and options', async () => {
+    const res = await callTool(tool(), { action: 'choose', question: 'Download or subtitles?', options: [{ label: 'Download', reply: 'Download season 3 of Survivor' }, { label: 'Subtitles', reply: 'Search subtitles for Survivor' }] });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'choose', confirm: false });
+    expect((await callTool(tool(), { action: 'choose', question: 'Which?' })).ok).toBe(false);
   });
   it('refuses an unknown title, a missing title and a host with no Bazarr', async () => {
     expect((await callTool(tool(), { action: 'subtitles', title: 'Nope Nope' })).ok).toBe(false);
@@ -169,7 +204,7 @@ describe('the loop collects proposals from the tool output, not from the model t
   it('returns none when the proposal failed', async () => {
     const tools = new Map<string, LabTool>([['propose_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
     const res = await ask('q', tools, scripted([
-      { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'surviv' } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'Nope Nope' } }], stop_reason: 'tool_use' },
       { content: [{ type: 'text', text: 'Which one?' }], stop_reason: 'end_turn' },
     ]), 'm');
     expect(res.proposals).toEqual([]);

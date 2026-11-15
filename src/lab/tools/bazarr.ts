@@ -45,7 +45,7 @@ async function get(cfg: BazarrConfig, path: string): Promise<unknown> {
   }
 }
 
-interface Item {
+export interface Item {
   kind: BazarrKind;
   id: number;
   title: string;
@@ -76,12 +76,46 @@ export async function listItems(cfg: BazarrConfig): Promise<Item[]> {
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/** Spaces and punctuation removed, so "Yellow Jackets" and "Yellowjackets" compare equal. */
+const compact = (s: string) => norm(s).replace(/ /g, '');
 
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * Resolves a spoken title to library items, loosest last: exact, then partial, then the same
+ * two with spaces and punctuation ignored, then a typo of up to two letters (queries of 6+
+ * letters only, so "Up" cannot match everything). A tier that matches stops the search, so a
+ * precise answer is never diluted by a looser one.
+ */
 export function matchTitle(items: Item[], query: string): Item[] {
   const q = norm(query);
   if (!q) return [];
   const exact = items.filter((i) => norm(i.title) === q);
-  return exact.length ? exact : items.filter((i) => norm(i.title).includes(q));
+  if (exact.length) return exact;
+  const partial = items.filter((i) => norm(i.title).includes(q));
+  if (partial.length) return partial;
+  const c = compact(query);
+  const cExact = items.filter((i) => compact(i.title) === c);
+  if (cExact.length) return cExact;
+  const cPartial = c.length >= 4 ? items.filter((i) => compact(i.title).includes(c)) : [];
+  if (cPartial.length) return cPartial;
+  if (c.length < 6) return [];
+  const scored = items
+    .map((i) => ({ i, d: Math.min(editDistance(compact(i.title), c, 2), editDistance(compact(i.title).slice(0, c.length), c, 2)) }))
+    .filter((x) => x.d <= 2);
+  const best = Math.min(...scored.map((x) => x.d));
+  return scored.filter((x) => x.d === best).map((x) => x.i);
 }
 
 export function bazarrFindTool(cfg: BazarrConfig): LabTool {

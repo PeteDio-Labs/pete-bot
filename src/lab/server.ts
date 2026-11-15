@@ -41,6 +41,8 @@ export interface LabServerDeps {
   mediaTools?: Map<string, LabTool>;
   /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
   actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
+  /** The confirmed download search: tracerr's search_missing for one title. Absent, a download act answers 404. */
+  actDownload?: (title: string, season?: number) => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
   /** Media routing metrics. Absent, GET /metrics answers 404. */
@@ -57,7 +59,10 @@ const MediaBody = z
       .default([]),
   })
   .strict();
-const ActBody = z.object({ kind: z.enum(['series', 'movie']), id: z.number().int().min(0).max(10_000_000) }).strict();
+const ActBody = z.union([
+  z.object({ kind: z.enum(['series', 'movie']), id: z.number().int().min(0).max(10_000_000) }).strict(),
+  z.object({ action: z.literal('download'), title: z.string().trim().min(1).max(200), season: z.number().int().min(0).max(100).optional() }).strict(),
+]);
 const CHECK_TIMEOUT_MS = 10_000;
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
@@ -115,25 +120,33 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       return new Response(await deps.metrics.register.metrics(), { headers: { 'content-type': deps.metrics.register.contentType } });
     }
 
-    if (url.pathname === '/v1/media/act' && deps.actBazarr) {
+    if (url.pathname === '/v1/media/act' && (deps.actBazarr || deps.actDownload)) {
       if (req.method !== 'POST') return json({ error: 'use POST' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
       let body: z.infer<typeof ActBody>;
       try {
         const parsed = ActBody.safeParse(await req.json());
-        if (!parsed.success) return json({ error: 'body must be {"kind": "series" or "movie", "id": <whole number>}' }, 400);
+        if (!parsed.success) return json({ error: 'body must be {"kind": "series" or "movie", "id": <whole number>} or {"action": "download", "title": "...", "season": <optional>}' }, 400);
         body = parsed.data;
       } catch {
         return json({ error: 'body is not JSON' }, 400);
       }
       try {
-        const message = await deps.actBazarr(body.kind, body.id);
-        log('media act done', { kind: body.kind, id: body.id });
+        let message: string;
+        if ('action' in body) {
+          if (!deps.actDownload) return json({ error: 'downloads are not configured' }, 404);
+          message = await deps.actDownload(body.title, body.season);
+          log('media act done', { action: 'download', titleLength: body.title.length, season: body.season });
+        } else {
+          if (!deps.actBazarr) return json({ error: 'subtitle search is not configured' }, 404);
+          message = await deps.actBazarr(body.kind, body.id);
+          log('media act done', { kind: body.kind, id: body.id });
+        }
         return json({ ok: true, message });
       } catch (err) {
         // A LabToolError message is written for the caller and holds no key.
         const message = err instanceof LabToolError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
-        log('media act failed', { kind: body.kind, id: body.id, error: message });
+        log('media act failed', { action: 'action' in body ? 'download' : 'subtitles', error: message });
         return json({ ok: false, error: message }, 502);
       }
     }

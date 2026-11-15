@@ -21,7 +21,7 @@ import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
 import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
-import { tracerrTools } from './tools/tracerr.js';
+import { searchMissingViaTracerr, tracerrTools } from './tools/tracerr.js';
 import { bazarrFindTool, bazarrStatusTool, searchMissing } from './tools/bazarr.js';
 import { codexReviewStatusTool, queueCodexReviewTool } from './tools/codexReview.js';
 import { proposeActionTool } from './tools/propose.js';
@@ -186,6 +186,7 @@ const handler = createLabHandler({
   callModel,
   model: cfg.model,
   mediaTools,
+  actDownload: cfg.tracerr ? (title, season) => searchMissingViaTracerr(cfg.tracerr!, title, season) : undefined,
   actBazarr: bazarrCfg ? (kind, id) => searchMissing(bazarrCfg, kind, id) : undefined,
   checks,
   log,
