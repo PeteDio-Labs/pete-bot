@@ -73,7 +73,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
       if (action === 'choose') {
         if (!question || !options) throw new LabToolError('request_action: choose needs a question and two to four options');
         const proposal: Proposal = { action: 'choose', label: question, options, confirm: false };
-        return { source: 'a clarification card', data: { proposal, pending: 'The user sees buttons and taps one. Nothing has run. Say only that you need them to pick.' } };
+        return { source: 'a clarification card', data: { proposal, pending: 'Nothing has run. Buttons appear under your reply. Reply in one short line that asks the question on the card. Do not repeat this note.' } };
       }
       if (action === 'download' || action === 'subtitles') {
         if (!title) throw new LabToolError(`request_action: ${action} needs a title`);
@@ -84,11 +84,11 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
             : `Download ${m.kind === 'series' && season !== undefined ? `season ${season} of ` : ''}the ${m.kind} ${m.title}`;
         const r = resolve(await listItems(bazarr), title, kind, reply);
         if ('none' in r) throw new LabToolError(`request_action: no show or movie in the library matches "${title.slice(0, 60)}". Ask the user with a choose card whether to try another spelling.`);
-        if ('card' in r) return { source: `library: "${title.slice(0, 60)}" needs a choice`, data: { proposal: r.card, pending: 'A card was made for the user. Nothing has run.' } };
+        if ('card' in r) return { source: `library: "${title.slice(0, 60)}" needs a choice`, data: { proposal: r.card, pending: 'Nothing has run. Buttons appear under your reply. Reply in one short line that asks the question on the card. Do not repeat this note.' } };
         const m = r.item;
         if (action === 'subtitles') {
           const proposal: Proposal = { action: 'subtitles', kind: m.kind, id: m.id, title: m.title, label: `Search subtitles for ${m.title} (${m.missing} missing)`, confirm: true };
-          return { source: `Bazarr: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'The user must tap Confirm. Nothing has run.' } };
+          return { source: `Bazarr: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' } };
         }
         const sn = m.kind === 'series' ? season : undefined;
         // A dry run first: tracerr says what it would search, so the card names it and a refusal
@@ -104,7 +104,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
           label: `Search for ${m.kind === 'series' ? (sn !== undefined ? `season ${sn} of ` : 'missing episodes of ') : ''}${m.title} (${m.kind === 'series' ? 'Sonarr' : 'Radarr'})`,
           confirm: true,
         };
-        return { source: `library: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'The user must tap Confirm. Nothing has run.' } };
+        return { source: `library: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' } };
       }
       if (!target || (action !== 'update_check' && action !== 'update_apply')) throw new LabToolError(`request_action: ${action} needs a target (${PROPOSE_TARGETS.join(', ')})`);
       const proposal: Proposal =
@@ -113,7 +113,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
           : { action, target, label: `Install updates for ${target}`, confirm: true };
       return {
         source: 'media-updates.yml targets',
-        data: { proposal, pending: proposal.confirm ? 'The user must tap Confirm. Nothing has run.' : 'This is a read-only check with nothing to confirm. It runs as soon as you answer, and its report follows. Do not tell the user to confirm.' },
+        data: { proposal, pending: proposal.confirm ? 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' : 'This is a read-only check with nothing to confirm. It runs as soon as you answer, and its report follows. Do not tell the user to confirm.' },
       };
     },
   };
