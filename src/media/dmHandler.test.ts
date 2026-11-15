@@ -64,7 +64,7 @@ describe('failures are said', () => {
     expect(ask.mock.calls[1]![1]).toEqual([]);
   });
   it('flags an incomplete or failed-read answer', () => {
-    const t = describeOutcome({ kind: 'answer', result: { answer: 'partial', toolCalls: [{ name: 'vpn_health', ok: false }], proposals: [], incomplete: true } });
+    const t = describeOutcome({ kind: 'answer', result: { answer: 'partial', toolCalls: [{ name: 'check_vpn', ok: false }], proposals: [], incomplete: true } });
     expect(t).toContain('incomplete');
     expect(t).toContain('1 read(s) failed');
   });

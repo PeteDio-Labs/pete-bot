@@ -175,7 +175,7 @@ describe('ask', () => {
   });
 
   it('sends a plain failure, not the raw text, when the final answer is an unfinished tool call', async () => {
-    const raw = '<tool_call>\n{"name": "library", "arguments": {}}\n</tool_call>';
+    const raw = '<tool_call>\n{"name": "find_in_library", "arguments": {}}\n</tool_call>';
     const result = await ask('what is in the library', tools, scripted([final(raw)]), 'm');
     expect(result.incomplete).toBe(true);
     expect(result.answer).not.toContain('tool_call');

@@ -25,7 +25,7 @@ export interface TracerrConfig {
   /** Such as http://192.168.50.237:8237 (237 reaches itself through the `lo` allowlist rule). */
   baseUrl: string;
   token: string;
-  /** partial_files reads 175 files and took 22 s in MED-3, so the default leaves room. */
+  /** list_partial_files reads 175 files and took 22 s in MED-3, so the default leaves room. */
   timeoutMs?: number;
   fetch?: typeof fetch;
 }
@@ -43,7 +43,7 @@ interface Spec {
 
 export const TRACERR_SPECS: Spec[] = [
   {
-    name: 'library',
+    name: 'find_in_library',
     description: 'What is in the library: "do I have X", "how many seasons", "is X complete". With no title, a whole-library summary.',
     input: z.object({ title: title(false) }),
   },
@@ -57,33 +57,33 @@ export const TRACERR_SPECS: Spec[] = [
     }),
   },
   { name: 'list_queue', description: 'Everything downloading or waiting to import, including torrents added by hand, with progress, speed and ETA, then the latest finished downloads. Use it for "how long until it is downloaded" and "latest downloads".', input: z.object({}) },
-  { name: 'queue_errors', description: 'Queue items that fail, block, stick or fail to import, with each message.', input: z.object({}) },
-  { name: 'why_is_it_dead', description: 'Why individual torrents do not move: seed counts and tracker messages. Check vpn_health first when everything is at zero seeds.', input: z.object({}) },
+  { name: 'list_queue_errors', description: 'Queue items that fail, block, stick or fail to import, with each message.', input: z.object({}) },
+  { name: 'diagnose_dead_download', description: 'Why individual torrents do not move: seed counts and tracker messages. Check check_vpn first when everything is at zero seeds.', input: z.object({}) },
   {
-    name: 'vpn_health',
+    name: 'check_vpn',
     description: "Whether the VPN tunnel is up, whether traffic leaks onto the house IP, and whether the forwarded port matches qBittorrent's. Use it when every download stalls at once.",
     input: z.object({}),
   },
-  { name: 'seerr_drift', description: 'What seerr claims against what Sonarr and Radarr hold on disk. The arr apps are ground truth.', input: z.object({}) },
-  { name: 'now_playing', description: 'Plex as a whole: who is watching, which libraries exist, whether it answers. Not a title lookup.', input: z.object({}) },
+  { name: 'check_seerr_drift', description: 'What seerr claims against what Sonarr and Radarr hold on disk. The arr apps are ground truth.', input: z.object({}) },
+  { name: 'get_now_playing', description: 'Plex as a whole: who is watching, which libraries exist, whether it answers. Not a title lookup.', input: z.object({}) },
   {
-    name: 'pool_health',
+    name: 'check_storage_pools',
     description: 'State of the ZFS pools on pve02 (media and downloads), read from inside the plex guest. Use it when many titles fail to play at once, or to check the pools after the USB enclosure reset. Not for one named title. It reports the pool state, not free space.',
     input: z.object({}),
   },
   {
-    name: 'disk_free',
+    name: 'check_disk_space',
     description: 'Free space on the volumes Sonarr and Radarr can see, such as the library and download disks, with a low or critical verdict. Use it for "how much space is left" and "is the disk full". Not for ZFS pool state and not for one title.',
     input: z.object({}),
   },
   {
-    name: 'indexer_health',
+    name: 'check_indexers',
     description: "Prowlarr's indexers: which are enabled, which are backed off after failures, and its health warnings. Use it for \"are the indexers working\" and \"why is search returning nothing\". Not for a stuck download.",
     input: z.object({}),
   },
-  { name: 'stale_versions', description: 'Which of Sonarr, Radarr and Prowlarr have an update available. It does not cover Plex, qBittorrent, seerr or Bazarr.', input: z.object({}) },
+  { name: 'check_app_versions', description: 'Which of Sonarr, Radarr and Prowlarr have an update available. It does not cover Plex, qBittorrent, seerr or Bazarr.', input: z.object({}) },
   {
-    name: 'partial_files',
+    name: 'list_partial_files',
     description: 'Imported episode files that are mostly zero bytes. With no title, files Sonarr imported in the last 14 days. It takes about 20 seconds.',
     input: z.object({ title: title(false) }),
   },
@@ -141,7 +141,7 @@ export function tracerrTools(cfg: TracerrConfig): LabTool[] {
 }
 
 /**
- * The one write lab-agent sends to tracerr: `search_missing` for ONE title, optionally one season and
+ * The one write lab-agent sends to tracerr: `request_missing_search` for ONE title, optionally one season and
  * one kind. With `dryRun` it changes nothing and returns what tracerr would do.
  * Only POST /v1/media/act reaches it, after you tapped Confirm. tracerr answers 403 unless this
  * caller is in its MEDIA_CONTROL_WRITERS (petedio-iac mtrace_write_callers); that surfaces here as an error.
@@ -151,7 +151,7 @@ export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string,
   if (season !== undefined && !(Number.isInteger(season) && season >= 0 && season <= 100)) throw new LabToolError('tracerr: season must be a whole number');
   const res = await fetchWithTimeout(
     cfg.fetch ?? fetch,
-    `${cfg.baseUrl.replace(/\/$/, '')}/api/tool/search_missing`,
+    `${cfg.baseUrl.replace(/\/$/, '')}/api/tool/request_missing_search`,
     {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },

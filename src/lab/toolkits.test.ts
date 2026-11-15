@@ -16,8 +16,8 @@ describe('toolkits', () => {
     expect(() => parseToolkits('core,helth')).toThrow(/no such toolkit: helth/);
   });
   it('keeps only the tools of the chosen kits, in their original order', () => {
-    const all = ['library', 'vpn_health', 'seerr_drift', 'request_action', 'search_knowledge'].map(tool);
-    expect([...selectMediaTools(all, ['core', 'audit']).keys()]).toEqual(['library', 'seerr_drift']);
+    const all = ['find_in_library', 'check_vpn', 'check_seerr_drift', 'request_action', 'search_knowledge'].map(tool);
+    expect([...selectMediaTools(all, ['core', 'audit']).keys()]).toEqual(['find_in_library', 'check_seerr_drift']);
   });
   it('refuses names that only exist on Object.prototype', () => {
     expect(() => parseToolkits('constructor')).toThrow(/no such toolkit/);

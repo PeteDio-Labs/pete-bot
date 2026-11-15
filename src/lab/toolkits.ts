@@ -13,9 +13,9 @@
 import type { LabTool } from './tools/types.js';
 
 export const MEDIA_TOOLKITS: Record<string, readonly string[]> = {
-  core: ['library', 'trace_request', 'list_queue', 'queue_errors'],
-  health: ['vpn_health', 'why_is_it_dead', 'pool_health', 'disk_free', 'indexer_health'],
-  audit: ['seerr_drift', 'stale_versions', 'partial_files', 'now_playing'],
+  core: ['find_in_library', 'trace_request', 'list_queue', 'list_queue_errors'],
+  health: ['check_vpn', 'diagnose_dead_download', 'check_storage_pools', 'check_disk_space', 'check_indexers'],
+  audit: ['check_seerr_drift', 'check_app_versions', 'list_partial_files', 'get_now_playing'],
   subtitles: ['check_subtitles', 'find_subtitles', 'request_action'],
   search: ['search_knowledge'],
 };
