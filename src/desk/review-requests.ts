@@ -54,6 +54,8 @@ const KEEP = 200;
 
 export class CodexReviewRequests {
   private readonly requests = new Map<string, ReviewRequest>();
+  /** A request is in flight from its first call until it has decided to queue or not. A concurrent call for the same PR waits on it, so two POSTs cannot both queue. */
+  private readonly deciding = new Map<string, Promise<RequestOutcome>>();
 
   constructor(private readonly deps: RequestDeps) {}
 
@@ -62,6 +64,22 @@ export class CodexReviewRequests {
   }
 
   async request(repo: string, pr: number, effort: Effort = 'medium'): Promise<RequestOutcome> {
+    const key = this.key(repo, pr);
+    const running = this.deciding.get(key);
+    if (running) {
+      const first = await running;
+      return first.kind === 'queued' ? { kind: 'already-queued', request: first.request } : first;
+    }
+    const decision = this.decide(repo, pr, effort);
+    this.deciding.set(key, decision);
+    try {
+      return await decision;
+    } finally {
+      this.deciding.delete(key);
+    }
+  }
+
+  private async decide(repo: string, pr: number, effort: Effort): Promise<RequestOutcome> {
     if (!this.deps.repos.includes(repo)) return { kind: 'refused', reason: `${repo} is not on the desk's repository list (${this.deps.repos.join(', ')})` };
     const pull = await this.deps.github.getPull(repo, pr);
     if (pull.state !== 'open' || pull.merged) return { kind: 'refused', reason: `${repo}#${pr} is not open` };

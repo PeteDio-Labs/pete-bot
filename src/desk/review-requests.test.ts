@@ -61,6 +61,17 @@ describe('request', () => {
   });
 });
 
+describe('concurrency', () => {
+  it('queues one review when two requests for the same head arrive together', async () => {
+    const { reqs, calls, release } = setup();
+    const [a, b] = await Promise.all([reqs.request('petedio-iac', 5), reqs.request('petedio-iac', 5)]);
+    expect([a.kind, b.kind].sort()).toEqual(['already-queued', 'queued']);
+    release();
+    await settle();
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('result', () => {
   it('is done only when a Codex review of the head appeared', async () => {
     const s = setup();

@@ -9,11 +9,12 @@
  * minutes, so POST answers at once and a caller polls GET. A quota refusal shows up there as
  * `rate_limited`. lab-agent's `queue_codex_review` tool is the only intended caller.
  */
+import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../../config.js';
 import { getReviewRequests } from '../../desk/index.js';
-import { RefusedError } from '../../desk/review-requests.js';
+import { RefusedError, type CodexReviewRequests } from '../../desk/review-requests.js';
 import { REPO_NAME } from '../../desk/config.js';
 import { logger } from '../../utils/index.js';
 
@@ -27,10 +28,12 @@ const Query = z.object({ repo: z.string().regex(REPO_NAME), pr: z.coerce.number(
 function authorized(req: Request): boolean {
   const expected = config.httpServer.codexReviewToken;
   const got = (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
-  return Boolean(expected) && got.length === expected.length && got === expected;
+  if (!expected || got.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(got), Buffer.from(expected));
 }
 
-export function codexReviewHandler() {
+/** `source` is a parameter so a test can supply a queue without starting the desk. */
+export function codexReviewHandler(source: () => CodexReviewRequests | null = getReviewRequests) {
   return async function handler(req: Request, res: Response): Promise<void> {
     if (!authorized(req)) {
       res.status(401).json({ error: 'unauthorized' });
@@ -42,7 +45,7 @@ export function codexReviewHandler() {
       res.status(400).json({ error: 'bad payload', detail: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.')}: ${i.message}`) });
       return;
     }
-    const requests = getReviewRequests();
+    const requests = source();
     if (!requests) {
       res.status(503).json({ error: 'desk_off', detail: 'the merge desk is off or misconfigured, so it holds no Codex queue' });
       return;
