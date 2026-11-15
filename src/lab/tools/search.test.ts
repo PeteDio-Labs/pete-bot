@@ -5,7 +5,7 @@ const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body)
 const tool = (f: (url: string, init?: RequestInit) => Promise<Response>) =>
   searchLabTool({ baseUrl: 'http://s:8526', token: 'tok', fetch: f as unknown as typeof fetch });
 
-describe('search_lab', () => {
+describe('search_knowledge', () => {
   it('sends the bearer, passes source and k, and trims each chunk', async () => {
     let seen: { url: string; init?: RequestInit } | undefined;
     const t = tool(async (url, init) => {

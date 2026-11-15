@@ -271,7 +271,7 @@ jobs:
             kv/data/services/claude-workspace-mirror installation_id | LAB_GH_INSTALL_ID ;
             kv/data/services/claude-workspace-mirror app_pem | LAB_GH_APP_PEM
 
-      # lab-agent's two optional tool tokens (PET-672 plane_item, PET-745 search_lab). The play
+      # lab-agent's two optional tool tokens (PET-672 get_plane_item, PET-745 search_knowledge). The play
       # refuses a deploy that would drop an installed token, so a deploy-on-merge that does not
       # read these paths fails closed once either is installed. Absent paths are allowed:
       # before a seed, the tool stays off and the deploy passes. A 403 or an outage still
@@ -384,7 +384,7 @@ jobs:
               "lab_agent_pve_token_secret": os.environ.get("LAB_PVE_SECRET", ""),
               "lab_agent_pve_endpoint":     os.environ.get("LAB_PVE_ENDPOINT", ""),
               "lab_agent_pve_ca_pem":       os.environ.get("LAB_PVE_CA", ""),
-              # .get for the same reason. Empty keeps plane_item and search_lab off.
+              # .get for the same reason. Empty keeps get_plane_item and search_knowledge off.
               "lab_agent_plane_token":      os.environ.get("LAB_PLANE_TOKEN", ""),
               "lab_agent_search_token":     os.environ.get("LAB_SEARCH_TOKEN", ""),
               # .get for the same reason. Empty keeps the media assistant off (PET-869).

@@ -7,7 +7,7 @@
  *
  * Its own bearer (CODEX_REVIEW_BEARER_TOKEN), so no other token opens it. A review takes
  * minutes, so POST answers at once and a caller polls GET. A quota refusal shows up there as
- * `rate_limited`. lab-agent's `queue_codex_review` tool is the only intended caller.
+ * `rate_limited`. lab-agent's `request_codex_review` tool is the only intended caller.
  */
 import { timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';

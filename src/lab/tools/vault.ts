@@ -1,5 +1,5 @@
 /**
- * vault_presence: which secrets exist in Vault, and which version each is at (PET-667).
+ * check_secrets: which secrets exist in Vault, and which version each is at (PET-667).
  *
  * It reads KV v2 METADATA only, with a token whose policy grants `list` and `read` on
  * `kv/metadata/services/*` and nothing on `kv/data/`. So it can show that
@@ -146,7 +146,8 @@ export function vaultPresenceTool(client: VaultMetadataClient): LabTool {
       .describe('One secret under services/, such as "pete-bot"; omit to list them all'),
   });
   return {
-    name: 'vault_presence',
+    name: 'check_secrets',
+    aliases: ['vault_presence'],
     description:
       'Which secrets exist under kv/services/ in Vault, with their current version and when each version was written. ' +
       'Metadata only: it never reads a value or a field name. Use it to confirm a seed script wrote a new version.',

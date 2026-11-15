@@ -1,5 +1,5 @@
 /**
- * pve_guests and pve_guest: live guest state from the Proxmox API (PET-668).
+ * list_guests and get_guest: live guest state from the Proxmox API (PET-668).
  *
  * The token is `lab-agent@pve!audit` with PVEAuditor on `/` and privilege separation
  * (PET-510's pattern), placed by PET-670's seed script. Every call is a GET.
@@ -130,7 +130,8 @@ export function pveGuestsTool(client: ProxmoxClient): LabTool {
     status: z.enum(['running', 'stopped']).optional().describe('Only guests in this state'),
   });
   return {
-    name: 'pve_guests',
+    name: 'list_guests',
+    aliases: ['pve_guests'],
     description:
       'Every Proxmox guest (LXC and VM) right now: VMID, name, node, status, uptime, CPU and memory. ' +
       'This is live state, which outranks the knowledge vault.',
@@ -150,7 +151,8 @@ export function pveGuestsTool(client: ProxmoxClient): LabTool {
 export function pveGuestTool(client: ProxmoxClient): LabTool {
   const input = z.object({ vmid: z.number().int().min(100).max(999_999_999).describe('The guest VMID, such as 235') });
   return {
-    name: 'pve_guest',
+    name: 'get_guest',
+    aliases: ['pve_guest'],
     description:
       "One Proxmox guest in detail: its live status and a summary of its config (cores, memory, disks, " +
       'mounts, network, features). Secret-bearing config keys are never returned.',

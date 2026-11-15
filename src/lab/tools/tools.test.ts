@@ -110,7 +110,7 @@ describe('inputJsonSchema', () => {
   });
 });
 
-describe('pve_guests and pve_guest', () => {
+describe('list_guests and get_guest', () => {
   const cfg = { baseUrl: 'https://192.168.50.10:8006', tokenId: 'lab-agent@pve!audit', tokenSecret: 's3cret', caPem: CA };
   const ok = {
     '/cluster/resources?type=vm': json(fixture('pve-cluster-resources.json')),
@@ -140,7 +140,7 @@ describe('pve_guests and pve_guest', () => {
 
   it('reports an unauthorized token as an error', async () => {
     const tool = pveGuestsTool(new ProxmoxClient({ ...cfg, fetch: stubFetch({ '/cluster/resources?type=vm': json('{"data":null}', 401) }) }));
-    expect(error(await callTool(tool, {}))).toBe('pve_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)');
+    expect(error(await callTool(tool, {}))).toBe('list_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)');
   });
 
   it('reports a token that sees no guests as an error, not an empty lab', async () => {
@@ -177,7 +177,7 @@ describe('pve_guests and pve_guest', () => {
 
   it('says how many guests it searched when a VMID is missing', async () => {
     const tool = pveGuestTool(new ProxmoxClient({ ...cfg, fetch: stubFetch(ok) }));
-    expect(error(await callTool(tool, { vmid: 999 }))).toBe('pve_guest: no guest 999 among 3 guests in cluster/resources');
+    expect(error(await callTool(tool, { vmid: 999 }))).toBe('get_guest: no guest 999 among 3 guests in cluster/resources');
   });
 
   it('refuses to start without a CA or over plain http, so TLS is never unverified', () => {
@@ -186,7 +186,7 @@ describe('pve_guests and pve_guest', () => {
   });
 });
 
-describe('kuma_status', () => {
+describe('check_monitors', () => {
   const cfg = { baseUrl: 'http://192.168.50.4:3001', slug: 'fault-study' };
   const ok = {
     '/api/status-page/fault-study': json(fixture('kuma-status-page.json')),
@@ -404,7 +404,7 @@ describe('vault notes', () => {
   });
 });
 
-describe('git_history', () => {
+describe('get_git_history', () => {
   let tool: LabTool;
   beforeAll(async () => {
     const repo = await makeTestRepo();
@@ -452,7 +452,7 @@ describe('git_history', () => {
   });
 });
 
-describe('plane_item and plane_projects', () => {
+describe('get_plane_item and list_plane_projects', () => {
   const PROJECT = '2b962587-cfc8-404d-bbfc-d57c3a60e07f';
   const FOL = '11111111-1111-4111-8111-111111111111';
   const cfg = { baseUrl: 'http://plane.test:8080', workspace: 'petedio', identifiers: ['PET', 'FOL'], token: 'plane_api_secret' };
@@ -519,7 +519,7 @@ describe('plane_item and plane_projects', () => {
     expect(seen.filter((x) => x.url.includes('work-items'))).toHaveLength(0);
   });
 
-  it('lists projects with plane_projects, and fails on none', async () => {
+  it('lists projects with list_plane_projects, and fails on none', async () => {
     const out = data(await callTool(planeProjectsTool(client({ [P]: projects })), {}));
     expect(out.source).toBe('2 projects listed by Plane');
     expect(out.data.projects).toEqual([
@@ -597,9 +597,9 @@ describe('buildLabTools', () => {
     });
     const defs = toolDefinitions(tools);
     expect(defs.map((d) => d.name)).toEqual([
-      'lab_overview', 'find_host', 'host_note', 'pve_guests', 'pve_guest', 'kuma_status', 'git_history', 'desk_status', 'systemd_status', 'vault_presence',
+      'get_overview', 'find_host', 'get_host_note', 'list_guests', 'get_guest', 'check_monitors', 'get_git_history', 'check_merge_desk', 'check_services', 'check_secrets',
     ]);
-    // plane_item and plane_projects join only when a Plane token is configured.
+    // get_plane_item and list_plane_projects join only when a Plane token is configured.
     const withPlane = buildLabTools({
       vault: new GitClone('petedio-vault', '/nonexistent'),
       history: [clone],
@@ -610,9 +610,9 @@ describe('buildLabTools', () => {
       plane: { baseUrl: 'http://x:8080', workspace: 'petedio', identifiers: ['PET'], token: 't' },
       units: ['pete-bot.service', 'lab-agent.service'],
     });
-    expect([...withPlane.keys()].slice(-2)).toEqual(['plane_item', 'plane_projects']);
-    // The schema of every tool, plane_item's array included, must render.
-    const planeDef = toolDefinitions(withPlane).find((d) => d.name === 'plane_item')!;
+    expect([...withPlane.keys()].slice(-2)).toEqual(['get_plane_item', 'list_plane_projects']);
+    // The schema of every tool, get_plane_item's array included, must render.
+    const planeDef = toolDefinitions(withPlane).find((d) => d.name === 'get_plane_item')!;
     expect(planeDef.input_schema).toEqual({
       type: 'object',
       properties: { keys: { type: 'array', items: { type: 'string', pattern: '^[A-Z][A-Z0-9]{1,9}-\\d{1,5}$' }, minItems: 1, maxItems: 10 } },
@@ -626,7 +626,7 @@ describe('buildLabTools', () => {
   });
 });
 
-describe('lab_overview', () => {
+describe('get_overview', () => {
   const stub = (name: string, out: () => { source: string; data: unknown }): LabTool => ({
     name,
     description: 'stub',
@@ -642,10 +642,10 @@ describe('lab_overview', () => {
     },
   });
   const healthy = () => [
-    stub('kuma_status', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }, { name: 'qbit', status: 'down', since: '2026-11-05T01:00:00Z', message: 'timeout' }] } })),
-    stub('pve_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }, { vmid: 249, name: 'forgejo', node: 'pve02', status: 'stopped' }] } })),
-    stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-05T01:00:00Z', lastPollError: null } } })),
-    stub('systemd_status', () => ({ source: 's', data: { units: [{ unit: 'pete-bot.service', active: 'active', sub: 'running', restarts: 0, result: 'success' }] } })),
+    stub('check_monitors', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }, { name: 'qbit', status: 'down', since: '2026-11-05T01:00:00Z', message: 'timeout' }] } })),
+    stub('list_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }, { vmid: 249, name: 'forgejo', node: 'pve02', status: 'stopped' }] } })),
+    stub('check_merge_desk', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-05T01:00:00Z', lastPollError: null } } })),
+    stub('check_services', () => ({ source: 's', data: { units: [{ unit: 'pete-bot.service', active: 'active', sub: 'running', restarts: 0, result: 'success' }] } })),
   ];
   const NOW = Date.parse('2026-11-05T01:10:00Z');
   const tool = (list: LabTool[]) => labOverviewTool(new Map(list.map((t) => [t.name, t])), () => NOW);
@@ -659,8 +659,8 @@ describe('lab_overview', () => {
 
   it('reports a quiet lab as nothing to look at, with the counts that back it', async () => {
     const quiet = healthy();
-    quiet[0] = stub('kuma_status', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }] } }));
-    quiet[1] = stub('pve_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }] } }));
+    quiet[0] = stub('check_monitors', () => ({ source: 's', data: { monitors: [{ name: 'plex', status: 'up', since: null, message: '' }] } }));
+    quiet[1] = stub('list_guests', () => ({ source: 's', data: { guests: [{ vmid: 235, name: 'plane', node: 'pve03', status: 'running' }] } }));
     const out = data(await callTool(tool(quiet), {}));
     expect(out.data.attention).toEqual([]);
     expect(out.source).toContain('1 monitors, 1 guests');
@@ -668,7 +668,7 @@ describe('lab_overview', () => {
 
   it('names a section that failed, and never reads it as healthy', async () => {
     const list = healthy();
-    list[0] = failing('kuma_status', 'Uptime Kuma: no answer within 8000 ms');
+    list[0] = failing('check_monitors', 'Uptime Kuma: no answer within 8000 ms');
     const out = data(await callTool(tool(list), {}));
     expect(out.data.allSectionsRead).toBe(false);
     expect(out.source).toContain('3 of 4 sections read');
@@ -678,30 +678,30 @@ describe('lab_overview', () => {
 
   it('flags a desk that stopped polling without an error, and a source with the wrong shape', async () => {
     const list = healthy();
-    list[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-04T01:00:00Z', lastPollError: null } } }));
-    list[3] = stub('systemd_status', () => ({ source: 's', data: {} }));
+    list[2] = stub('check_merge_desk', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: '2026-11-04T01:00:00Z', lastPollError: null } } }));
+    list[3] = stub('check_services', () => ({ source: 's', data: {} }));
     const out = data(await callTool(tool(list), {}));
     expect(out.data.attention).toContain('desk has not polled in the last hour (last poll 2026-11-04T01:00:00Z)');
     expect(out.data.attention).toContain('services: could not be read (the source answered with no "units" list)');
     const never = healthy();
-    never[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: null } } }));
+    never[2] = stub('check_merge_desk', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: null } } }));
     expect(data(await callTool(tool(never), {})).data.attention).toContain('desk has not polled in the last hour (last poll never)');
   });
 
   it('flags a desk poll error and an inactive unit', async () => {
     const list = healthy();
-    list[2] = stub('desk_status', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: 'GitHub 502' } } }));
-    list[3] = stub('systemd_status', () => ({ source: 's', data: { units: [{ unit: 'lab-agent.service', active: 'failed', sub: 'failed', restarts: 3, result: 'exit-code' }] } }));
+    list[2] = stub('check_merge_desk', () => ({ source: 's', data: { desk: { mode: 'live', lastPollAt: null, lastPollError: 'GitHub 502' } } }));
+    list[3] = stub('check_services', () => ({ source: 's', data: { units: [{ unit: 'lab-agent.service', active: 'failed', sub: 'failed', restarts: 3, result: 'exit-code' }] } }));
     const out = data(await callTool(tool(list), {}));
     expect(out.data.attention).toContain('desk poll error: GitHub 502');
     expect(out.data.attention).toContain('unit lab-agent.service is failed/failed');
   });
 
   it('fails the call when every source fails, and when a source tool is missing', async () => {
-    const all = ['kuma_status', 'pve_guests', 'desk_status', 'systemd_status'].map((n) => failing(n));
+    const all = ['check_monitors', 'list_guests', 'check_merge_desk', 'check_services'].map((n) => failing(n));
     expect(error(await callTool(tool(all), {}))).toContain('every source failed');
     const missing = data(await callTool(tool(healthy().slice(1)), {}));
     expect(missing.data.allSectionsRead).toBe(false);
-    expect(missing.data.attention).toContain('monitors: could not be read (kuma_status is not offered by this server)');
+    expect(missing.data.attention).toContain('monitors: could not be read (check_monitors is not offered by this server)');
   });
 });

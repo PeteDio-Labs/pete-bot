@@ -127,4 +127,16 @@ describe('errors and the write tier', () => {
     const shown = (await (await call(make(['read', 'write']), 'queue_thing')).json()) as { result: { isError: boolean } };
     expect(shown.result.isError).toBe(false);
   });
+
+  test('an alias answers a call, is logged under the new name and is not listed', async () => {
+    const renamed = new Map<string, McpTool>([['get_thing', { name: 'get_thing', aliases: ['old_thing'], description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: 's', data: 1 }) } as McpTool]]);
+    const logs: Array<Record<string, unknown> | undefined> = [];
+    const h = createMcpHandler({ serverInfo: { name: 'x', version: '0' }, instructions: 'x', path: '/mcp/x', tools: renamed, allowedPeer: '1.2.3.4', verify: async () => ({ ok: true, email: 'a@b.c' }), log: (_m, f) => logs.push(f) });
+    const rpc = (method: string, params: object) => h(new Request('http://x/mcp/x', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }), '1.2.3.4');
+    const res = (await (await rpc('tools/call', { name: 'old_thing', arguments: {} })).json()) as { result: { isError: boolean } };
+    expect(res.result.isError).toBe(false);
+    expect(logs.at(-1)).toMatchObject({ tool: 'get_thing', alias: 'old_thing', ok: true });
+    const list = (await (await rpc('tools/list', {})).json()) as { result: { tools: Array<{ name: string }> } };
+    expect(list.result.tools.map((t) => t.name)).toEqual(['get_thing']);
+  });
 });

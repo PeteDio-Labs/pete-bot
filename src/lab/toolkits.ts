@@ -17,7 +17,7 @@ export const MEDIA_TOOLKITS: Record<string, readonly string[]> = {
   health: ['vpn_health', 'why_is_it_dead', 'pool_health', 'disk_free', 'indexer_health'],
   audit: ['seerr_drift', 'stale_versions', 'partial_files', 'now_playing'],
   subtitles: ['bazarr_status', 'bazarr_find', 'propose_action'],
-  search: ['search_lab'],
+  search: ['search_knowledge'],
 };
 
 export const ALL_TOOLKITS = Object.keys(MEDIA_TOOLKITS);

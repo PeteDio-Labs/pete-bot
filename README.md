@@ -135,10 +135,10 @@ imports it: it runs in its own `lab-agent` process, never beside the desk key.
 
 | Tool | Reads |
 |---|---|
-| `find_host`, `host_note` | host notes and the live inventory table from a read-only `petedio-vault` clone |
-| `pve_guests`, `pve_guest` | the Proxmox API, GET only, with a `PVEAuditor` token and the cluster CA |
-| `kuma_status` | Uptime Kuma's status-page JSON on Pete-Pi |
-| `git_history` | commits in the iac repos by path or message text, with their PET keys |
+| `find_host`, `get_host_note` | host notes and the live inventory table from a read-only `petedio-vault` clone |
+| `list_guests`, `get_guest` | the Proxmox API, GET only, with a `PVEAuditor` token and the cluster CA |
+| `check_monitors` | Uptime Kuma's status-page JSON on Pete-Pi |
+| `get_git_history` | commits in the iac repos by path or message text, with their PET keys |
 
 Each tool takes a zod-checked input, returns its data with a `source` line saying what it
 read, and caps its output at 16 KB. A read that fails, or that finds nothing where
@@ -177,7 +177,7 @@ answers 404, and `lab-agent` starts without the route.
 | Tool | Reads |
 |---|---|
 | `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
-| `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
+| `search_knowledge` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
 ### Claude review as the desk's required review
 
@@ -188,14 +188,14 @@ A PR review or PR comment by a listed login counts when its first line is exactl
 "Changes requested" of the head holds the merge. The desk then queues no Codex review of its own. It is an
 attestation, not authentication: a thread posts under whichever identity its GitHub connector holds.
 
-Codex is still required for tier 2, and for any PR with a second opinion queued through `queue_codex_review` (the
+Codex is still required for tier 2, and for any PR with a second opinion queued through `request_codex_review` (the
 desk saves a mark before the queue call) or any Codex review on it, so a Codex "Changes requested" is never walked
 past. With the variable empty, the desk behaves as before and reads no PR comments.
 
 ### Second-opinion Codex reviews
 
 Claude's review is the review of record. A thread that wants Codex as a second opinion calls the lab MCP's
-`queue_codex_review` (repo, PR, optional effort) and then polls `codex_review_status`. Only the lab MCP serves
+`request_codex_review` (repo, PR, optional effort) and then polls `check_codex_review`. Only the lab MCP serves
 these two tools: the `/lab` model loop and the media assistant do not. lab-agent holds no key to codex-248. It
 calls `POST|GET /v1/codex-review` on pete-bot, which queues through the merge desk's own `CodexQueue`, so the
 gate's one-review-at-a-time lock and repo-name check apply. A request is limited to `DESK_REPOS`, to an open PR,
@@ -228,7 +228,7 @@ the journal line `media ask answered`.
 **Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (library, trace_request, list_queue,
 queue_errors), `health` (vpn_health, why_is_it_dead, pool_health, disk_free, indexer_health), `audit` (seerr_drift,
 stale_versions, partial_files, now_playing), `subtitles` (bazarr_status, bazarr_find, propose_action) and `search`
-(search_lab). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
+(search_knowledge). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
 To compare tool counts, restart with a different list and read the `tools` and `toolkits` labels.
 
 **Scrape door.** `/metrics` answers on `127.0.0.1:LAB_PORT` for local probes. To let Prometheus read it, set
@@ -306,11 +306,11 @@ Phase 1 adds three tools to the library for both doors:
 
 | Tool | Reads |
 |---|---|
-| `desk_status` | pete-bot's `/health`: the merge desk's mode and last poll |
-| `systemd_status` | `systemctl show` for `pete-bot.service` and `lab-agent.service` only |
-| `vault_presence` | KV v2 metadata under `kv/metadata/services/`: names, versions and times, never a value or a field name |
+| `check_merge_desk` | pete-bot's `/health`: the merge desk's mode and last poll |
+| `check_services` | `systemctl show` for `pete-bot.service` and `lab-agent.service` only |
+| `check_secrets` | KV v2 metadata under `kv/metadata/services/`: names, versions and times, never a value or a field name |
 
-`vault_presence` uses a periodic token with read and list on that metadata path only.
+`check_secrets` uses a periodic token with read and list on that metadata path only.
 `lab-agent` renews it twice a day. While Vault is sealed, the tool says so.
 `LAB_VAULT_TOKEN` and `LAB_VAULT_CA_FILE` are required even while the MCP door is off, so
 `lab-agent` starts only after `PET-670`'s seed script has minted that token.

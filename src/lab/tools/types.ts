@@ -39,6 +39,8 @@ export const DEFAULT_OUTPUT_CAP_BYTES = 16 * 1024;
 
 export interface LabTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
+  /** Earlier names the lab MCP still answers (see McpTool.aliases). */
+  aliases?: readonly string[];
   description: string;
   input: S;
   /**
