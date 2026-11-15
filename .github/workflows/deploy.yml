@@ -312,29 +312,30 @@ jobs:
             kv/data/services/lab-agent-media mtrace_token | LAB_MTRACE_TOKEN ;
             kv/data/services/lab-agent-media bazarr_key | LAB_BAZARR_KEY
 
-      # No long-lived key. The job signs a fresh ed25519 key as the Vault SSH role `pete-bot-deploy`:
+      # No long-lived key. The job signs a fresh ed25519 key as the Vault SSH role `deploy-pete-bot`:
       # a 30-minute certificate that opens root on 237 only, and only from the runners
       # (petedio-iac vault-config/ssh.tf, docs/runbooks/host-deploys.md). Vault revokes the token as
       # soon as it has signed. ⚠ THIS STEP RUNS AFTER EVERY OTHER VAULT READ, which each mint their
       # own token, so the revoke cannot cut one off. A sealed Vault, a role that has not been
       # applied, or a host that does not trust the CA fails the deploy here or at the play.
-      - name: Sign a pete-bot-deploy SSH certificate
+      - name: Sign a deploy-pete-bot SSH certificate
         run: |
           umask 077
           key="$RUNNER_TEMP/lxc_ssh_key"
-          ssh-keygen -q -t ed25519 -N '' -C pete-bot-deploy -f "$key"
+          ssh-keygen -q -t ed25519 -N '' -C deploy-pete-bot -f "$key"
           python3 -c 'import json,sys; print(json.dumps({"public_key": open(sys.argv[1]).read().strip()}))' "$key.pub" > "$RUNNER_TEMP/sign.json"
           printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > "$RUNNER_TEMP/vault.hdr"
           if ! curl -sS --fail-with-body --cacert "$VAULT_CA" -m 15 -H @"$RUNNER_TEMP/vault.hdr" \
               -X POST --data @"$RUNNER_TEMP/sign.json" \
-              https://192.168.50.223:8200/v1/ssh-client-signer/sign/pete-bot-deploy > "$RUNNER_TEMP/signed.json"; then
-            echo "::error title=deploy::Vault refused to sign the pete-bot-deploy key: $(head -c 300 "$RUNNER_TEMP/signed.json")"
+              https://192.168.50.223:8200/v1/ssh-client-signer/sign/deploy-pete-bot > "$RUNNER_TEMP/signed.json"; then
+            echo "::error title=deploy::Vault refused to sign the deploy-pete-bot key: $(head -c 300 "$RUNNER_TEMP/signed.json")"
+            curl -sS -m 10 -o /dev/null --cacert "$VAULT_CA" -H @"$RUNNER_TEMP/vault.hdr" -X POST https://192.168.50.223:8200/v1/auth/token/revoke-self || true
             exit 1
           fi
           python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["signed_key"].strip())' \
             "$RUNNER_TEMP/signed.json" > "$key-cert.pub"
-          ssh-keygen -L -f "$key-cert.pub" | grep -q '^ *pete-bot-deploy$' \
-            || { echo "::error title=deploy::the certificate does not name the pete-bot-deploy principal"; exit 1; }
+          ssh-keygen -L -f "$key-cert.pub" | grep -q '^ *deploy-pete-bot$' \
+            || { echo "::error title=deploy::the certificate does not name the deploy-pete-bot principal"; exit 1; }
           echo "signed: $(ssh-keygen -L -f "$key-cert.pub" | grep -E 'Valid:' | sed 's/^ *//')"
           curl -sS --fail --cacert "$VAULT_CA" -m 10 -o /dev/null -H @"$RUNNER_TEMP/vault.hdr" \
             -X POST https://192.168.50.223:8200/v1/auth/token/revoke-self \
