@@ -6,6 +6,7 @@ import { ollamaReviewer } from './qwen.js';
 import type { Client } from 'discord.js';
 import { loadDeskSettings, type DeskState, type DeskEnv } from './config.js';
 import { CodexQueue } from './codex.js';
+import { CodexReviewRequests } from './review-requests.js';
 import { MergeDesk, type DeskStatus } from './desk.js';
 import { discordNotifier } from './discord.js';
 import { GitHubApp } from './github.js';
@@ -28,6 +29,7 @@ function logNotifier(): Notifier {
 }
 
 let desk: MergeDesk | null = null;
+let reviewRequests: CodexReviewRequests | null = null;
 let deskState: DeskState = { state: 'off' };
 
 export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = process.env as DeskEnv): void {
@@ -59,10 +61,15 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
       logger.error(`[Desk] Codex grading is off: DESK_CODEX_GRADES_PATH ${s.codexGradesPath} cannot be opened: ${String(err)}`);
     }
   }
+  // One queue and one GitHub client for both, so a requested second opinion and the desk's own
+  // reviews share the gate's one-at-a-time lock.
+  const codex = new CodexQueue(s.codex);
+  const github = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
+  reviewRequests = new CodexReviewRequests({ queue: codex, github, repos: s.repos, log: logger });
   desk = new MergeDesk({
     settings: s,
-    github: new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org }),
-    codex: new CodexQueue(s.codex),
+    github,
+    codex,
     qwen: s.fallback ? ollamaReviewer(s.fallback.qwen) : undefined,
     store,
     grades,
@@ -71,6 +78,11 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
   });
   desk.start();
   logger.info(`[Desk] The merge desk is ${s.mode} for ${s.repos.join(', ')}`);
+}
+
+/** Second-opinion Codex reviews a thread asked for. Null while the desk is off or misconfigured. */
+export function getReviewRequests(): CodexReviewRequests | null {
+  return reviewRequests;
 }
 
 export function getDesk(): MergeDesk | null {

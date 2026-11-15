@@ -37,6 +37,8 @@ export interface LabTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
    * cost a retry and a "1 read(s) failed" note on every follow-up (2026-11-12).
    */
   ignoredKeys?: readonly string[];
+  /** Default true. Only the lab MCP reads it, to set the MCP `readOnlyHint`. A tool that sets false changes something outside this process. */
+  readOnly?: boolean;
   run(input: z.infer<S>): Promise<ToolOutput>;
 }
 

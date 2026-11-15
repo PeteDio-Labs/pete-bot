@@ -179,6 +179,21 @@ answers 404, and `lab-agent` starts without the route.
 | `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
 | `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
+### Second-opinion Codex reviews
+
+Claude's review is the review of record. A thread that wants Codex as a second opinion calls the lab MCP's
+`queue_codex_review` (repo, PR, optional effort) and then polls `codex_review_status`. Only the lab MCP serves
+these two tools: the `/lab` model loop and the media assistant do not. lab-agent holds no key to codex-248. It
+calls `POST|GET /v1/codex-review` on pete-bot, which queues through the merge desk's own `CodexQueue`, so the
+gate's one-review-at-a-time lock and repo-name check apply. A request is limited to `DESK_REPOS`, to an open PR,
+and to a head with no Codex review yet. A repeat for the same head answers `already-queued`.
+
+The queue call answers at once and the review takes minutes. A quota refusal (`rate_limit_reached` or
+`codex-quota` in the gate's output) reads `rate_limited` in the status. A zero exit with no Codex review of the
+head reads `failed`. Requests live in memory, so a restart forgets them and `status` then reads GitHub alone.
+`/v1/codex-review` takes its own `CODEX_REVIEW_BEARER_TOKEN`, which no other route accepts. lab-agent reads the
+same value as `LAB_CODEX_REVIEW_TOKEN` and offers the tools only when it is set.
+
 `LAB_MTRACE_TOKEN` is lab-agent's own tracerr caller (`token_lab-agent`), never pete-bot's. 237 reaches tracerr on
 its own LAN address through the `lo` rule in the nftables allowlist. `LAB_OLLAMA_URL` now defaults to
 CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the port.
@@ -382,6 +397,7 @@ holds an Anthropic key. `LAB_PROVIDER=gateway` is refused at lab-agent's startup
 | `ALERT_BASELINE_PATH` | No | — | Where recovery times persist. Empty keeps them in memory |
 | `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert`, which Uptime Kuma sends. Empty refuses every alert |
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
+| `CODEX_REVIEW_BEARER_TOKEN` | No | — | Bearer token for `/v1/codex-review`, which lab-agent calls. Empty refuses every request |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |

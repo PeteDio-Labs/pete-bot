@@ -60,6 +60,10 @@ const EnvSchema = z.object({
   // search_lab (PET-745). The tool is offered only when the token is set.
   LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
   LAB_SEARCH_TOKEN: TOKEN.optional(),
+  // queue_codex_review and codex_review_status (the lab MCP only). Offered when the token is set;
+  // it is pete-bot's CODEX_REVIEW_BEARER_TOKEN, which opens /v1/codex-review alone.
+  LAB_CODEX_REVIEW_URL: z.string().url().default('http://127.0.0.1:3015/v1/codex-review'),
+  LAB_CODEX_REVIEW_TOKEN: TOKEN.optional(),
   // tracerr, for the media assistant (PET-869). 237 reaches its own LAN address through the
   // `lo` allowlist rule. The tools are offered only when the token is set, and the token is
   // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
@@ -97,6 +101,8 @@ export interface LabConfig {
   plane: { baseUrl: string; workspace: string; identifiers: string[]; token: string } | null;
   /** null while no search token is set. */
   search: { baseUrl: string; token: string } | null;
+  /** null while no token is set: the MCP then offers no Codex review tools. */
+  codexReview: { url: string; token: string } | null;
   /** The toolkits the media assistant offers (LAB_MEDIA_TOOLKITS). Every kit when unset. */
   mediaToolkits: string[];
   /** null while LAB_METRICS_HOST is unset: /metrics then answers on loopback only. */
@@ -184,6 +190,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
       ? { baseUrl: e.LAB_PLANE_URL, workspace: e.LAB_PLANE_WORKSPACE, identifiers: e.LAB_PLANE_PROJECTS.split(','), token: e.LAB_PLANE_TOKEN }
       : null,
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
+    codexReview: e.LAB_CODEX_REVIEW_TOKEN ? { url: e.LAB_CODEX_REVIEW_URL, token: e.LAB_CODEX_REVIEW_TOKEN } : null,
     mediaToolkits: parseToolkits(e.LAB_MEDIA_TOOLKITS),
     metrics: e.LAB_METRICS_HOST ? { host: e.LAB_METRICS_HOST, port: e.LAB_METRICS_PORT, peer: e.LAB_METRICS_PEER } : null,
     tracerr: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
