@@ -65,7 +65,14 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
   // reviews share the gate's one-at-a-time lock.
   const codex = new CodexQueue(s.codex);
   const github = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
-  reviewRequests = new CodexReviewRequests({ queue: codex, github, repos: s.repos, log: logger });
+  // A queued second opinion makes Codex required for that PR (decide.ts), so the mark is saved before the queue call.
+  reviewRequests = new CodexReviewRequests({
+    queue: codex,
+    github,
+    repos: s.repos,
+    log: logger,
+    onQueued: (repo, pr) => store.update(repo, pr, { secondOpinionAt: new Date().toISOString() }),
+  });
   desk = new MergeDesk({
     settings: s,
     github,

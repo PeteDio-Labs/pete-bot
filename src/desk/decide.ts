@@ -21,12 +21,18 @@
 import type { CheckSummary, PullDetail } from './github.js';
 import type { Classification } from './classify.js';
 import { effortFor, type CodexReview, type Effort } from './codex.js';
+import { claudeOnHead, type ClaudeReview } from './claude-review.js';
 
 export const HOLD_LABEL = 'merge-desk/hold';
 /** Two blocking Codex rounds, then a person looks (the codex-review skill's stop rule). */
 export const MAX_ROUNDS = 2;
 
 export interface PrMemory {
+  /**
+   * When a thread queued a Codex second opinion for this PR (ISO). From then on Codex is
+   * required for the PR, on every head, however the Claude review reads.
+   */
+  secondOpinionAt?: string;
   /** The head SHA the desk last queued a Codex review for. */
   queuedSha?: string;
   /** True while that ssh call runs. */
@@ -77,6 +83,10 @@ export interface Facts {
   pull: PullDetail;
   classification: Classification;
   codex: CodexReview[];
+  /** Claude reviews by DESK_CLAUDE_REVIEWERS, any head. Empty while that list is empty. */
+  claude?: ClaudeReview[];
+  /** True when DESK_CLAUDE_REVIEWERS is set: Claude's review is then the required one for tier 0 and 1. */
+  claudeMode?: boolean;
   checks: CheckSummary;
   /** Branch-protection required checks on the base branch; null or absent when unreadable. */
   requiredChecks?: string[] | null;
@@ -96,8 +106,8 @@ export type Decision =
   | { kind: 'merge'; sha: string; review: CodexReview | null; by: ReviewedBy }
   | { kind: 'ask'; sha: string; review: CodexReview | null; by: ReviewedBy; why: string };
 
-/** Who cleared the head: Codex, the local Qwen pass (tier 1), or CI alone (tier 0, Codex out). */
-export type ReviewedBy = 'codex' | 'qwen' | 'ci';
+/** Who cleared the head: Codex, Claude's review (tier 0 and 1), the local Qwen pass (tier 1), or CI alone (tier 0, Codex out). */
+export type ReviewedBy = 'codex' | 'qwen' | 'ci' | 'claude';
 
 /** Distinct commits Codex blocked, oldest first. */
 export function blockingRounds(codex: CodexReview[]): CodexReview[] {
@@ -151,7 +161,16 @@ export function decide(f: Facts): Decision {
   let review: CodexReview | null = null;
   let by: ReviewedBy = 'codex';
 
-  if (!onHead) {
+  // Claude's review is the required one for tier 0 and 1, unless Codex is in the picture: a
+  // second opinion a thread queued, or any Codex review on the PR, keeps the Codex gate, so a
+  // Codex "Changes requested" is never walked past. Tier 2 always needs Codex.
+  const secondOpinion = Boolean(f.memory.secondOpinionAt) || f.codex.length > 0;
+  if (f.claudeMode && f.classification.tier < 2 && !secondOpinion) {
+    const c = claudeOnHead(f.claude ?? [], sha, pull.author);
+    if (!c) return { kind: 'wait', reason: 'waiting for a Claude review of the head' };
+    if (c.verdict === 'changes-requested') return { kind: 'wait', reason: 'Claude requested changes on the head' };
+    by = 'claude';
+  } else if (!onHead) {
     if (rounds.length >= allowed) return { kind: 'stop', sha, rounds };
     const fb = fallbackFor(f, sha);
     if (fb === 'ci') {

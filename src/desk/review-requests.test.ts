@@ -8,7 +8,7 @@ const review = (commitId: string, first = '## Codex review: No blocking findings
   id: 1, author: CODEX_LOGIN, commitId, state: 'COMMENTED', body: `${first}\nbody`, htmlUrl: 'https://x/r/1', submittedAt: '2026-11-15T00:00:00Z',
 });
 
-function setup(opts: { open?: boolean; head?: string; reviews?: ReturnType<typeof review>[]; result?: QueueResult; afterRun?: () => void } = {}) {
+function setup(opts: { onQueued?: (repo: string, pr: number, sha: string) => void; open?: boolean; head?: string; reviews?: ReturnType<typeof review>[]; result?: QueueResult; afterRun?: () => void } = {}) {
   let head = opts.head ?? 'aaaaaaa1';
   const reviews = [...(opts.reviews ?? [])];
   const calls: string[] = [];
@@ -26,7 +26,7 @@ function setup(opts: { open?: boolean; head?: string; reviews?: ReturnType<typeo
     getPull: async () => ({ state: opts.open === false ? 'closed' : 'open', merged: false, headSha: head }) as never,
     listReviews: async () => reviews as never,
   };
-  const reqs = new CodexReviewRequests({ queue, github, repos: ['petedio-iac', 'pete-bot'], log });
+  const reqs = new CodexReviewRequests({ queue, github, repos: ['petedio-iac', 'pete-bot'], log, onQueued: opts.onQueued });
   return { reqs, calls, release, reviews, setHead: (h: string) => (head = h) };
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -58,6 +58,20 @@ describe('request', () => {
     release();
     await settle();
     expect(calls).toEqual(['petedio-iac 5 high']);
+  });
+});
+
+describe('the second-opinion mark', () => {
+  it('is saved once, before the queue call, and not for a refused or already-reviewed request', async () => {
+    const marks: string[] = [];
+    const s = setup({ onQueued: (r, n, sha) => marks.push(`${r}#${n}@${sha}`) });
+    await s.reqs.request('petedio-usaa', 5);
+    expect(marks).toEqual([]);
+    await s.reqs.request('petedio-iac', 5);
+    expect(marks).toEqual(['petedio-iac#5@aaaaaaa1']);
+    const done = setup({ reviews: [review('aaaaaaa1')], onQueued: (r) => marks.push(r) });
+    await done.reqs.request('petedio-iac', 6);
+    expect(marks).toHaveLength(1);
   });
 });
 

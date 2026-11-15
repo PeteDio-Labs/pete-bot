@@ -9,6 +9,7 @@
  * poll forever and stop every later one.
  */
 import { createSign } from 'node:crypto';
+import type { PullComment } from './claude-review.js';
 
 const API = 'https://api.github.com';
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -209,6 +210,12 @@ export class GitHubApp {
     }));
   }
 
+  /** The PR's conversation comments (not inline review comments), oldest first. */
+  async listComments(repo: string, n: number): Promise<PullComment[]> {
+    const raw = await this.pages<RawComment>(`listing ${repo}#${n}'s comments`, `${this.repoPath(repo)}/issues/${n}/comments`);
+    return raw.map((c) => ({ author: c.user?.login ?? '', body: c.body ?? '', htmlUrl: c.html_url, updatedAt: c.updated_at ?? c.created_at }));
+  }
+
   /**
    * Check runs and commit statuses on one commit. Only the latest run of each check counts.
    * A skipped or neutral run is not a pass: it lands in `skipped`, and the desk asks Pedro.
@@ -388,6 +395,14 @@ interface RawPull {
   head: { sha: string; repo: { full_name: string } | null };
   base: { ref: string };
   labels?: { name: string }[];
+}
+
+interface RawComment {
+  user: { login: string } | null;
+  body: string | null;
+  html_url: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 interface RawReview {
