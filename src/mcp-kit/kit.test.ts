@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { createMcpHandler, McpToolError, redact, type McpTool } from '../src/index.js';
+import { createMcpHandler, McpToolError, redact, type McpTool } from './index.js';
 import { runContract } from './contract.js';
 
 // Credential-shaped canaries are joined at run time, so no literal in this file looks like a

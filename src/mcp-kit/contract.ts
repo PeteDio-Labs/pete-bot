@@ -8,7 +8,7 @@
  * with `okCall`, and a `read` tool that fails when called with `failCall`.
  */
 import { describe, expect, test } from 'bun:test';
-import { createMcpHandler, type McpDeps } from '../src/index.js';
+import { createMcpHandler, type McpDeps } from './index.js';
 
 export interface ContractSetup {
   deps: Omit<McpDeps, 'log' | 'verify'>;

@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { ask, ASK_DEADLINE_MS, MEDIA_SYSTEM_PROMPT, type AskResult, type CallModel } from './agent.js';
 import { ModelError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
-import type { LabTool } from './tools/index.js';
+import { LabToolError, type LabTool } from './tools/index.js';
 import type { LabMetrics } from './metrics.js';
 
 export type Check = () => Promise<string>;
@@ -132,7 +132,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         return json({ ok: true, message });
       } catch (err) {
         // A LabToolError message is written for the caller and holds no key.
-        const message = err instanceof Error && err.name === 'LabToolError' ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
+        const message = err instanceof LabToolError ? err.message : `internal error (${(err as Error)?.name ?? 'unknown'})`;
         log('media act failed', { kind: body.kind, id: body.id, error: message });
         return json({ ok: false, error: message }, 502);
       }
