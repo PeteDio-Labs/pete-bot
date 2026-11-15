@@ -88,7 +88,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
         const m = r.item;
         if (action === 'subtitles') {
           const proposal: Proposal = { action: 'subtitles', kind: m.kind, id: m.id, title: m.title, label: `Search subtitles for ${m.title} (${m.missing} missing)`, confirm: true };
-          return { source: `Bazarr: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that says what you will do if they confirm, such as "Ready to search season 3 of Yellowjackets. Tap Confirm." Do not repeat this note.' } };
+          return { source: `Bazarr: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' } };
         }
         const sn = m.kind === 'series' ? season : undefined;
         // A dry run first: tracerr says what it would search, so the card names it and a refusal
@@ -104,7 +104,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
           label: `Search for ${m.kind === 'series' ? (sn !== undefined ? `season ${sn} of ` : 'missing episodes of ') : ''}${m.title} (${m.kind === 'series' ? 'Sonarr' : 'Radarr'})`,
           confirm: true,
         };
-        return { source: `library: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that says what you will do if they confirm, such as "Ready to search season 3 of Yellowjackets. Tap Confirm." Do not repeat this note.' } };
+        return { source: `library: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' } };
       }
       if (!target || (action !== 'update_check' && action !== 'update_apply')) throw new LabToolError(`request_action: ${action} needs a target (${PROPOSE_TARGETS.join(', ')})`);
       const proposal: Proposal =
@@ -113,7 +113,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
           : { action, target, label: `Install updates for ${target}`, confirm: true };
       return {
         source: 'media-updates.yml targets',
-        data: { proposal, pending: proposal.confirm ? 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that says what you will do if they confirm, such as "Ready to search season 3 of Yellowjackets. Tap Confirm." Do not repeat this note.' : 'This is a read-only check with nothing to confirm. It runs as soon as you answer, and its report follows. Do not tell the user to confirm.' },
+        data: { proposal, pending: proposal.confirm ? 'Nothing has run. A Confirm button appears under your reply. Reply in one short line that names the title and, for a show, the season, then says to tap Confirm. Do not repeat this note.' : 'This is a read-only check with nothing to confirm. It runs as soon as you answer, and its report follows. Do not tell the user to confirm.' },
       };
     },
   };
