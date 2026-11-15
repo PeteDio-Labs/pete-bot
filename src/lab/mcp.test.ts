@@ -264,7 +264,9 @@ describe('the MCP door', () => {
     const ok = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'find_host', arguments: { query: '235' } } });
     expect(ok.result.isError).toBe(false);
     expect(JSON.parse(ok.result.content[0].text)).toEqual({ source: 'test', data: { query: '235' } });
-    expect(logs.at(-1)?.fields).toMatchObject({ email: 'pedelgadillo@gmail.com', tool: 'find_host', input: { query: '235' }, ok: true });
+    expect(logs.at(-1)?.fields).toMatchObject({ caller: 'pedelgadillo@gmail.com', tool: 'find_host', tier: 'read', inputLength: JSON.stringify({ query: '235' }).length, ok: true });
+    // The kit logs the input's length, never its text, because a query can be private.
+    expect(JSON.stringify(logs.at(-1))).not.toContain('235"');
 
     const bad = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'find_host', arguments: { query: 'fail' } } });
     expect(bad.result).toEqual({ content: [{ type: 'text', text: 'find_host: vault clone unreadable' }], isError: true });
@@ -272,10 +274,10 @@ describe('the MCP door', () => {
 
   it('refuses an unknown tool or method, a GET, a batch and a bad body', async () => {
     expect((await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'shell', arguments: { cmd: 'id' } } })).error.code).toBe(-32602);
-    // The refusal leaves a record naming the caller, the requested tool and its input.
+    // The refusal leaves a record naming the caller, the requested tool and its input's length.
     expect(logs.at(-1)).toEqual({
       msg: 'mcp call',
-      fields: { email: 'pedelgadillo@gmail.com', tool: 'shell', input: { cmd: 'id' }, ok: false, rejected: 'unknown tool' },
+      fields: { caller: 'pedelgadillo@gmail.com', tool: 'shell', inputLength: JSON.stringify({ cmd: 'id' }).length, ok: false, rejected: 'unknown tool' },
     });
     expect((await rpc({ jsonrpc: '2.0', id: 7, method: 'resources/list' })).error.code).toBe(-32601);
     expect((await call(null, { method: 'GET' })).status).toBe(405);

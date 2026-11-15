@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { createMcpHandler, McpToolError, redact, type McpTool } from '../src/index.js';
+import { createMcpHandler, McpToolError, redact, type McpTool } from './index.js';
 import { runContract } from './contract.js';
 
 // Credential-shaped canaries are joined at run time, so no literal in this file looks like a
@@ -74,6 +74,11 @@ describe('redact: false positives and missed shapes', () => {
     for (const ok of ['{"token_count": 12345}', '"tokens": 1234567', '"cf_token_ttl": "3600s"', '"secret": "present"', 'key: value']) {
       expect(redact(ok)).toEqual({ text: ok, changed: false });
     }
+  });
+
+  test('leaves prose that mentions basic or bearer alone', () => {
+    for (const ok of ['Use basic configuration for the host', 'a Bearer authentication scheme', 'basic setup']) expect(redact(ok)).toEqual({ text: ok, changed: false });
+    expect(redact('Basic dXNlcjpwYXNzd29yZA==').changed).toBe(true);
   });
 
   test('redacts AWS, GitHub and sk- keys, URL credentials, private keys and quoted values with spaces', () => {
