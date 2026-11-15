@@ -12,7 +12,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { actMedia, type MediaClientConfig } from '../clients/mediaAgent.js';
+import { actDownload, actMedia, type MediaClientConfig } from '../clients/mediaAgent.js';
 import { runUpdate } from '../clients/githubActions.js';
 import type { UpdateOutcome } from '../clients/githubActions.js';
 import type { Proposal } from '../lab/tools/propose.js';
@@ -35,6 +35,12 @@ export class PendingStore {
     const id = randomBytes(8).toString('hex');
     this.items.set(id, { proposal, at: this.now() });
     return id;
+  }
+
+  /** Reads a proposal without consuming it. */
+  peek(id: string): Proposal | undefined {
+    const hit = this.items.get(id);
+    return hit && this.now() - hit.at <= this.ttlMs ? hit.proposal : undefined;
   }
 
   /** Removes and returns the proposal. A second take of the same id returns nothing. */
@@ -63,9 +69,18 @@ export function proposalRow(id: string): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
-export function parseButton(customId: string): { verb: 'ok' | 'no'; id: string } | null {
+export function parseButton(customId: string): { verb: 'ok' | 'no'; id: string; pick?: number } | null {
+  const pick = /^media:pick:([0-9a-f]{16}):([0-3])$/.exec(customId);
+  if (pick) return { verb: 'ok', id: pick[1]!, pick: Number(pick[2]) };
   const m = /^media:(ok|no):([0-9a-f]{16})$/.exec(customId);
   return m ? { verb: m[1] as 'ok' | 'no', id: m[2]! } : null;
+}
+
+/** A clarification card: one button per option. The tap re-asks with that option's reply. */
+export function choiceRow(id: string, options: Array<{ label: string }>): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    ...options.slice(0, 4).map((o, i) => new ButtonBuilder().setCustomId(`${MEDIA_BUTTON_PREFIX}:pick:${id}:${i}`).setLabel(o.label.slice(0, 80)).setStyle(ButtonStyle.Primary)),
+  );
 }
 
 export type ProposalResult =
@@ -74,6 +89,7 @@ export type ProposalResult =
 
 export interface RunDeps {
   act?: typeof actMedia;
+  download?: typeof actDownload;
   update?: typeof runUpdate;
   media: MediaClientConfig;
   onStarted?: (url: string) => Promise<void>;
@@ -86,6 +102,13 @@ export async function runProposal(p: Proposal, deps: RunDeps): Promise<ProposalR
     if (out.kind === 'done') return { kind: 'text', ok: true, text: `${p.title}: ${out.message}` };
     if (out.kind === 'not-configured') return { kind: 'text', ok: false, text: 'The media assistant is not configured on this host (`LAB_ASK_TOKEN` is empty). Nothing ran.' };
     return { kind: 'text', ok: false, text: `The subtitle search did not run: ${out.reason.slice(0, 300)}` };
+  }
+  if (p.action === 'choose') return { kind: 'text', ok: false, text: 'A clarification card has no action to run.' };
+  if (p.action === 'download') {
+    const out = await (deps.download ?? actDownload)(p.title, p.season, p.kind === 'series' ? 'series' : 'movie', deps.media);
+    if (out.kind === 'done') return { kind: 'text', ok: true, text: `${p.title}: ${out.message}` };
+    if (out.kind === 'not-configured') return { kind: 'text', ok: false, text: 'The media assistant is not configured on this host (`LAB_ASK_TOKEN` is empty). Nothing ran.' };
+    return { kind: 'text', ok: false, text: `The download search did not run: ${out.reason.slice(0, 300)}` };
   }
   const mode = p.action === 'update_check' ? 'check' : 'apply';
   const outcome = await (deps.update ?? runUpdate)(mode, p.target, false, {

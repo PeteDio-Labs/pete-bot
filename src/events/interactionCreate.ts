@@ -26,6 +26,10 @@ import { getDesk } from '../desk/index.js';
 import { BUTTON_PREFIX, type MergeDesk } from '../desk/desk.js';
 import { getReports } from '../reports/index.js';
 import { REPORT_NAMES, type ReportName } from '../reports/settings.js';
+import { askMedia } from '../clients/mediaAgent.js';
+import { chunk, describe } from '../media/dmHandler.js';
+import { createPresenter, type Replier } from '../media/present.js';
+import type { Proposal } from '../lab/tools/propose.js';
 import { mediaPending, parseButton, runProposal, type PendingStore, type ProposalResult } from '../media/actions.js';
 
 const COLOR_OK = 0x57f287;
@@ -288,6 +292,34 @@ export function resultMessage(r: ProposalResult): { content?: string; embeds?: E
 }
 
 /**
+ * A clarification card tap. The chosen option's reply goes back to the media assistant as the owner's
+ * next message, so the assistant resolves the question with no history to carry.
+ */
+async function handlePick(interaction: ButtonInteraction, proposal: Proposal | undefined, index: number, store: PendingStore): Promise<void> {
+  const option = proposal?.action === 'choose' ? proposal.options[index] : undefined;
+  if (!option) {
+    await interaction.update({ content: 'That request expired or already ran, so nothing ran. Ask again.', components: [] });
+    return;
+  }
+  await interaction.update({ content: `**${proposal!.label}**\nYou chose: ${option.label}`, components: [] });
+  try {
+    const outcome = await askMedia(option.reply, [], { ...config.lab, timeoutMs: config.media.timeoutMs });
+    if (outcome.kind === 'failed') logger.error(`[media] pick failed: ${outcome.reason}`);
+    for (const part of chunk(describe(outcome))) await interaction.followUp(part);
+    if (outcome.kind === 'answer' && outcome.result.proposals.length > 0) {
+      // A re-ask from a button runs no update check on its own: that path needs a typed message.
+      const offered = outcome.result.proposals.filter((p) => p.action !== 'update_check');
+      await createPresenter(store)({ reply: (o) => interaction.followUp(o as never) } as Replier, offered);
+    }
+  } catch (err) {
+    // The follow-up token lasts fifteen minutes. Say the failure in a DM instead of leaving a spent card in silence.
+    const text = err instanceof Error ? err.message : String(err);
+    logger.error(`[media] pick follow-up failed: ${text}`);
+    await interaction.user.send(`I could not finish "${option.label}": ${text.slice(0, 300)}. Ask again.`).catch(() => undefined);
+  }
+}
+
+/**
  * A media assistant button (PET-869). Owner only, one use, ten minutes. The tap removes the
  * buttons first, so a double tap cannot run the change twice, and then runs it and says how it ended.
  */
@@ -303,7 +335,21 @@ async function handleMediaButton(interaction: ButtonInteraction, store: PendingS
     await interaction.update({ content: 'That button is not valid.', components: [] });
     return;
   }
+  // A pick tap on a Confirm card, or a Confirm tap on a choice card, must not consume the stored proposal.
+  const held = store.peek(button.id);
+  if (!held) {
+    await interaction.update({ content: 'That request expired or already ran, so nothing ran. Ask again.', components: [] });
+    return;
+  }
+  if ((button.pick !== undefined) !== (held.action === 'choose')) {
+    await interaction.update({ content: 'That button does not match its request, so nothing ran. Ask again.', components: [] });
+    return;
+  }
   const proposal = store.take(button.id);
+  if (button.pick !== undefined) {
+    await handlePick(interaction, proposal, button.pick, store);
+    return;
+  }
   if (button.verb === 'no') {
     await interaction.update({ content: proposal ? `Cancelled: ${proposal.label}` : 'Cancelled.', components: [] });
     return;
@@ -316,7 +362,7 @@ async function handleMediaButton(interaction: ButtonInteraction, store: PendingS
   const startedAt = Date.now();
   let message: { content?: string; embeds?: EmbedBuilder[] };
   try {
-    if (proposal.action !== 'subtitles' && !config.updates.token) throw new Error('`GITHUB_UPDATES_TOKEN` is empty on this host, so pete-bot cannot start a run');
+    if ((proposal.action === 'update_check' || proposal.action === 'update_apply') && !config.updates.token) throw new Error('`GITHUB_UPDATES_TOKEN` is empty on this host, so pete-bot cannot start a run');
     const result = await runProposal(proposal, { media: { ...config.lab, timeoutMs: config.media.timeoutMs }, update: run });
     askTotal.inc({ surface: 'media', status: result.kind === 'text' ? (result.ok ? 'success' : 'failure') : result.outcome.kind === 'completed' && result.outcome.conclusion === 'success' ? 'success' : 'failure' });
     message = resultMessage(result);

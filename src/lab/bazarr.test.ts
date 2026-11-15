@@ -24,6 +24,24 @@ const router = (extra: Record<string, () => Response> = {}) =>
     return json({}, 404);
   });
 
+describe('matchTitle loose resolution', () => {
+  const items = [
+    { kind: 'series' as const, id: 1, title: 'Yellowjackets', missing: 0 },
+    { kind: 'series' as const, id: 2, title: 'Up Here', missing: 0 },
+  ];
+  it('joins and splits words, and forgives a typo', () => {
+    expect(matchTitle(items, 'Yellow Jackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'yellow-jackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'Yelowjackets').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'Yelowjackets', { typo: false })).toEqual([]);
+  });
+  it('does not match a short or unrelated query', () => {
+    expect(matchTitle(items, 'Upp')).toEqual([]);
+    expect(matchTitle(items, 'Breaking Bad')).toEqual([]);
+    expect(matchTitle([{ kind: 'series' as const, id: 9, title: 'Teachers', missing: 0 }], 'Reacher')).toEqual([]);
+  });
+});
+
 describe('matchTitle', () => {
   const items = [
     { kind: 'series' as const, id: 12, title: 'Survivor', missing: 4 },
@@ -118,9 +136,31 @@ describe('propose_action', () => {
     expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'subtitles', kind: 'movie', id: 7, confirm: true });
     expect(res.ok && res.text).toContain('Nothing has run');
   });
-  it('refuses an ambiguous title and lists the candidates', async () => {
+  it('turns an ambiguous title into a choose card of the candidates, and runs nothing', async () => {
     const res = await callTool(tool(), { action: 'subtitles', title: 'surviv' });
-    expect(!res.ok && res.error).toContain('matches 2 titles');
+    const p = res.ok && (proposalOf(res.text) as { action: string; confirm: boolean; options: Array<{ label: string; reply: string }> });
+    expect(p).toMatchObject({ action: 'choose', confirm: false });
+    expect(p && p.options.map((o) => o.reply)).toEqual(['Search subtitles for the series Survivor', 'Search subtitles for the series Survivor: Edge of Extinction']);
+  });
+  it('proposes a download for one show and season, resolving a split spelling', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'Sur vivor', season: 3 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'download', kind: 'series', title: 'Survivor', season: 3, confirm: true });
+  });
+  it('never runs a typo match: it asks with a Did you mean card', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'Survivr', season: 1 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'choose', confirm: false });
+  });
+  it('makes a movie download with no season and refuses an unknown title', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'never after dark', season: 2 });
+    const p = res.ok && (proposalOf(res.text) as Record<string, unknown>);
+    expect(p).toMatchObject({ action: 'download', kind: 'movie', confirm: true });
+    expect(p && 'season' in p).toBe(false);
+    expect((await callTool(tool(), { action: 'download', title: 'Zzzzzz Qqqqqq' })).ok).toBe(false);
+  });
+  it('builds a choose card from the model\'s own question and options', async () => {
+    const res = await callTool(tool(), { action: 'choose', question: 'Download or subtitles?', options: [{ label: 'Download', reply: 'Download season 3 of Survivor' }, { label: 'Subtitles', reply: 'Search subtitles for Survivor' }] });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'choose', confirm: false });
+    expect((await callTool(tool(), { action: 'choose', question: 'Which?' })).ok).toBe(false);
   });
   it('refuses an unknown title, a missing title and a host with no Bazarr', async () => {
     expect((await callTool(tool(), { action: 'subtitles', title: 'Nope Nope' })).ok).toBe(false);
@@ -169,7 +209,7 @@ describe('the loop collects proposals from the tool output, not from the model t
   it('returns none when the proposal failed', async () => {
     const tools = new Map<string, LabTool>([['propose_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
     const res = await ask('q', tools, scripted([
-      { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'surviv' } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'Nope Nope' } }], stop_reason: 'tool_use' },
       { content: [{ type: 'text', text: 'Which one?' }], stop_reason: 'end_turn' },
     ]), 'm');
     expect(res.proposals).toEqual([]);
@@ -205,5 +245,41 @@ describe('POST /v1/media/act', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'bazarr refused the lab-agent key (HTTP 401)' });
     const res2 = await make(async () => { throw new TypeError('secret path /etc/x'); })(post({ kind: 'series', id: 1 }));
     expect(JSON.stringify(await res2.json())).not.toContain('/etc/x');
+  });
+});
+
+describe('searchMissingViaTracerr', () => {
+  const cfg = (body: unknown, status = 200) => ({ baseUrl: 'http://t', token: 'x', fetch: (async () => new Response(JSON.stringify(body), { status })) as never });
+  it('reports only an accepted search as done', async () => {
+    const { searchMissingViaTracerr } = await import('./tools/tracerr.js');
+    expect(await searchMissingViaTracerr(cfg({ ok: true, result: 'Sonarr accepted a search for season 3 of "Yellowjackets". It has queued the search, not finished it.' }), 'Yellowjackets', 3)).toContain('accepted a search');
+    await expect(searchMissingViaTracerr(cfg({ ok: true, result: 'No library item is titled "X". Nothing was changed.' }), 'X')).rejects.toThrow('did not start');
+    await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'forbidden' }, 403), 'X')).rejects.toThrow('write callers');
+  });
+});
+
+describe('the dry run before a download card', () => {
+  const proposalOf = (text: string) => (JSON.parse(text) as { data: { proposal: Record<string, unknown> } }).data.proposal;
+  const bodies: unknown[] = [];
+  const tracerr = (text: string, status = 200) => ({
+    baseUrl: 'http://t',
+    token: 'x',
+    fetch: (async (_u: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify(status === 200 ? { ok: true, result: text } : { ok: false, error: text }), { status });
+    }) as never,
+  });
+  it('sends kind and dry_run, and puts the preview on the proposal', async () => {
+    const t = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('Dry run: would ask Sonarr to search season 3 of "Survivor".'));
+    const res = await callTool(t, { action: 'download', title: 'Survivor', season: 3 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'download', kind: 'series', preview: expect.stringContaining('Dry run: would ask Sonarr') });
+    expect(bodies.at(-1)).toEqual({ title: 'Survivor', season: 3, kind: 'series', dry_run: true });
+  });
+  it('makes no proposal when tracerr refuses the dry run', async () => {
+    const t = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('forbidden: caller lab-agent is read-only', 403));
+    const res = await callTool(t, { action: 'download', title: 'Survivor', season: 3 });
+    expect(!res.ok && res.error).toContain('write callers');
+    const t2 = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('Radarr already has a file for "X", so nothing was changed.'));
+    expect((await callTool(t2, { action: 'download', title: 'Never After Dark' })).ok).toBe(false);
   });
 });

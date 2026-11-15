@@ -93,6 +93,14 @@ export function parseProposals(raw: unknown): Proposal[] {
     if (!label) continue;
     if (p.action === 'subtitles' && (p.kind === 'series' || p.kind === 'movie') && Number.isInteger(p.id) && typeof p.title === 'string') {
       out.push({ action: 'subtitles', kind: p.kind, id: p.id as number, title: p.title.slice(0, 120), label, confirm: true });
+    } else if (p.action === 'download' && (p.kind === 'series' || p.kind === 'movie') && typeof p.title === 'string' && (p.season === undefined || (Number.isInteger(p.season) && (p.season as number) >= 0 && (p.season as number) <= 100))) {
+      out.push({ action: 'download', kind: p.kind, title: p.title.slice(0, 120), ...(p.season !== undefined ? { season: p.season as number } : {}), ...(typeof p.preview === 'string' ? { preview: p.preview.slice(0, 200) } : {}), label, confirm: true });
+    } else if (p.action === 'choose' && Array.isArray(p.options)) {
+      const options = (p.options as Array<Record<string, unknown>>)
+        .filter((o) => typeof o?.label === 'string' && o.label && typeof o?.reply === 'string' && o.reply)
+        .slice(0, 4)
+        .map((o) => ({ label: String(o.label).slice(0, 40), reply: String(o.reply).slice(0, 200) }));
+      if (options.length >= 2) out.push({ action: 'choose', label, options, confirm: false });
     } else if ((p.action === 'update_check' || p.action === 'update_apply') && typeof p.target === 'string' && TARGETS.includes(p.target)) {
       const target = p.target as (typeof TARGETS)[number] as Extract<Proposal, { target: string }>['target'];
       out.push(p.action === 'update_check' ? { action: 'update_check', target, label, confirm: false } : { action: 'update_apply', target, label, confirm: true });
@@ -117,6 +125,36 @@ export async function actMedia(
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ kind, id }),
+      signal: AbortSignal.timeout(cfg.timeoutMs),
+    });
+  } catch (err) {
+    return { kind: 'failed', reason: `lab-agent unreachable (${(err as Error)?.message ?? err})` };
+  }
+  let body: { ok?: unknown; message?: unknown; error?: unknown };
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    return { kind: 'failed', reason: `lab-agent answered HTTP ${res.status} with a body that is not JSON` };
+  }
+  if (res.ok && body.ok === true && typeof body.message === 'string') return { kind: 'done', message: body.message };
+  return { kind: 'failed', reason: `lab-agent answered HTTP ${res.status}: ${typeof body.error === 'string' ? body.error : 'no reason given'}` };
+}
+
+/** Asks lab-agent to run the confirmed download search for one title, optionally one season. */
+export async function actDownload(
+  title: string,
+  season: number | undefined,
+  kind: 'series' | 'movie' | undefined,
+  cfg: MediaClientConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ActOutcome> {
+  if (!cfg.token) return { kind: 'not-configured' };
+  let res: Response;
+  try {
+    res = await fetchImpl(`${cfg.url.replace(/\/$/, '')}/v1/media/act`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'download', title, ...(season !== undefined ? { season } : {}), ...(kind ? { kind } : {}) }),
       signal: AbortSignal.timeout(cfg.timeoutMs),
     });
   } catch (err) {

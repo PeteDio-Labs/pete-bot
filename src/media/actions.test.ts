@@ -250,3 +250,29 @@ describe('the DM handler with proposals', () => {
     expect(m.reply.mock.calls.at(-1)![0]).toContain('nothing ran');
   });
 });
+
+describe('download proposals and clarification cards', () => {
+  it('parses a button that picks option 2 and rejects option 4', async () => {
+    const { parseButton } = await import('./actions.js');
+    expect(parseButton('media:pick:0123456789abcdef:2')).toEqual({ verb: 'ok', id: '0123456789abcdef', pick: 2 });
+    expect(parseButton('media:pick:0123456789abcdef:4')).toBeNull();
+  });
+  it('runs a confirmed download through lab-agent and says a failure', async () => {
+    const { runProposal } = await import('./actions.js');
+    const media = { url: 'http://x', token: 't', timeoutMs: 1000 };
+    const ok = await runProposal({ action: 'download', kind: 'series', title: 'Yellowjackets', season: 3, label: 'l', confirm: true }, { media, download: async (t, s) => ({ kind: 'done', message: `searched ${t} ${s}` }) });
+    expect(ok).toEqual({ kind: 'text', ok: true, text: 'Yellowjackets: searched Yellowjackets 3' });
+    const bad = await runProposal({ action: 'download', kind: 'series', title: 'Y', label: 'l', confirm: true }, { media, download: async () => ({ kind: 'failed', reason: 'tracerr says no' }) });
+    expect(bad).toMatchObject({ kind: 'text', ok: false });
+  });
+  it('keeps a valid download and choose proposal, and drops a card with one option', async () => {
+    const { parseProposals } = await import('../clients/mediaAgent.js');
+    const out = parseProposals([
+      { action: 'download', kind: 'series', title: 'Yellowjackets', season: 3, label: 'Search', confirm: true },
+      { action: 'choose', label: 'Which?', options: [{ label: 'A', reply: 'Download A' }, { label: 'B', reply: 'Download B' }] },
+      { action: 'choose', label: 'Which?', options: [{ label: 'A', reply: 'Download A' }] },
+      { action: 'download', kind: 'series', title: 'X', season: -1, label: 'bad' },
+    ]);
+    expect(out.map((p) => p.action)).toEqual(['download', 'choose']);
+  });
+});

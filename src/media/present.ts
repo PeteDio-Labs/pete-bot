@@ -3,19 +3,27 @@
  * and an immediate run for an update check, which changes nothing.
  */
 import type { Message } from 'discord.js';
+
+/** The one thing a presenter needs: a way to reply. A DM message and a button tap both have it. */
+export type Replier = Pick<Message, 'reply'>;
 import { config } from '../config.js';
 import { runUpdate } from '../clients/githubActions.js';
 import type { Proposal } from '../lab/tools/propose.js';
 import { outcomeEmbed } from '../events/interactionCreate.js';
 import { logger } from '../utils/index.js';
-import { mediaPending, proposalRow, type PendingStore } from './actions.js';
+import { choiceRow, mediaPending, proposalRow, type PendingStore } from './actions.js';
 
 export function createPresenter(store: PendingStore = mediaPending, run: typeof runUpdate = runUpdate) {
-  return async function present(message: Message, proposals: Proposal[]): Promise<void> {
+  return async function present(message: Replier, proposals: Proposal[]): Promise<void> {
     for (const p of proposals) {
+      if (p.action === 'choose') {
+        const id = store.add(p);
+        await message.reply({ content: `**${p.label}**\n${p.options.map((o) => `• ${o.label}: ${o.reply}`).join('\n')}\nTap one. It expires in 10 minutes.`, components: [choiceRow(id, p.options)] });
+        continue;
+      }
       if (p.confirm) {
         const id = store.add(p);
-        await message.reply({ content: `**${p.label}**\nTap Confirm to run it. It expires in 10 minutes.`, components: [proposalRow(id)] });
+        await message.reply({ content: `**${p.label}**\n${p.action === 'download' && p.preview ? `${p.preview}\n` : ''}Tap Confirm to run it. It expires in 10 minutes.`, components: [proposalRow(id)] });
         continue;
       }
       // An update check reads the stack and changes nothing, so it runs without a tap.
