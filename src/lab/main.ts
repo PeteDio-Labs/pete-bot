@@ -65,7 +65,7 @@ const mediaTools = cfg.tracerr
         ...tracerrTools(cfg.tracerr),
         ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
         ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
-        proposeActionTool(bazarrCfg),
+        proposeActionTool(bazarrCfg, cfg.tracerr ?? undefined),
       ],
       cfg.mediaToolkits,
     )
@@ -186,7 +186,7 @@ const handler = createLabHandler({
   callModel,
   model: cfg.model,
   mediaTools,
-  actDownload: cfg.tracerr ? (title, season) => searchMissingViaTracerr(cfg.tracerr!, title, season) : undefined,
+  actDownload: cfg.tracerr ? (title, season, kind) => searchMissingViaTracerr(cfg.tracerr!, title, season, { kind }) : undefined,
   actBazarr: bazarrCfg ? (kind, id) => searchMissing(bazarrCfg, kind, id) : undefined,
   checks,
   log,

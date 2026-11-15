@@ -257,3 +257,29 @@ describe('searchMissingViaTracerr', () => {
     await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'forbidden' }, 403), 'X')).rejects.toThrow('write callers');
   });
 });
+
+describe('the dry run before a download card', () => {
+  const proposalOf = (text: string) => (JSON.parse(text) as { data: { proposal: Record<string, unknown> } }).data.proposal;
+  const bodies: unknown[] = [];
+  const tracerr = (text: string, status = 200) => ({
+    baseUrl: 'http://t',
+    token: 'x',
+    fetch: (async (_u: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      return new Response(JSON.stringify(status === 200 ? { ok: true, result: text } : { ok: false, error: text }), { status });
+    }) as never,
+  });
+  it('sends kind and dry_run, and puts the preview on the proposal', async () => {
+    const t = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('Dry run: would ask Sonarr to search season 3 of "Survivor".'));
+    const res = await callTool(t, { action: 'download', title: 'Survivor', season: 3 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'download', kind: 'series', preview: expect.stringContaining('Dry run: would ask Sonarr') });
+    expect(bodies.at(-1)).toEqual({ title: 'Survivor', season: 3, kind: 'series', dry_run: true });
+  });
+  it('makes no proposal when tracerr refuses the dry run', async () => {
+    const t = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('forbidden: caller lab-agent is read-only', 403));
+    const res = await callTool(t, { action: 'download', title: 'Survivor', season: 3 });
+    expect(!res.ok && res.error).toContain('write callers');
+    const t2 = proposeActionTool({ ...CFG, fetch: router() as never }, tracerr('Radarr already has a file for "X", so nothing was changed.'));
+    expect((await callTool(t2, { action: 'download', title: 'Never After Dark' })).ok).toBe(false);
+  });
+});

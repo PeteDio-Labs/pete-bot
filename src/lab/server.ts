@@ -42,7 +42,7 @@ export interface LabServerDeps {
   /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
   actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
   /** The confirmed download search: tracerr's search_missing for one title. Absent, a download act answers 404. */
-  actDownload?: (title: string, season?: number) => Promise<string>;
+  actDownload?: (title: string, season?: number, kind?: 'series' | 'movie') => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
   /** Media routing metrics. Absent, GET /metrics answers 404. */
@@ -61,7 +61,7 @@ const MediaBody = z
   .strict();
 const ActBody = z.union([
   z.object({ kind: z.enum(['series', 'movie']), id: z.number().int().min(0).max(10_000_000) }).strict(),
-  z.object({ action: z.literal('download'), title: z.string().trim().min(1).max(200), season: z.number().int().min(0).max(100).optional() }).strict(),
+  z.object({ action: z.literal('download'), title: z.string().trim().min(1).max(200), season: z.number().int().min(0).max(100).optional(), kind: z.enum(['series', 'movie']).optional() }).strict(),
 ]);
 const CHECK_TIMEOUT_MS = 10_000;
 
@@ -135,7 +135,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
         let message: string;
         if ('action' in body) {
           if (!deps.actDownload) return json({ error: 'downloads are not configured' }, 404);
-          message = await deps.actDownload(body.title, body.season);
+          message = await deps.actDownload(body.title, body.season, body.kind);
           log('media act done', { action: 'download', titleLength: body.title.length, season: body.season });
         } else {
           if (!deps.actBazarr) return json({ error: 'subtitle search is not configured' }, 404);

@@ -94,7 +94,7 @@ export function parseProposals(raw: unknown): Proposal[] {
     if (p.action === 'subtitles' && (p.kind === 'series' || p.kind === 'movie') && Number.isInteger(p.id) && typeof p.title === 'string') {
       out.push({ action: 'subtitles', kind: p.kind, id: p.id as number, title: p.title.slice(0, 120), label, confirm: true });
     } else if (p.action === 'download' && (p.kind === 'series' || p.kind === 'movie') && typeof p.title === 'string' && (p.season === undefined || (Number.isInteger(p.season) && (p.season as number) >= 0 && (p.season as number) <= 100))) {
-      out.push({ action: 'download', kind: p.kind, title: p.title.slice(0, 120), ...(p.season !== undefined ? { season: p.season as number } : {}), label, confirm: true });
+      out.push({ action: 'download', kind: p.kind, title: p.title.slice(0, 120), ...(p.season !== undefined ? { season: p.season as number } : {}), ...(typeof p.preview === 'string' ? { preview: p.preview.slice(0, 200) } : {}), label, confirm: true });
     } else if (p.action === 'choose' && Array.isArray(p.options)) {
       const options = (p.options as Array<Record<string, unknown>>)
         .filter((o) => typeof o?.label === 'string' && o.label && typeof o?.reply === 'string' && o.reply)
@@ -144,6 +144,7 @@ export async function actMedia(
 export async function actDownload(
   title: string,
   season: number | undefined,
+  kind: 'series' | 'movie' | undefined,
   cfg: MediaClientConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ActOutcome> {
@@ -153,7 +154,7 @@ export async function actDownload(
     res = await fetchImpl(`${cfg.url.replace(/\/$/, '')}/v1/media/act`, {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'download', title, ...(season !== undefined ? { season } : {}) }),
+      body: JSON.stringify({ action: 'download', title, ...(season !== undefined ? { season } : {}), ...(kind ? { kind } : {}) }),
       signal: AbortSignal.timeout(cfg.timeoutMs),
     });
   } catch (err) {

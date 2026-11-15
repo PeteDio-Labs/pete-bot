@@ -105,7 +105,7 @@ export async function runProposal(p: Proposal, deps: RunDeps): Promise<ProposalR
   }
   if (p.action === 'choose') return { kind: 'text', ok: false, text: 'A clarification card has no action to run.' };
   if (p.action === 'download') {
-    const out = await (deps.download ?? actDownload)(p.title, p.season, deps.media);
+    const out = await (deps.download ?? actDownload)(p.title, p.season, p.kind === 'series' ? 'series' : 'movie', deps.media);
     if (out.kind === 'done') return { kind: 'text', ok: true, text: `${p.title}: ${out.message}` };
     if (out.kind === 'not-configured') return { kind: 'text', ok: false, text: 'The media assistant is not configured on this host (`LAB_ASK_TOKEN` is empty). Nothing ran.' };
     return { kind: 'text', ok: false, text: `The download search did not run: ${out.reason.slice(0, 300)}` };

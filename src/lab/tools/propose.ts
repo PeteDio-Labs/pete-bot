@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { listItems, matchTitle, type Item, type BazarrConfig, type BazarrKind } from './bazarr.js';
+import { searchMissingViaTracerr, type TracerrConfig } from './tracerr.js';
 import { LabToolError, type LabTool } from './types.js';
 
 /** Mirrors UPDATE_TARGETS in src/clients/githubActions.ts. A test keeps the two equal. */
@@ -21,7 +22,7 @@ export const PROPOSE_TOOL = 'propose_action';
 
 export type Proposal =
   | { action: 'subtitles'; kind: BazarrKind; id: number; title: string; label: string; confirm: true }
-  | { action: 'download'; kind: BazarrKind; title: string; season?: number; label: string; confirm: true }
+  | { action: 'download'; kind: BazarrKind; title: string; season?: number; preview?: string; label: string; confirm: true }
   | { action: 'choose'; label: string; options: Array<{ label: string; reply: string }>; confirm: false }
   | { action: 'update_check'; target: (typeof PROPOSE_TARGETS)[number]; label: string; confirm: false }
   | { action: 'update_apply'; target: (typeof PROPOSE_TARGETS)[number]; label: string; confirm: true };
@@ -43,7 +44,7 @@ function resolve(items: Item[], title: string, kind: BazarrKind | undefined, rep
   return { none: true };
 }
 
-export function proposeActionTool(bazarr: BazarrConfig | undefined): LabTool {
+export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: TracerrConfig): LabTool {
   const input = z.object({
     action: z.enum(['subtitles', 'download', 'choose', 'update_check', 'update_apply']),
     kind: z.enum(['series', 'movie']).optional().describe('For download or subtitles: series or movie, to tell apart two items with one title'),
@@ -90,11 +91,16 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined): LabTool {
           return { source: `Bazarr: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'The user must tap Confirm. Nothing has run.' } };
         }
         const sn = m.kind === 'series' ? season : undefined;
+        // A dry run first: tracerr says what it would search, so the card names it and a refusal
+        // (not a write caller, a movie that already has a file) is said before you tap, not after.
+        let preview = '';
+        if (tracerr) preview = await searchMissingViaTracerr(tracerr, m.title, sn, { kind: m.kind, dryRun: true });
         const proposal: Proposal = {
           action: 'download',
           kind: m.kind,
           title: m.title,
           ...(sn !== undefined ? { season: sn } : {}),
+          ...(preview ? { preview: preview.slice(0, 200) } : {}),
           label: `Search for ${m.kind === 'series' ? (sn !== undefined ? `season ${sn} of ` : 'missing episodes of ') : ''}${m.title} (${m.kind === 'series' ? 'Sonarr' : 'Radarr'})`,
           confirm: true,
         };

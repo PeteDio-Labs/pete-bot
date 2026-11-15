@@ -23,7 +23,7 @@ export function createPresenter(store: PendingStore = mediaPending, run: typeof 
       }
       if (p.confirm) {
         const id = store.add(p);
-        await message.reply({ content: `**${p.label}**\nTap Confirm to run it. It expires in 10 minutes.`, components: [proposalRow(id)] });
+        await message.reply({ content: `**${p.label}**\n${p.action === 'download' && p.preview ? `${p.preview}\n` : ''}Tap Confirm to run it. It expires in 10 minutes.`, components: [proposalRow(id)] });
         continue;
       }
       // An update check reads the stack and changes nothing, so it runs without a tap.

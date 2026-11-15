@@ -141,11 +141,12 @@ export function tracerrTools(cfg: TracerrConfig): LabTool[] {
 }
 
 /**
- * The one write lab-agent sends to tracerr: `search_missing` for ONE title, optionally one season.
+ * The one write lab-agent sends to tracerr: `search_missing` for ONE title, optionally one season and
+ * one kind. With `dryRun` it changes nothing and returns what tracerr would do.
  * Only POST /v1/media/act reaches it, after you tapped Confirm. tracerr answers 403 unless this
  * caller is in its MEDIA_CONTROL_WRITERS (petedio-iac mtrace_write_callers); that surfaces here as an error.
  */
-export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string, season?: number): Promise<string> {
+export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string, season?: number, opts: { kind?: 'series' | 'movie'; dryRun?: boolean } = {}): Promise<string> {
   if (!title.trim() || title.length > 200) throw new LabToolError('tracerr: the title must be 1 to 200 characters');
   if (season !== undefined && !(Number.isInteger(season) && season >= 0 && season <= 100)) throw new LabToolError('tracerr: season must be a whole number');
   const res = await fetchWithTimeout(
@@ -154,7 +155,7 @@ export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string,
     {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(season === undefined ? { title } : { title, season }),
+      body: JSON.stringify({ title, ...(season !== undefined ? { season } : {}), ...(opts.kind ? { kind: opts.kind } : {}), dry_run: opts.dryRun === true }),
       redirect: 'error',
     },
     cfg.timeoutMs ?? 40_000,
@@ -174,6 +175,11 @@ export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string,
   if (!text) throw new LabToolError('tracerr accepted the call but said nothing about what it did, so it is not reported as done');
   // tracerr answers a refusal ("nothing was changed", "did not answer") as an ordinary result, so only its
   // acceptance sentence counts as a search that started.
+  // A dry run says what it would do; only a live call must say the app accepted a search.
+  if (opts.dryRun) {
+    if (!/^Dry run: would ask/i.test(text)) throw new LabToolError(`tracerr would not run the search: ${text.slice(0, 300)}`);
+    return text.slice(0, 400);
+  }
   if (!/accepted a search/i.test(text)) throw new LabToolError(`tracerr did not start the search: ${text.slice(0, 300)}`);
   return text.slice(0, 400);
 }
