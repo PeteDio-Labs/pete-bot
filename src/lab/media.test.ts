@@ -66,6 +66,8 @@ describe('mtrace tools', () => {
     ['401', json({ ok: false }, 401), 'refused the lab-agent token'],
     ['404', json({ ok: false }, 404), 'tool list has drifted'],
     ['500', json({ ok: false }, 500), 'HTTP 500'],
+    ['a 502 with an error body', json({ ok: false, error: 'sonarr not answering' }, 502), 'sonarr not answering'],
+    ['a 502 without JSON', new Response('<html>', { status: 502 }), 'HTTP 502'],
     ['a non-JSON body', new Response('<html>', { status: 200 }), 'not JSON'],
     ['a JSON array', json([1, 2]), 'not an object'],
   ])('fails on %s', async (_n, response, expected) => {
