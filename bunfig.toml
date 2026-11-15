@@ -1,6 +1,7 @@
 # `bun test` is the only test runner (PET-617: Pedro's "run everything under bun").
 [test]
-# Only src: `bun run build` writes compiled copies of every test into dist.
-root = "src"
+# src and packages/*: `bun run build` writes compiled copies of every test into dist, so dist is ignored.
+root = "."
+pathIgnorePatterns = ["dist/**", "node_modules/**"]
 # Loads .env.test and silences the logger before any module reads config.
 preload = ["./test.setup.ts"]
