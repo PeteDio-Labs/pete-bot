@@ -20,6 +20,7 @@
  */
 import type { CodexQueue, QueueResult } from './codex.js';
 import { codexReviews } from './codex.js';
+import { claudeReviews } from './claude-review.js';
 import type { ClassifierSource, RunPython } from './classify.js';
 import { classify } from './classify.js';
 import type { QwenReviewer } from './qwen.js';
@@ -343,10 +344,13 @@ export class MergeDesk {
     // Memory saved before PET-751 has no queuedAt. Start the fallback clock when the desk first sees that.
     const seen = store.get(repo, n);
     if (seen.queuedSha && !seen.queuedAt) store.update(repo, n, { queuedAt: new Date().toISOString() });
-    const [defaultBranch, files, reviews, checks, unresolvedThreads] = await Promise.all([
+    const claudeMode = settings.claudeReviewers.size > 0;
+    const [defaultBranch, files, reviews, comments, checks, unresolvedThreads] = await Promise.all([
       this.defaultBranch(repo),
       github.listFiles(repo, n),
       github.listReviews(repo, n),
+      // Read only when Claude reviews are on, so the Codex-only gate makes the same calls as before.
+      claudeMode ? github.listComments(repo, n) : Promise.resolve([]),
       github.checks(repo, pull.headSha),
       github.unresolvedThreads(repo, n),
     ]);
@@ -364,6 +368,8 @@ export class MergeDesk {
       pull,
       classification,
       codex: codexReviews(reviews),
+      claude: claudeMode ? claudeReviews(reviews, comments, settings.claudeReviewers) : [],
+      claudeMode,
       checks,
       requiredChecks,
       unresolvedThreads,
@@ -632,10 +638,10 @@ export class MergeDesk {
     });
   }
 
-  private async merge(repo: string, f: Facts, sha: string, how: string, by: 'codex' | 'qwen' | 'ci' = 'codex'): Promise<{ ok: boolean; message: string }> {
+  private async merge(repo: string, f: Facts, sha: string, how: string, by: 'codex' | 'qwen' | 'ci' | 'claude' = 'codex'): Promise<{ ok: boolean; message: string }> {
     const { github, store } = this.deps;
     const n = f.pull.number;
-    const evidence = `tier ${f.classification.tier}; ${by === 'codex' ? `Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'}` : by === 'qwen' ? 'Codex out, Qwen VERDICT: CLEAN' : 'Codex out, CI only (tier 0)'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed${gateNote(f)}; 0 open threads`;
+    const evidence = `tier ${f.classification.tier}; ${by === 'codex' ? `Codex ${f.codex.find((r) => r.commitId === sha)?.verdict ?? 'unknown'}` : by === 'claude' ? `Claude review: No blocking findings (${f.claude?.find((r) => sha.toLowerCase().startsWith(r.sha))?.url ?? 'link unknown'})` : by === 'qwen' ? 'Codex out, Qwen VERDICT: CLEAN' : 'Codex out, CI only (tier 0)'} at ${short(sha)}; ${f.checks.passed}/${f.checks.total} checks passed${gateNote(f)}; 0 open threads`;
     // The approval satisfies a required review where one exists, and records the evidence
     // where none does.
     const fail = async (why: string) => {
@@ -669,7 +675,8 @@ export class MergeDesk {
     }
     const where = landed ? `on \`${f.defaultBranch}\`` : `but I could not confirm it is on \`${f.defaultBranch}\``;
     store.update(repo, n, { mergedSha: result.sha });
-    if (by !== 'codex') {
+    // The ledger measures the Qwen and CI-only fallbacks. A Codex or Claude merge is not a row in it.
+    if (by === 'qwen' || by === 'ci') {
       try {
         store.ledgerMerged({ repo, pr: n, sha, tier: f.classification.tier, by, mergedSha: result.sha });
       } catch (err) {
@@ -754,7 +761,8 @@ function gateNote(f: Facts): string {
   return ` (required: ${g.examined.join(', ')}${g.ignored.length ? `; not required, skipped by workflow condition: ${g.ignored.join(', ')}` : ''})`;
 }
 
-function reviewNote(d: { by: 'codex' | 'qwen' | 'ci'; review: { verdict: string; url: string } | null }): string {
+function reviewNote(d: { by: 'codex' | 'qwen' | 'ci' | 'claude'; review: { verdict: string; url: string } | null }): string {
+  if (d.by === 'claude') return 'Claude review: No blocking findings';
   if (d.by === 'codex' && d.review) return `Codex: [${d.review.verdict}](${d.review.url})`;
   return d.by === 'qwen' ? 'Codex out; Qwen VERDICT: CLEAN' : 'Codex out; CI only (tier 0)';
 }

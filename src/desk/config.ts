@@ -26,6 +26,11 @@ export interface DeskSettings {
   /** GitHub logins whose PRs the desk may merge. Anyone else's PR is skipped. */
   authors: ReadonlySet<string>;
   /**
+   * GitHub logins whose `Claude review:` line counts as the required review for tier 0 and 1
+   * (claude-review.ts). Empty keeps the Codex-only gate, so nothing changes until it is set.
+   */
+  claudeReviewers: ReadonlySet<string>;
+  /**
    * Repos that run no validation on a PR, by decision. Only there may a head with no check
    * at all merge without a tap; anywhere else, an empty list may be CI that never started.
    */
@@ -64,6 +69,7 @@ export interface DeskEnv {
   DESK_REPOS?: string;
   DESK_NO_CI_REPOS?: string;
   DESK_AUTHORS?: string;
+  DESK_CLAUDE_REVIEWERS?: string;
   DESK_APP_ID?: string;
   DESK_INSTALLATION_ID?: string;
   DESK_APP_KEY_PATH?: string;
@@ -122,6 +128,10 @@ export function loadDeskSettings(
   if (authors.length === 0) return bad('DESK_AUTHORS is empty, so no PR could ever merge');
   const badAuthor = authors.find((a) => !LOGIN.test(a));
   if (badAuthor) return bad(`DESK_AUTHORS holds "${badAuthor}", which is not a GitHub login`);
+
+  const claudeReviewers = list(env.DESK_CLAUDE_REVIEWERS);
+  const badReviewer = claudeReviewers.find((a) => !LOGIN.test(a));
+  if (badReviewer) return bad(`DESK_CLAUDE_REVIEWERS holds "${badReviewer}", which is not a GitHub login`);
 
   const appId = (env.DESK_APP_ID ?? '').trim();
   const installationId = (env.DESK_INSTALLATION_ID ?? '').trim();
@@ -182,6 +192,7 @@ export function loadDeskSettings(
       org: (env.DESK_ORG ?? '').trim() || 'PeteDio-Labs',
       repos,
       authors: new Set(authors.map((a) => a.toLowerCase())),
+      claudeReviewers: new Set(claudeReviewers.map((a) => a.toLowerCase())),
       noCiRepos: new Set(noCiRepos),
       appId,
       installationId,

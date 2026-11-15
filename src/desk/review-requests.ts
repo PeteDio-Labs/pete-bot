@@ -46,6 +46,8 @@ export interface RequestDeps {
   /** DESK_REPOS: the only repositories a request may name. */
   repos: string[];
   log: { info(m: string): void; warn(m: string): void; error(m: string): void };
+  /** Called once a request will queue, before the queue call, so the desk knows Codex is required for the PR. */
+  onQueued?: (repo: string, pr: number, sha: string) => void;
   now?: () => Date;
 }
 
@@ -94,6 +96,7 @@ export class CodexReviewRequests {
     const request: ReviewRequest = { repo, pr, sha, effort, state: 'queued', requestedAt: (this.deps.now?.() ?? new Date()).toISOString() };
     this.requests.set(this.key(repo, pr), request);
     this.prune();
+    this.deps.onQueued?.(repo, pr, sha);
     this.deps.log.info(`codex second opinion: queueing (${effort}) for ${repo}#${pr} at ${sha.slice(0, 7)}`);
     void this.run(request);
     return { kind: 'queued', request };

@@ -20,6 +20,7 @@ const settings = (over: Partial<DeskSettings> = {}): DeskSettings => ({
   org: 'PeteDio-Labs',
   repos: [REPO],
   authors: new Set(['petedillo']),
+  claudeReviewers: new Set(),
   noCiRepos: new Set(),
   appId: '1',
   installationId: '2',

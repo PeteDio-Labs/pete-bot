@@ -34,6 +34,15 @@ describe('loadDeskSettings', () => {
     expect(s.settings.noCiRepos.size).toBe(0);
   });
 
+  it('keeps Claude reviews off until DESK_CLAUDE_REVIEWERS is set, and lower-cases the logins', () => {
+    const off = load(good);
+    const on = load({ ...good, DESK_CLAUDE_REVIEWERS: 'PeteDillo, claude-reviewer[bot]' });
+    if (off.state !== 'ready' || on.state !== 'ready') throw new Error('expected ready');
+    expect(off.settings.claudeReviewers.size).toBe(0);
+    expect([...on.settings.claudeReviewers]).toEqual(['petedillo', 'claude-reviewer[bot]']);
+    expect(load({ ...good, DESK_CLAUDE_REVIEWERS: 'bad login!' }).state).toBe('misconfigured');
+  });
+
   it.each([
     ['an unknown mode', { DESK_MODE: 'yes' }, 'DESK_MODE'],
     ['no repos', { DESK_REPOS: '' }, 'DESK_REPOS'],

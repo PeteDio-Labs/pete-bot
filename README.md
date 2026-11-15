@@ -179,6 +179,19 @@ answers 404, and `lab-agent` starts without the route.
 | `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
 | `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
+### Claude review as the desk's required review
+
+With `DESK_CLAUDE_REVIEWERS` set, the desk accepts a Claude review as the required review for tier 0 and tier 1.
+A PR review or PR comment by a listed login counts when its first line is exactly
+`Claude review: No blocking findings at <sha>` or `Claude review: Changes requested at <sha>`, where `<sha>` is
+7 to 40 hex characters naming the head. Any push voids it. The login must differ from the PR author's, and a
+"Changes requested" of the head holds the merge. The desk then queues no Codex review of its own. It is an
+attestation, not authentication: a thread posts under whichever identity its GitHub connector holds.
+
+Codex is still required for tier 2, and for any PR with a second opinion queued through `queue_codex_review` (the
+desk saves a mark before the queue call) or any Codex review on it, so a Codex "Changes requested" is never walked
+past. With the variable empty, the desk behaves as before and reads no PR comments.
+
 ### Second-opinion Codex reviews
 
 Claude's review is the review of record. A thread that wants Codex as a second opinion calls the lab MCP's
@@ -397,6 +410,7 @@ holds an Anthropic key. `LAB_PROVIDER=gateway` is refused at lab-agent's startup
 | `ALERT_BASELINE_PATH` | No | — | Where recovery times persist. Empty keeps them in memory |
 | `ALERT_BEARER_TOKEN` | No | — | Bearer token for `/v1/alert`, which Uptime Kuma sends. Empty refuses every alert |
 | `NOTIFY_BEARER_TOKEN` | No | — | Bearer token for `/v1/notify`, which sessions send. Empty refuses every notify |
+| `DESK_CLAUDE_REVIEWERS` | No | — | Comma-separated GitHub logins whose `Claude review:` line is the required review for tier 0 and 1. Empty keeps the Codex-only gate |
 | `CODEX_REVIEW_BEARER_TOKEN` | No | — | Bearer token for `/v1/codex-review`, which lab-agent calls. Empty refuses every request |
 | `ALERT_COALESCE_MS` | No | `60000` | Grouping window; `0` disables grouping |
 | `ALERT_STATE_PATH` | No | — | Open incidents on disk; empty means memory only |
