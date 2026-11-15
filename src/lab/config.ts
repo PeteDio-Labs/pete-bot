@@ -60,7 +60,7 @@ const EnvSchema = z.object({
   // search_lab (PET-745). The tool is offered only when the token is set.
   LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
   LAB_SEARCH_TOKEN: TOKEN.optional(),
-  // mtrace, for the media assistant (PET-869). 237 reaches its own LAN address through the
+  // tracerr, for the media assistant (PET-869). 237 reaches its own LAN address through the
   // `lo` allowlist rule. The tools are offered only when the token is set, and the token is
   // lab-agent's own caller (`token_lab-agent`), never pete-bot's.
   LAB_MEDIA_TOOLKITS: z.string().optional(),
@@ -101,8 +101,8 @@ export interface LabConfig {
   mediaToolkits: string[];
   /** null while LAB_METRICS_HOST is unset: /metrics then answers on loopback only. */
   metrics: { host: string; port: number; peer: string } | null;
-  /** null while no mtrace token is set: the media assistant then answers 404. */
-  mtrace: { baseUrl: string; token: string } | null;
+  /** null while no tracerr token is set: the media assistant then answers 404. */
+  tracerr: { baseUrl: string; token: string } | null;
   /** null while no Bazarr key is set: no subtitle tools, no subtitle action. */
   bazarr: { baseUrl: string; apiKey: string } | null;
   drift: { notifyUrl: string; notifyToken: string; at: string };
@@ -186,7 +186,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     search: e.LAB_SEARCH_TOKEN ? { baseUrl: e.LAB_SEARCH_URL.replace(/\/$/, ''), token: e.LAB_SEARCH_TOKEN } : null,
     mediaToolkits: parseToolkits(e.LAB_MEDIA_TOOLKITS),
     metrics: e.LAB_METRICS_HOST ? { host: e.LAB_METRICS_HOST, port: e.LAB_METRICS_PORT, peer: e.LAB_METRICS_PEER } : null,
-    mtrace: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
+    tracerr: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
     bazarr: e.LAB_BAZARR_KEY ? { baseUrl: e.LAB_BAZARR_URL.replace(/\/$/, ''), apiKey: e.LAB_BAZARR_KEY } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,

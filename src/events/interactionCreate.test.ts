@@ -83,10 +83,10 @@ describe('/status', () => {
     expect(JSON.stringify(editReply.mock.calls[0]![0])).toMatch(/0 incidents open/);
   });
 
-  it('no longer mentions mtrace', async () => {
+  it('no longer mentions tracerr', async () => {
     const { interaction, editReply } = fakeInteraction();
     await handler()(interaction);
-    expect(JSON.stringify(editReply.mock.calls[0]![0])).not.toMatch(/mtrace/i);
+    expect(JSON.stringify(editReply.mock.calls[0]![0])).not.toMatch(/mtrace|tracerr/i);
   });
 
   it('says when /update has no token', async () => {

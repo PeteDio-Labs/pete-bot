@@ -1,5 +1,5 @@
 /**
- * The media assistant's lab-agent side (PET-869): the mtrace tools, the history the loop
+ * The media assistant's lab-agent side (PET-869): the tracerr tools, the history the loop
  * carries, and POST /v1/media/ask.
  */
 import { describe, expect, it, vi } from 'bun:test';
@@ -8,23 +8,23 @@ import { ask, MEDIA_SYSTEM_PROMPT, type CallModel, type ModelResponse } from './
 import { loadLabConfig } from './config.js';
 import { createLabHandler } from './server.js';
 import { callTool, inputJsonSchema, type LabTool } from './tools/index.js';
-import { MTRACE_SPECS, mtraceTools } from './tools/mtrace.js';
+import { TRACERR_SPECS, tracerrTools } from './tools/tracerr.js';
 import { createLabMetrics } from './metrics.js';
 
 const ASK = 'a'.repeat(40);
 const CFG = { baseUrl: 'http://192.168.50.237:8237/', token: 'm'.repeat(40) };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-const find = (name: string, fetchImpl: typeof fetch) => mtraceTools({ ...CFG, fetch: fetchImpl }).find((t) => t.name === name)!;
+const find = (name: string, fetchImpl: typeof fetch) => tracerrTools({ ...CFG, fetch: fetchImpl }).find((t) => t.name === name)!;
 
-describe('mtrace tools', () => {
+describe('tracerr tools', () => {
   it('offers exactly the thirteen read tools', () => {
-    expect(MTRACE_SPECS.map((s) => s.name).sort()).toEqual(
+    expect(TRACERR_SPECS.map((s) => s.name).sort()).toEqual(
       ['disk_free', 'indexer_health', 'library', 'list_queue', 'now_playing', 'partial_files', 'pool_health', 'queue_errors', 'seerr_drift', 'stale_versions', 'trace_request', 'vpn_health', 'why_is_it_dead'],
     );
   });
 
   it('turns every input into a JSON Schema the model can be offered', () => {
-    for (const s of MTRACE_SPECS) expect(inputJsonSchema(s.input)).toMatchObject({ type: 'object', additionalProperties: false });
+    for (const s of TRACERR_SPECS) expect(inputJsonSchema(s.input)).toMatchObject({ type: 'object', additionalProperties: false });
     expect(inputJsonSchema(find('trace_request', fetch).input)).toMatchObject({ required: ['title'] });
   });
 
@@ -43,7 +43,7 @@ describe('mtrace tools', () => {
     expect(url).toBe('http://192.168.50.237:8237/api/tool/trace_request');
     expect((init as RequestInit).headers).toMatchObject({ authorization: `Bearer ${CFG.token}` });
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ title: 'Survivor', season: 50 });
-    expect(res.ok && res.text).toContain('mtrace trace_request');
+    expect(res.ok && res.text).toContain('tracerr trace_request');
     expect(res.ok && res.text).toContain('190 of 192');
   });
 
@@ -76,7 +76,7 @@ describe('mtrace tools', () => {
     expect(!res.ok && res.error).toContain(expected);
   });
 
-  it('fails when mtrace is unreachable', async () => {
+  it('fails when tracerr is unreachable', async () => {
     const res = await callTool(find('vpn_health', (async () => { throw new Error('ECONNRESET'); }) as never), {});
     expect(!res.ok && res.error).toContain('unreachable (ECONNRESET)');
   });
@@ -119,7 +119,7 @@ describe('download ETA follow-ups', () => {
   for (const q of ["how long until it's downloaded", 'show me the latest downloads', 'what finished downloading recently']) {
     it(`offers list_queue and carries the earlier turns for "${q}"`, async () => {
       const seen: Array<Record<string, unknown>> = [];
-      const run = vi.fn(async () => ({ source: 'mtrace list_queue', data: { text: 'Coco 37.8%, ETA 45m' } }));
+      const run = vi.fn(async () => ({ source: 'tracerr list_queue', data: { text: 'Coco 37.8%, ETA 45m' } }));
       const tool: LabTool = { name: 'list_queue', description: 'd', input: z.object({}), run };
       const out = await ask(
         q,
@@ -152,7 +152,7 @@ describe('the media prompt', () => {
   });
 
   it('describes list_queue with ETA and latest finished downloads', () => {
-    const q = mtraceTools({ baseUrl: 'http://x', token: 't'.repeat(40) }).find((t) => t.name === 'list_queue');
+    const q = tracerrTools({ baseUrl: 'http://x', token: 't'.repeat(40) }).find((t) => t.name === 'list_queue');
     expect(q?.description).toContain('ETA');
     expect(q?.description).toContain('latest finished downloads');
   });
@@ -245,9 +245,9 @@ describe('settings', () => {
   };
   const read = (p: string) => (p.endsWith('.pem') && p.includes('github') ? KEY : '-----BEGIN CERTIFICATE-----\nM\n-----END CERTIFICATE-----\n');
 
-  it('offers mtrace only with a token, and rejects a short one', () => {
-    expect(loadLabConfig(env, read).mtrace).toBeNull();
-    expect(loadLabConfig({ ...env, LAB_MTRACE_TOKEN: 'm'.repeat(40) }, read).mtrace).toEqual({ baseUrl: 'http://192.168.50.237:8237', token: 'm'.repeat(40) });
+  it('offers tracerr only with a token, and rejects a short one', () => {
+    expect(loadLabConfig(env, read).tracerr).toBeNull();
+    expect(loadLabConfig({ ...env, LAB_MTRACE_TOKEN: 'm'.repeat(40) }, read).tracerr).toEqual({ baseUrl: 'http://192.168.50.237:8237', token: 'm'.repeat(40) });
     expect(() => loadLabConfig({ ...env, LAB_MTRACE_TOKEN: 'short' }, read)).toThrow('LAB_MTRACE_TOKEN');
   });
 });

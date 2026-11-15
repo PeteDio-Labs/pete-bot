@@ -52,7 +52,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
   logger.info('/status');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  // No mtrace line since PET-518: pete-bot calls nothing on mtrace. An unconfigured
+  // No tracerr line since PET-518: pete-bot calls nothing on tracerr. An unconfigured
   // /update is the one state here that needs attention, so it alone turns the embed yellow.
   const incidents = openIncidents();
   const updates = Boolean(config.updates.token);

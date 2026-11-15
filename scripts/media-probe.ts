@@ -8,10 +8,10 @@
  *   MTRACE_TOKEN_FILE=~/.config/mtrace/token bun scripts/media-probe.ts --ask "why is Survivor stuck"
  *
  * Checks, in order. Each prints what it examined, and the exit code is 1 when any failed:
- *   1. mtrace /health.
- *   2. The tool list on mtrace (GET /api/tools) against MTRACE_SPECS: a missing, extra or
+ *   1. tracerr /health.
+ *   2. The tool list on tracerr (GET /api/tools) against TRACERR_SPECS: a missing, extra or
  *      re-shaped tool is drift, and the probe says which.
- *   3. All thirteen tools through the code the assistant uses (src/lab/tools/mtrace.ts), with
+ *   3. All thirteen tools through the code the assistant uses (src/lab/tools/tracerr.ts), with
  *      timings. An `ok=false` finding is printed as a finding, not a failure.
  *   4. With BAZARR_API_KEY set (read the key in Bazarr's config.yaml on 222, never print it):
  *      bazarr_status, bazarr_find for PROBE_TITLE, and propose_action for it. These only read
@@ -27,7 +27,7 @@ import { homedir } from 'node:os';
 import { ask, MEDIA_SYSTEM_PROMPT } from '../src/lab/agent.js';
 import { ollamaCaller } from '../src/lab/ollama.js';
 import { callTool, inputJsonSchema } from '../src/lab/tools/index.js';
-import { MTRACE_SPECS, mtraceTools } from '../src/lab/tools/mtrace.js';
+import { TRACERR_SPECS, tracerrTools } from '../src/lab/tools/tracerr.js';
 import { bazarrFindTool, bazarrStatusTool } from '../src/lab/tools/bazarr.js';
 import { proposeActionTool } from '../src/lab/tools/propose.js';
 
@@ -64,9 +64,9 @@ try {
 // 1
 try {
   const res = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(5000) });
-  line(res.ok, `1 mtrace /health: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
+  line(res.ok, `1 tracerr /health: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
 } catch (err) {
-  line(false, `1 mtrace /health: unreachable (${(err as Error).message}). A refusal means this host is not on the allowlist.`);
+  line(false, `1 tracerr /health: unreachable (${(err as Error).message}). A refusal means this host is not on the allowlist.`);
 }
 
 // 2
@@ -76,10 +76,10 @@ try {
   const body = (await res.json()) as unknown;
   const list = (Array.isArray(body) ? body : (body as { tools?: unknown[] }).tools ?? []) as Array<{ name: string; parameters?: { properties?: Record<string, unknown>; required?: string[] } }>;
   const live = new Map(list.map((t) => [t.name, t]));
-  const ours = new Map(MTRACE_SPECS.map((s) => [s.name, s]));
+  const ours = new Map(TRACERR_SPECS.map((s) => [s.name, s]));
   const drift: string[] = [];
-  for (const name of ours.keys()) if (!live.has(name)) drift.push(`missing on mtrace: ${name}`);
-  for (const name of live.keys()) if (!ours.has(name)) drift.push(`not in MTRACE_SPECS: ${name}`);
+  for (const name of ours.keys()) if (!live.has(name)) drift.push(`missing on tracerr: ${name}`);
+  for (const name of live.keys()) if (!ours.has(name)) drift.push(`not in TRACERR_SPECS: ${name}`);
   for (const [name, spec] of ours) {
     const t = live.get(name);
     if (!t) continue;
@@ -88,10 +88,10 @@ try {
     const keysMine = Object.keys(mine.properties ?? {}).sort().join(',');
     const reqLive = [...(t.parameters?.required ?? [])].sort().join(',');
     const reqMine = [...(mine.required ?? [])].sort().join(',');
-    if (keysLive !== keysMine) drift.push(`${name}: arguments differ (mtrace: ${keysLive || 'none'}; ours: ${keysMine || 'none'})`);
-    else if (reqLive !== reqMine) drift.push(`${name}: required differs (mtrace: ${reqLive || 'none'}; ours: ${reqMine || 'none'})`);
+    if (keysLive !== keysMine) drift.push(`${name}: arguments differ (tracerr: ${keysLive || 'none'}; ours: ${keysMine || 'none'})`);
+    else if (reqLive !== reqMine) drift.push(`${name}: required differs (tracerr: ${reqLive || 'none'}; ours: ${reqMine || 'none'})`);
   }
-  line(drift.length === 0, `2 tool list: ${live.size} on mtrace, ${ours.size} in MTRACE_SPECS${drift.length ? `\n      ${drift.join('\n      ')}` : ', names and arguments match'}`);
+  line(drift.length === 0, `2 tool list: ${live.size} on tracerr, ${ours.size} in TRACERR_SPECS${drift.length ? `\n      ${drift.join('\n      ')}` : ', names and arguments match'}`);
 } catch (err) {
   line(false, `2 tool list: ${(err as Error).message}`);
 }
@@ -109,7 +109,7 @@ function gist(text: string): string {
 }
 
 // 3
-const tools = mtraceTools({ baseUrl: BASE, token: tok, timeoutMs: 60_000 });
+const tools = tracerrTools({ baseUrl: BASE, token: tok, timeoutMs: 60_000 });
 let ran = 0;
 for (const tool of tools) {
   const args = tool.name === 'trace_request' ? { title: TITLE } : {};

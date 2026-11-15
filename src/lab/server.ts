@@ -37,7 +37,7 @@ export interface LabServerDeps {
   log?: (msg: string, fields?: Record<string, unknown>) => void;
   /** Tests shorten it; production uses ASK_DEADLINE_MS. */
   deadlineMs?: number;
-  /** The media assistant's tools (PET-869): mtrace and search. Absent, /v1/media/ask answers 404. */
+  /** The media assistant's tools (PET-869): tracerr and search. Absent, /v1/media/ask answers 404. */
   mediaTools?: Map<string, LabTool>;
   /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
   actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;

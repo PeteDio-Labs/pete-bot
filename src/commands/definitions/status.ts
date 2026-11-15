@@ -1,7 +1,7 @@
 // /status — what is pete-bot holding right now?
 //
-// Open incidents, uptime, and whether /update has a token. It asks mtrace nothing: pete-bot
-// stopped calling mtrace in PET-518, and mtrace left loopback in the same change.
+// Open incidents, uptime, and whether /update has a token. It asks tracerr nothing: pete-bot
+// stopped calling tracerr in PET-518, and tracerr left loopback in the same change.
 import { SlashCommandBuilder, ApplicationIntegrationType, InteractionContextType } from 'discord.js';
 
 export const statusCommand = new SlashCommandBuilder()

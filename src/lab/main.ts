@@ -21,7 +21,7 @@ import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
 import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
-import { mtraceTools } from './tools/mtrace.js';
+import { tracerrTools } from './tools/tracerr.js';
 import { bazarrFindTool, bazarrStatusTool, searchMissing } from './tools/bazarr.js';
 import { proposeActionTool } from './tools/propose.js';
 import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
@@ -54,14 +54,14 @@ const tools = buildLabTools({
   search: cfg.search ?? undefined,
   units: LAB_UNITS,
 });
-// The media assistant's tools (PET-869): mtrace's thirteen reads, plus search when it is set.
-// With no mtrace token the map stays undefined and /v1/media/ask answers 404, so a host
+// The media assistant's tools (PET-869): tracerr's thirteen reads, plus search when it is set.
+// With no tracerr token the map stays undefined and /v1/media/ask answers 404, so a host
 // that has not been seeded says so instead of answering without its tools.
 const bazarrCfg = cfg.bazarr ?? undefined;
-const mediaTools = cfg.mtrace
+const mediaTools = cfg.tracerr
   ? selectMediaTools(
       [
-        ...mtraceTools(cfg.mtrace),
+        ...tracerrTools(cfg.tracerr),
         ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
         ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
         proposeActionTool(bazarrCfg),
@@ -113,13 +113,13 @@ const checks: Record<string, Check> = {
     return GitClone.describe('petedio-vault', s);
   },
   // Present only when the media assistant is configured (PET-869). /health is open and touches
-  // nothing in the stack, so it proves mtrace answers, not that its backends do.
-  ...(cfg.mtrace
+  // nothing in the stack, so it proves tracerr answers, not that its backends do.
+  ...(cfg.tracerr
     ? {
-        async mtrace() {
-          const res = await fetch(`${cfg.mtrace!.baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
-          if (!res.ok) throw new Error(`mtrace answered HTTP ${res.status} to /health`);
-          return 'mtrace up';
+        async tracerr() {
+          const res = await fetch(`${cfg.tracerr!.baseUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+          if (!res.ok) throw new Error(`tracerr answered HTTP ${res.status} to /health`);
+          return 'tracerr up';
         },
       }
     : {}),
