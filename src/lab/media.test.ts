@@ -250,4 +250,11 @@ describe('settings', () => {
     expect(loadLabConfig({ ...env, LAB_MTRACE_TOKEN: 'm'.repeat(40) }, read).tracerr).toEqual({ baseUrl: 'http://192.168.50.237:8237', token: 'm'.repeat(40) });
     expect(() => loadLabConfig({ ...env, LAB_MTRACE_TOKEN: 'short' }, read)).toThrow('LAB_MTRACE_TOKEN');
   });
+
+  it('reads the LAB_TRACERR_ names first and the LAB_MTRACE_ names as a fallback', () => {
+    const both = { ...env, LAB_TRACERR_TOKEN: 't'.repeat(40), LAB_TRACERR_URL: 'http://10.0.0.1:8237/', LAB_MTRACE_TOKEN: 'm'.repeat(40), LAB_MTRACE_URL: 'http://10.0.0.2:8237' };
+    expect(loadLabConfig(both, read).tracerr).toEqual({ baseUrl: 'http://10.0.0.1:8237', token: 't'.repeat(40) });
+    expect(loadLabConfig({ ...env, LAB_TRACERR_TOKEN: 't'.repeat(40) }, read).tracerr).toEqual({ baseUrl: 'http://192.168.50.237:8237', token: 't'.repeat(40) });
+    expect(() => loadLabConfig({ ...env, LAB_TRACERR_TOKEN: 'short' }, read)).toThrow('LAB_TRACERR_TOKEN');
+  });
 });
