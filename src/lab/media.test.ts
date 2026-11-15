@@ -163,7 +163,7 @@ describe('the media prompt', () => {
 });
 
 describe('POST /v1/media/ask', () => {
-  const lab: LabTool = { name: 'pve_guests', description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) };
+  const lab: LabTool = { name: 'list_guests', description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) };
   const media: LabTool = { name: 'list_queue', description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) };
   const post = (body: unknown, token = ASK, path = '/v1/media/ask') =>
     new Request(`http://127.0.0.1:3016${path}`, {

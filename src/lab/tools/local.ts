@@ -1,8 +1,8 @@
 /**
- * desk_status and systemd_status: what is running on 237 itself (PET-667).
+ * check_merge_desk and check_services: what is running on 237 itself (PET-667).
  *
- * Both read only this host. desk_status asks pete-bot's public /health, which carries the
- * merge desk's mode and its last poll; systemd_status runs `systemctl show` for a fixed list
+ * Both read only this host. check_merge_desk asks pete-bot's public /health, which carries the
+ * merge desk's mode and its last poll; check_services runs `systemctl show` for a fixed list
  * of units. Neither takes a free-form name: the unit is chosen from a list, so a caller can't
  * read an arbitrary unit or pass an option to systemctl.
  */
@@ -18,7 +18,8 @@ export interface DeskConfig {
 export function deskStatusTool(cfg: DeskConfig): LabTool {
   const input = z.object({});
   return {
-    name: 'desk_status',
+    name: 'check_merge_desk',
+    aliases: ['desk_status'],
     description:
       "The merge desk's state from pete-bot's /health: its mode, the repos it watches, when it last polled, how many " +
       'PRs that poll read, any poll error, and how many PRs it has merged. It also returns the weekly reports runner state and ' +
@@ -72,13 +73,14 @@ export function parseShow(out: string): Array<Record<string, string>> {
 }
 
 export function systemdStatusTool(units: readonly string[], run: SystemctlRunner = runSystemctl): LabTool {
-  if (units.length === 0) throw new Error('systemd_status needs at least one unit');
-  for (const u of units) if (!/^[\w@.-]+\.(service|timer)$/.test(u)) throw new Error(`systemd_status: bad unit name ${u}`);
+  if (units.length === 0) throw new Error('check_services needs at least one unit');
+  for (const u of units) if (!/^[\w@.-]+\.(service|timer)$/.test(u)) throw new Error(`check_services: bad unit name ${u}`);
   const input = z.object({
     unit: z.enum(units as [string, ...string[]]).optional().describe('One unit; omit for all of them'),
   });
   return {
-    name: 'systemd_status',
+    name: 'check_services',
+    aliases: ['systemd_status'],
     description: `State of the systemd units on 237 (${units.join(', ')}): active or not, since when, restart count and last result.`,
     input,
     async run({ unit }: z.infer<typeof input>) {

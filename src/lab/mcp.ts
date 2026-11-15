@@ -24,8 +24,8 @@ export { normalizePeer };
 export const MCP_PATH = '/mcp/lab';
 const SERVER_INFO = { name: 'petedio-lab', version: '1.0.0' };
 const INSTRUCTIONS =
-  "Tools for Pedro's homelab. All are reads except queue_codex_review, which starts a second-opinion Codex review. For \"what is wrong right now\", call lab_overview first. Live state (pve_guests, pve_guest, kuma_status, systemd_status, desk_status) " +
-  'outranks the knowledge vault (find_host, host_note). Every result names what it read in `source`; a failed read is an error, never an empty result.';
+  "Tools for Pedro's homelab. All are reads except request_codex_review, which starts a second-opinion Codex review. For \"what is wrong right now\", call get_overview first. Live state (list_guests, get_guest, check_monitors, check_services, check_merge_desk) " +
+  'outranks the knowledge vault (find_host, get_host_note). Every result names what it read in `source`; a failed read is an error, never an empty result.';
 
 export interface McpDeps {
   tools: Map<string, LabTool>;
@@ -41,7 +41,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
     instructions: INSTRUCTIONS,
     path: MCP_PATH,
     tools: new Map([...deps.tools].map(([name, tool]) => [name, toMcpTool(tool)])),
-    // The lab serves queue_codex_review, a write, so it exposes both tiers.
+    // The lab serves request_codex_review, a write, so it exposes both tiers.
     exposeTiers: ['read', 'write'],
     allowedPeer: deps.allowedPeer,
     verify: deps.verify,

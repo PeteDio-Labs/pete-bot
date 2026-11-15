@@ -1,5 +1,5 @@
 /**
- * plane_item and plane_projects: Plane work items across projects (PET-672, PET-859).
+ * get_plane_item and list_plane_projects: Plane work items across projects (PET-672, PET-859).
  *
  * A key such as `FOL-12` names its project by identifier. The client lists the projects once,
  * maps identifier to id, and reads that project's states. A caller never supplies a project
@@ -162,11 +162,12 @@ export function planeItemTool(plane: PlaneClient): LabTool {
       .max(MAX_KEYS),
   });
   return {
-    name: 'plane_item',
+    name: 'get_plane_item',
+    aliases: ['plane_item'],
     description:
       `The title, state and last update of up to ${MAX_KEYS} work items in Plane, by key such as "PET-672" or "FOL-12". ` +
-      'The project comes from the key, so you never pass a project id. Use plane_projects to see the identifiers. ' +
-      'Use it to name the items a git_history result cites.',
+      'The project comes from the key, so you never pass a project id. Use list_plane_projects to see the identifiers. ' +
+      'Use it to name the items a get_git_history result cites.',
     input,
     async run({ keys }: z.infer<typeof input>) {
       const unique = [...new Set(keys)];
@@ -191,10 +192,11 @@ export function planeItemTool(plane: PlaneClient): LabTool {
 export function planeProjectsTool(plane: PlaneClient): LabTool {
   const input = z.object({});
   return {
-    name: 'plane_projects',
+    name: 'list_plane_projects',
+    aliases: ['plane_projects'],
     description:
       'The Plane projects this server may read, by identifier, with name and project id. ' +
-      'Use it to learn which identifiers plane_item accepts.',
+      'Use it to learn which identifiers get_plane_item accepts.',
     input,
     async run() {
       const projects = [...(await plane.projects()).values()].sort((a, b) => a.identifier.localeCompare(b.identifier));

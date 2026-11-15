@@ -63,7 +63,7 @@ const mediaTools = cfg.tracerr
   ? selectMediaTools(
       [
         ...tracerrTools(cfg.tracerr),
-        ...(tools.has('search_lab') ? [tools.get('search_lab')!] : []),
+        ...(tools.has('search_knowledge') ? [tools.get('search_knowledge')!] : []),
         ...(bazarrCfg ? [bazarrStatusTool(bazarrCfg), bazarrFindTool(bazarrCfg)] : []),
         proposeActionTool(bazarrCfg, cfg.tracerr ?? undefined),
       ],

@@ -1,5 +1,5 @@
 /**
- * search_lab: meaning-based search over the vault, Plane, the digest and repo docs (PET-745).
+ * search_knowledge: meaning-based search over the vault, Plane, the digest and repo docs (PET-745).
  *
  * Calls petedio-search on ollama-host (`GET /api/search`), which embeds the question on the
  * 1660 SUPER lane and ranks stored chunks. It is read-only, and the caller's bearer travels
@@ -41,7 +41,8 @@ export function searchLabTool(cfg: SearchConfig): LabTool {
     k: z.number().int().min(1).max(MAX_HITS).optional(),
   });
   return {
-    name: 'search_lab',
+    name: 'search_knowledge',
+    aliases: ['search_lab'],
     description:
       'Search the knowledge vault, Plane items, lab digests and repo docs (runbooks, gotchas, host settings) by meaning. ' +
       'Use it to find where something is explained. For live state use the pve and kuma tools. Cite the ref of each hit.',

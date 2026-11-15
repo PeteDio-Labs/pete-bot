@@ -56,6 +56,9 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
   const log = deps.log ?? (() => {});
   const tiers = deps.exposeTiers ?? ['read'];
   const served = new Map([...deps.tools].filter(([, t]) => tiers.includes(t.tier)));
+  // An alias answers a call but never appears in tools/list.
+  const callable = new Map(served);
+  for (const t of served.values()) for (const a of t.aliases ?? []) if (!callable.has(a)) callable.set(a, t);
   const definitions = [...served.values()].map((t) => ({
     name: t.name,
     description: t.description,
@@ -112,7 +115,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
         const name = String(msg.params?.name ?? '');
         const args = msg.params?.arguments ?? {};
         const inputLength = JSON.stringify(args).length;
-        const tool = served.get(name);
+        const tool = callable.get(name);
         if (!tool) {
           log('mcp call', { caller: access.email, tool: name, inputLength, ok: false, rejected: 'unknown tool' });
           return rpcError(id, -32602, `unknown tool: ${name}`);
@@ -122,7 +125,8 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
         const body = redact(result.ok ? result.text : result.error);
         log('mcp call', {
           caller: access.email,
-          tool: name,
+          tool: tool.name,
+          ...(name !== tool.name ? { alias: name } : {}),
           tier: tool.tier,
           inputLength,
           ok: result.ok,

@@ -1,5 +1,5 @@
 /**
- * find_host and host_note: what the knowledge vault says about a machine (PET-668).
+ * find_host and get_host_note: what the knowledge vault says about a machine (PET-668).
  *
  * The vault keys every host note on VMID (`Hosts/<vmid>-<name>.md`), and
  * `Hosts/hosts-inventory.md` holds the ground-truthed guest table under "## Live inventory".
@@ -7,7 +7,7 @@
  *
  * ⚠ THE VAULT IS A DOCUMENT, NOT THE MACHINE. Live infra outranks it (the vault's own first
  * rule), so every answer carries the note's `verified:` date and the commit it was read at.
- * To see what is running, a caller asks pve_guests.
+ * To see what is running, a caller asks list_guests.
  */
 import { z } from 'zod';
 import { GitClone } from './git.js';
@@ -188,7 +188,7 @@ export function findHostTool(index: HostIndex): LabTool {
     name: 'find_host',
     description:
       "Look up a machine in the knowledge vault: its host note's frontmatter (VMID, node, address, status, " +
-      'verified date) and its row in the live inventory table. The vault is a document; ask pve_guests for live state.',
+      'verified date) and its row in the live inventory table. The vault is a document; ask list_guests for live state.',
     input,
     async run({ query }: z.infer<typeof input>) {
       const idx = await index.load();
@@ -212,7 +212,8 @@ export function findHostTool(index: HostIndex): LabTool {
 export function hostNoteTool(index: HostIndex): LabTool {
   const input = z.object({ query: QUERY });
   return {
-    name: 'host_note',
+    name: 'get_host_note',
+    aliases: ['host_note'],
     description:
       "Read one host note's full text from the knowledge vault, by VMID or name. Fails when the query " +
       'matches more than one note; narrow it with find_host first.',

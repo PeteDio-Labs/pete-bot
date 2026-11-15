@@ -20,6 +20,10 @@ proposal doc for PET-924.
 
 Over MCP, a `write` tool requests; anything that changes host state goes through `lab-action.yml`.
 
+## Renaming a tool
+
+Set `aliases: ['old_name']` on the tool. The old name still answers `tools/call`, and the log line carries `alias`. `tools/list` shows only the new name. Remove the alias one release later.
+
 ## Use it from another repo
 
 Copy or pin `src/mcp-kit` by commit from `pete-bot` and run `runContract` in your tests. `petedio-media-control`

@@ -21,7 +21,7 @@ export { callTool, capText, inputJsonSchema, LabToolError, type LabTool, type To
 export { GitClone, runGit, type GitRunner } from './git.js';
 export { secretsHealth, VaultMetadataClient } from './vault.js';
 
-/** The units systemd_status reads on 237: the two processes this repo builds. */
+/** The units check_services reads on 237: the two processes this repo builds. */
 export const LAB_UNITS = ['pete-bot.service', 'lab-agent.service'] as const;
 
 export interface LabToolsConfig {
@@ -31,14 +31,14 @@ export interface LabToolsConfig {
   history: GitClone[];
   proxmox: ProxmoxConfig;
   kuma: KumaConfig;
-  /** HashiCorp Vault, for vault_presence. `vault` above is the knowledge-vault clone. */
+  /** HashiCorp Vault, for check_secrets. `vault` above is the knowledge-vault clone. */
   secrets: VaultConfig;
   deskHealthUrl: string;
-  /** Plane, for plane_item and plane_projects (PET-672, PET-859). Absent until the token is seeded, and then the tool is not offered. */
+  /** Plane, for get_plane_item and list_plane_projects (PET-672, PET-859). Absent until the token is seeded, and then the tool is not offered. */
   plane?: PlaneConfig;
-  /** petedio-search, for search_lab (PET-745). Absent until the token is seeded, and then the tool is not offered. */
+  /** petedio-search, for search_knowledge (PET-745). Absent until the token is seeded, and then the tool is not offered. */
   search?: SearchConfig;
-  /** The systemd units on this host that systemd_status may read. */
+  /** The systemd units on this host that check_services may read. */
   units: readonly string[];
   systemctl?: SystemctlRunner;
 }
@@ -61,7 +61,7 @@ export function buildLabTools(cfg: LabToolsConfig): Map<string, LabTool> {
   ];
   const map = new Map(tools.map((t) => [t.name, t]));
   // The overview folds four of the tools above, so it is built from the finished map and listed first.
-  return new Map([['lab_overview', labOverviewTool(map)], ...map]);
+  return new Map([['get_overview', labOverviewTool(map)], ...map]);
 }
 
 /** The tool list in the shape both the Anthropic `tools` array and MCP `tools/list` take. */

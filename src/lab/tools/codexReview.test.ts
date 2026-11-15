@@ -4,7 +4,7 @@ import { codexReviewStatusTool, queueCodexReviewTool } from './codexReview.js';
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const cfg = (f: (url: string, init?: RequestInit) => Promise<Response>) => ({ url: 'http://127.0.0.1:3015/v1/codex-review', token: 'tok', fetch: f as unknown as typeof fetch });
 
-describe('queue_codex_review', () => {
+describe('request_codex_review', () => {
   it('is marked as not read-only and posts the repo, PR and effort with the bearer', async () => {
     let seen: { url: string; init?: RequestInit } | undefined;
     const t = queueCodexReviewTool(cfg(async (url, init) => ((seen = { url, init }), reply({ ok: true, kind: 'queued' }, 202))));
@@ -25,7 +25,7 @@ describe('queue_codex_review', () => {
   });
 });
 
-describe('codex_review_status', () => {
+describe('check_codex_review', () => {
   it('reads with GET and counts the reviews', async () => {
     let url = '';
     const t = codexReviewStatusTool(cfg(async (u) => ((url = u), reply({ head: 'a', request: { state: 'rate_limited' }, reviews: [] }))));

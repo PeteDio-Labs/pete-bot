@@ -1,6 +1,6 @@
 /**
  * The lab MCP (PET-667): the Access JWT check, the MCP door, and the three tools phase 1
- * adds (desk_status, systemd_status, vault_presence).
+ * adds (check_merge_desk, check_services, check_secrets).
  */
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { generateKeyPairSync, createSign, type KeyObject } from 'node:crypto';
@@ -310,7 +310,7 @@ describe('the MCP door', () => {
   });
 });
 
-describe('desk_status', () => {
+describe('check_merge_desk', () => {
   it("returns the desk's state from pete-bot's /health", async () => {
     const tool = deskStatusTool({
       healthUrl: 'http://127.0.0.1:3015/health',
@@ -337,7 +337,7 @@ describe('desk_status', () => {
   });
 });
 
-describe('systemd_status', () => {
+describe('check_services', () => {
   const SHOW = 'Id=pete-bot.service\nLoadState=loaded\nActiveState=active\nSubState=running\nActiveEnterTimestamp=Mon 2026-10-19 07:13:01 UTC\nNRestarts=0\nResult=success\n\nId=lab-agent.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\nActiveEnterTimestamp=\nNRestarts=0\nResult=success\n';
 
   it('reads only the fixed units, with options after --', async () => {
@@ -374,7 +374,7 @@ describe('systemd_status', () => {
   });
 });
 
-describe('vault_presence', () => {
+describe('check_secrets', () => {
   const routes = (map: Record<string, Response | (() => Response)>, seen: Array<{ url: string; init?: RequestInit }> = []) =>
     (async (url: string, init?: RequestInit) => {
       seen.push({ url, init });
