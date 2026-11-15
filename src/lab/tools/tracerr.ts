@@ -164,14 +164,16 @@ export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string,
   if (res.status === 401) throw new LabToolError('tracerr refused the lab-agent token (HTTP 401)');
   if (res.status === 403) throw new LabToolError('tracerr does not let lab-agent change anything yet: lab-agent is not in its write callers (mtrace_write_callers). Nothing ran.');
   if (!res.ok) throw new LabToolError(`tracerr answered HTTP ${res.status} to the search`);
-  let body: { ok?: unknown; result?: unknown; text?: unknown; error?: unknown };
+  // tracerr answers { ok, result: { tool, timing, text } } (petedio-media-control src/server.ts report()).
+  let body: { ok?: unknown; result?: unknown; error?: unknown };
   try {
     body = (await res.json()) as typeof body;
   } catch {
     throw new LabToolError('tracerr answered the search with a body that is not JSON');
   }
-  if (body.ok === false) throw new LabToolError(`tracerr refused the search: ${String(body.error ?? body.result ?? 'no reason').slice(0, 300)}`);
-  const text = [body.result, body.text].find((v) => typeof v === 'string') as string | undefined;
+  if (body.ok === false) throw new LabToolError(`tracerr refused the search: ${String(body.error ?? 'no reason').slice(0, 300)}`);
+  const inner = body.result;
+  const text = typeof inner === 'string' ? inner : typeof (inner as { text?: unknown } | null)?.text === 'string' ? ((inner as { text: string }).text) : undefined;
   if (!text) throw new LabToolError('tracerr accepted the call but said nothing about what it did, so it is not reported as done');
   // tracerr answers a refusal ("nothing was changed", "did not answer") as an ordinary result, so only its
   // acceptance sentence counts as a search that started.

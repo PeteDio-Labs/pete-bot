@@ -252,8 +252,8 @@ describe('searchMissingViaTracerr', () => {
   const cfg = (body: unknown, status = 200) => ({ baseUrl: 'http://t', token: 'x', fetch: (async () => new Response(JSON.stringify(body), { status })) as never });
   it('reports only an accepted search as done', async () => {
     const { searchMissingViaTracerr } = await import('./tools/tracerr.js');
-    expect(await searchMissingViaTracerr(cfg({ ok: true, result: 'Sonarr accepted a search for season 3 of "Yellowjackets". It has queued the search, not finished it.' }), 'Yellowjackets', 3)).toContain('accepted a search');
-    await expect(searchMissingViaTracerr(cfg({ ok: true, result: 'No library item is titled "X". Nothing was changed.' }), 'X')).rejects.toThrow('did not start');
+    expect(await searchMissingViaTracerr(cfg({ ok: true, result: { tool: 'search_missing', timing: { toolMs: 12 }, text: 'Sonarr accepted a search for season 3 of "Yellowjackets". It has queued the search, not finished it.' } }), 'Yellowjackets', 3)).toContain('accepted a search');
+    await expect(searchMissingViaTracerr(cfg({ ok: true, result: { tool: 'search_missing', timing: { toolMs: 12 }, text: 'No library item is titled "X". Nothing was changed.' } }), 'X')).rejects.toThrow('did not start');
     await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'forbidden' }, 403), 'X')).rejects.toThrow('write callers');
   });
 });
@@ -266,7 +266,7 @@ describe('the dry run before a download card', () => {
     token: 'x',
     fetch: (async (_u: string, init: { body: string }) => {
       bodies.push(JSON.parse(init.body));
-      return new Response(JSON.stringify(status === 200 ? { ok: true, result: text } : { ok: false, error: text }), { status });
+      return new Response(JSON.stringify(status === 200 ? { ok: true, result: { tool: 'search_missing', timing: { toolMs: 3 }, text } } : { ok: false, error: text }), { status });
     }) as never,
   });
   it('sends kind and dry_run, and puts the preview on the proposal', async () => {
