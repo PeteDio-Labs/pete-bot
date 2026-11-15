@@ -76,6 +76,11 @@ describe('redact: false positives and missed shapes', () => {
     }
   });
 
+  test('leaves prose that mentions basic or bearer alone', () => {
+    for (const ok of ['Use basic configuration for the host', 'a Bearer authentication scheme', 'basic setup']) expect(redact(ok)).toEqual({ text: ok, changed: false });
+    expect(redact('Basic dXNlcjpwYXNzd29yZA==').changed).toBe(true);
+  });
+
   test('redacts AWS, GitHub and sk- keys, URL credentials, private keys and quoted values with spaces', () => {
     const raw = `${AWS} ${GH} ${SKANT} postgres://u:hunter22pw@h/db ssh_key: abcdefgh12 password: "my secret pw here"\n-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----`;
     const out = redact(raw).text;

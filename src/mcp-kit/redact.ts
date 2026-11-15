@@ -15,7 +15,8 @@ const NAME = '(?:[A-Za-z0-9]+[_-])*(?:token|secret|password|passwd|api[_-]?key|a
 
 const PATTERNS: Array<[RegExp, string | ((...m: string[]) => string)]> = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, MARK],
-  [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, `$1 ${MARK}`],
+  // The value must look like a credential (a digit, `.`, `_` or `=` in 8+ characters, or 20+ characters), so prose such as "use basic configuration" stays readable.
+  [/\b(Bearer|Basic)\s+(?:(?=[A-Za-z0-9._~+/=-]*[0-9._=])[A-Za-z0-9._~+/=-]{8,}|[A-Za-z0-9._~+/=-]{20,})/gi, `$1 ${MARK}`],
   [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/g, MARK],
   [/\bhv[sbr]\.[A-Za-z0-9_-]{16,}/g, MARK],
   [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, MARK],
