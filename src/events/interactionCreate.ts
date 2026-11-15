@@ -306,7 +306,9 @@ async function handlePick(interaction: ButtonInteraction, proposal: Proposal | u
   if (outcome.kind === 'failed') logger.error(`[media] pick failed: ${outcome.reason}`);
   for (const part of chunk(describe(outcome))) await interaction.followUp(part);
   if (outcome.kind === 'answer' && outcome.result.proposals.length > 0) {
-    await createPresenter(store)({ reply: (o) => interaction.followUp(o as never) } as Replier, outcome.result.proposals);
+    // A re-ask from a button runs no update check on its own: that path needs a typed message.
+    const offered = outcome.result.proposals.filter((p) => p.action !== 'update_check');
+    await createPresenter(store)({ reply: (o) => interaction.followUp(o as never) } as Replier, offered);
   }
 }
 
@@ -324,6 +326,11 @@ async function handleMediaButton(interaction: ButtonInteraction, store: PendingS
   const button = parseButton(interaction.customId);
   if (!button) {
     await interaction.update({ content: 'That button is not valid.', components: [] });
+    return;
+  }
+  // A pick tap on a Confirm card, or a Confirm tap on a choice card, must not consume the stored proposal.
+  if ((button.pick !== undefined) !== (store.peek(button.id)?.action === 'choose')) {
+    await interaction.update({ content: 'That button does not match its request, so nothing ran. Ask again.', components: [] });
     return;
   }
   const proposal = store.take(button.id);

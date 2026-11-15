@@ -33,11 +33,12 @@ describe('matchTitle loose resolution', () => {
     expect(matchTitle(items, 'Yellow Jackets').map((i) => i.id)).toEqual([1]);
     expect(matchTitle(items, 'yellow-jackets').map((i) => i.id)).toEqual([1]);
     expect(matchTitle(items, 'Yelowjackets').map((i) => i.id)).toEqual([1]);
-    expect(matchTitle(items, 'Yellowjacket').map((i) => i.id)).toEqual([1]);
+    expect(matchTitle(items, 'Yelowjackets', { typo: false })).toEqual([]);
   });
   it('does not match a short or unrelated query', () => {
     expect(matchTitle(items, 'Upp')).toEqual([]);
     expect(matchTitle(items, 'Breaking Bad')).toEqual([]);
+    expect(matchTitle([{ kind: 'series' as const, id: 9, title: 'Teachers', missing: 0 }], 'Reacher')).toEqual([]);
   });
 });
 
@@ -139,11 +140,15 @@ describe('propose_action', () => {
     const res = await callTool(tool(), { action: 'subtitles', title: 'surviv' });
     const p = res.ok && (proposalOf(res.text) as { action: string; confirm: boolean; options: Array<{ label: string; reply: string }> });
     expect(p).toMatchObject({ action: 'choose', confirm: false });
-    expect(p && p.options.map((o) => o.reply)).toEqual(['Search subtitles for Survivor', 'Search subtitles for Survivor: Edge of Extinction']);
+    expect(p && p.options.map((o) => o.reply)).toEqual(['Search subtitles for the series Survivor', 'Search subtitles for the series Survivor: Edge of Extinction']);
   });
   it('proposes a download for one show and season, resolving a split spelling', async () => {
     const res = await callTool(tool(), { action: 'download', title: 'Sur vivor', season: 3 });
     expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'download', kind: 'series', title: 'Survivor', season: 3, confirm: true });
+  });
+  it('never runs a typo match: it asks with a Did you mean card', async () => {
+    const res = await callTool(tool(), { action: 'download', title: 'Survivr', season: 1 });
+    expect(res.ok && proposalOf(res.text)).toMatchObject({ action: 'choose', confirm: false });
   });
   it('makes a movie download with no season and refuses an unknown title', async () => {
     const res = await callTool(tool(), { action: 'download', title: 'never after dark', season: 2 });
@@ -240,5 +245,15 @@ describe('POST /v1/media/act', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'bazarr refused the lab-agent key (HTTP 401)' });
     const res2 = await make(async () => { throw new TypeError('secret path /etc/x'); })(post({ kind: 'series', id: 1 }));
     expect(JSON.stringify(await res2.json())).not.toContain('/etc/x');
+  });
+});
+
+describe('searchMissingViaTracerr', () => {
+  const cfg = (body: unknown, status = 200) => ({ baseUrl: 'http://t', token: 'x', fetch: (async () => new Response(JSON.stringify(body), { status })) as never });
+  it('reports only an accepted search as done', async () => {
+    const { searchMissingViaTracerr } = await import('./tools/tracerr.js');
+    expect(await searchMissingViaTracerr(cfg({ ok: true, result: 'Sonarr accepted a search for season 3 of "Yellowjackets". It has queued the search, not finished it.' }), 'Yellowjackets', 3)).toContain('accepted a search');
+    await expect(searchMissingViaTracerr(cfg({ ok: true, result: 'No library item is titled "X". Nothing was changed.' }), 'X')).rejects.toThrow('did not start');
+    await expect(searchMissingViaTracerr(cfg({ ok: false, error: 'forbidden' }, 403), 'X')).rejects.toThrow('write callers');
   });
 });

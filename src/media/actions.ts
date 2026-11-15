@@ -37,6 +37,12 @@ export class PendingStore {
     return id;
   }
 
+  /** Reads a proposal without consuming it. */
+  peek(id: string): Proposal | undefined {
+    const hit = this.items.get(id);
+    return hit && this.now() - hit.at <= this.ttlMs ? hit.proposal : undefined;
+  }
+
   /** Removes and returns the proposal. A second take of the same id returns nothing. */
   take(id: string): Proposal | undefined {
     const hit = this.items.get(id);

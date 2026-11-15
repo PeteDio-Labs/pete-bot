@@ -94,11 +94,11 @@ function editDistance(a: string, b: string, max: number): number {
 
 /**
  * Resolves a spoken title to library items, loosest last: exact, then partial, then the same
- * two with spaces and punctuation ignored, then a typo of up to two letters (queries of 6+
+ * two with spaces and punctuation ignored, then a typo of one letter (two for 9+ letters; queries of 6+
  * letters only, so "Up" cannot match everything). A tier that matches stops the search, so a
  * precise answer is never diluted by a looser one.
  */
-export function matchTitle(items: Item[], query: string): Item[] {
+export function matchTitle(items: Item[], query: string, opts: { typo?: boolean } = {}): Item[] {
   const q = norm(query);
   if (!q) return [];
   const exact = items.filter((i) => norm(i.title) === q);
@@ -110,10 +110,10 @@ export function matchTitle(items: Item[], query: string): Item[] {
   if (cExact.length) return cExact;
   const cPartial = c.length >= 4 ? items.filter((i) => compact(i.title).includes(c)) : [];
   if (cPartial.length) return cPartial;
-  if (c.length < 6) return [];
+  if (opts.typo === false || c.length < 6) return [];
   const scored = items
-    .map((i) => ({ i, d: Math.min(editDistance(compact(i.title), c, 2), editDistance(compact(i.title).slice(0, c.length), c, 2)) }))
-    .filter((x) => x.d <= 2);
+    .map((i) => ({ i, d: editDistance(compact(i.title), c, 2) }))
+    .filter((x) => x.d <= (c.length >= 9 ? 2 : 1));
   const best = Math.min(...scored.map((x) => x.d));
   return scored.filter((x) => x.d === best).map((x) => x.i);
 }

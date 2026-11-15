@@ -172,5 +172,8 @@ export async function searchMissingViaTracerr(cfg: TracerrConfig, title: string,
   if (body.ok === false) throw new LabToolError(`tracerr refused the search: ${String(body.error ?? body.result ?? 'no reason').slice(0, 300)}`);
   const text = [body.result, body.text].find((v) => typeof v === 'string') as string | undefined;
   if (!text) throw new LabToolError('tracerr accepted the call but said nothing about what it did, so it is not reported as done');
+  // tracerr answers a refusal ("nothing was changed", "did not answer") as an ordinary result, so only its
+  // acceptance sentence counts as a search that started.
+  if (!/accepted a search/i.test(text)) throw new LabToolError(`tracerr did not start the search: ${text.slice(0, 300)}`);
   return text.slice(0, 400);
 }

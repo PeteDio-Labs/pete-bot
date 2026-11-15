@@ -18,7 +18,7 @@ export function createPresenter(store: PendingStore = mediaPending, run: typeof 
     for (const p of proposals) {
       if (p.action === 'choose') {
         const id = store.add(p);
-        await message.reply({ content: `**${p.label}**\nTap one. It expires in 10 minutes.`, components: [choiceRow(id, p.options)] });
+        await message.reply({ content: `**${p.label}**\n${p.options.map((o) => `• ${o.label}: ${o.reply}`).join('\n')}\nTap one. It expires in 10 minutes.`, components: [choiceRow(id, p.options)] });
         continue;
       }
       if (p.confirm) {
