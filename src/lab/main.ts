@@ -23,6 +23,7 @@ import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, t
 import { readKuma } from './tools/kuma.js';
 import { tracerrTools } from './tools/tracerr.js';
 import { bazarrFindTool, bazarrStatusTool, searchMissing } from './tools/bazarr.js';
+import { codexReviewStatusTool, queueCodexReviewTool } from './tools/codexReview.js';
 import { proposeActionTool } from './tools/propose.js';
 import { gitAuthFromToken, repoReadToken } from './tools/githubToken.js';
 
@@ -211,13 +212,16 @@ if (cfg.metrics) {
 if (cfg.mcp) {
   const mcpCfg = cfg.mcp;
   const access = new AccessVerifier({ teamDomain: mcpCfg.teamDomain, aud: mcpCfg.aud, emails: mcpCfg.emails, agents: mcpCfg.agents });
-  const mcpHandler = createMcpHandler({ tools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
+  // The Codex review tools join the MCP only. `tools` also feeds the /lab model loop, which must not be able to start a review.
+  const mcpTools = new Map(tools);
+  if (cfg.codexReview) for (const t of [queueCodexReviewTool(cfg.codexReview), codexReviewStatusTool(cfg.codexReview)]) mcpTools.set(t.name, t);
+  const mcpHandler = createMcpHandler({ tools: mcpTools, allowedPeer: mcpCfg.peer, verify: (jwt) => access.verify(jwt), log });
   const mcpServer = Bun.serve({
     hostname: mcpCfg.host,
     port: mcpCfg.port,
     fetch: (req, srv) => mcpHandler(req, srv.requestIP(req)?.address),
   });
-  log('lab MCP listening', { address: `${mcpCfg.host}:${mcpServer.port}`, peer: mcpCfg.peer, tools: [...tools.keys()] });
+  log('lab MCP listening', { address: `${mcpCfg.host}:${mcpServer.port}`, peer: mcpCfg.peer, tools: [...mcpTools.keys()] });
 } else {
   log('lab MCP off: LAB_ACCESS_AUD is not set');
 }

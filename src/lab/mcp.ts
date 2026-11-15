@@ -22,7 +22,7 @@ export const MCP_PATH = '/mcp/lab';
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const SERVER_INFO = { name: 'petedio-lab', version: '1.0.0' };
 const INSTRUCTIONS =
-  "Read-only tools for Pedro's homelab. For \"what is wrong right now\", call lab_overview first. Live state (pve_guests, pve_guest, kuma_status, systemd_status, desk_status) " +
+  "Tools for Pedro's homelab. All are reads except queue_codex_review, which starts a second-opinion Codex review. For \"what is wrong right now\", call lab_overview first. Live state (pve_guests, pve_guest, kuma_status, systemd_status, desk_status) " +
   'outranks the knowledge vault (find_host, host_note). Every result names what it read in `source`; a failed read is an error, never an empty result.';
 
 export interface McpDeps {
@@ -53,7 +53,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
     name: t.name,
     description: t.description,
     inputSchema: inputJsonSchema(t.input),
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: t.readOnly !== false, destructiveHint: false, openWorldHint: false },
   }));
 
   return async (req, peer) => {

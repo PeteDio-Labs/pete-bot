@@ -97,6 +97,11 @@ interface Config {
      * request.
      */
     notifyToken: string;
+    /**
+     * Bearer token for /v1/codex-review, which lab-agent calls for a thread. Its own token, so
+     * neither the notify nor the alert token can queue a review. Empty refuses every request.
+     */
+    codexReviewToken: string;
   };
 }
 
@@ -161,6 +166,7 @@ export const config: Config = {
     port: parseInt(getEnvVar('HTTP_SERVER_PORT', '3015'), 10),
     alertToken: getEnvVar('ALERT_BEARER_TOKEN', ''),
     notifyToken: getEnvVar('NOTIFY_BEARER_TOKEN', ''),
+    codexReviewToken: getEnvVar('CODEX_REVIEW_BEARER_TOKEN', ''),
   },
 };
 
