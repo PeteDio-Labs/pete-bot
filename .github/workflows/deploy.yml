@@ -74,9 +74,9 @@ jobs:
           role: pete-bot-cd
           jwtGithubAudience: https://github.com/PeteDio-Labs
           caCertificate: ${{ steps.vault_ca.outputs.b64 }}
-          exportToken: false
+          # The token signs the SSH certificate below. It is the only step that exports one.
+          exportToken: true
           secrets: |
-            kv/data/services/pete-bot deploy_ssh_private_key | LXC_SSH_KEY ;
             kv/data/services/pete-bot deploy_ssh_public_key | PB_CD_PUBLIC_KEY ;
             kv/data/services/pete-bot discord_token | PB_TOKEN ;
             kv/data/services/pete-bot discord_client_id | PB_CLIENT ;
@@ -312,10 +312,40 @@ jobs:
             kv/data/services/lab-agent-media mtrace_token | LAB_MTRACE_TOKEN ;
             kv/data/services/lab-agent-media bazarr_key | LAB_BAZARR_KEY
 
+      # No long-lived key. The job signs a fresh ed25519 key as the Vault SSH role `pete-bot-deploy`:
+      # a 30-minute certificate that opens root on 237 only, and only from the runners
+      # (petedio-iac vault-config/ssh.tf, docs/runbooks/host-deploys.md). Vault revokes the token as
+      # soon as it has signed. ⚠ THIS STEP RUNS AFTER EVERY OTHER VAULT READ, which each mint their
+      # own token, so the revoke cannot cut one off. A sealed Vault, a role that has not been
+      # applied, or a host that does not trust the CA fails the deploy here or at the play.
+      - name: Sign a pete-bot-deploy SSH certificate
+        run: |
+          umask 077
+          key="$RUNNER_TEMP/lxc_ssh_key"
+          ssh-keygen -q -t ed25519 -N '' -C pete-bot-deploy -f "$key"
+          python3 -c 'import json,sys; print(json.dumps({"public_key": open(sys.argv[1]).read().strip()}))' "$key.pub" > "$RUNNER_TEMP/sign.json"
+          printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > "$RUNNER_TEMP/vault.hdr"
+          if ! curl -sS --fail-with-body --cacert "$VAULT_CA" -m 15 -H @"$RUNNER_TEMP/vault.hdr" \
+              -X POST --data @"$RUNNER_TEMP/sign.json" \
+              https://192.168.50.223:8200/v1/ssh-client-signer/sign/pete-bot-deploy > "$RUNNER_TEMP/signed.json"; then
+            echo "::error title=deploy::Vault refused to sign the pete-bot-deploy key: $(head -c 300 "$RUNNER_TEMP/signed.json")"
+            exit 1
+          fi
+          python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["signed_key"].strip())' \
+            "$RUNNER_TEMP/signed.json" > "$key-cert.pub"
+          ssh-keygen -L -f "$key-cert.pub" | grep -q '^ *pete-bot-deploy$' \
+            || { echo "::error title=deploy::the certificate does not name the pete-bot-deploy principal"; exit 1; }
+          echo "signed: $(ssh-keygen -L -f "$key-cert.pub" | grep -E 'Valid:' | sed 's/^ *//')"
+          curl -sS --fail --cacert "$VAULT_CA" -m 10 -o /dev/null -H @"$RUNNER_TEMP/vault.hdr" \
+            -X POST https://192.168.50.223:8200/v1/auth/token/revoke-self \
+            || echo "::warning title=deploy::could not revoke the Vault token; it expires at the end of its 15-minute TTL"
+          rm -f "$RUNNER_TEMP/vault.hdr" "$RUNNER_TEMP/sign.json" "$RUNNER_TEMP/signed.json"
+        env:
+          VAULT_CA: ${{ github.workspace }}/iac/environments/homelab/vault-ca.crt
+
       - name: Stage the secrets as files, never as arguments
         run: |
           umask 077
-          printf '%s\n' "$LXC_SSH_KEY" > "$RUNNER_TEMP/lxc_ssh_key"
           python3 - <<'PY'
           import json, os
           json.dump({
@@ -396,6 +426,7 @@ jobs:
             -v "$PWD/pete-bot/scripts:/scripts:ro" \
             -v "$PWD/pete-bot:/src:ro" \
             -v "$RUNNER_TEMP/lxc_ssh_key:/key:ro" \
+            -v "$RUNNER_TEMP/lxc_ssh_key-cert.pub:/key-cert.pub:ro" \
             -v "$RUNNER_TEMP/extra.json:/extra.json:ro" \
             -w /iac/ansible \
             -e ANSIBLE_HOST_KEY_CHECKING=False \
@@ -411,3 +442,7 @@ jobs:
       # No off-box health check. The play already proves more from the target: it waits
       # on /health AND greps the journal for 'logged in as', which is what a bad token or
       # a revoked app breaks while /health stays perfectly green.
+
+      - name: Remove the staged key, certificate and secrets
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lxc_ssh_key" "$RUNNER_TEMP/lxc_ssh_key.pub" "$RUNNER_TEMP/lxc_ssh_key-cert.pub" "$RUNNER_TEMP/extra.json" "$RUNNER_TEMP/vault.hdr" "$RUNNER_TEMP/sign.json" "$RUNNER_TEMP/signed.json"
