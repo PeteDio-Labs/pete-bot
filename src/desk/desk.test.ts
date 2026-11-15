@@ -85,6 +85,14 @@ class FakeGitHub {
   async listReviews() {
     return this.reviews;
   }
+  issueComments: { author: string; body: string; htmlUrl: string; updatedAt: string }[] = [];
+  commentReads = 0;
+  onCommentRead: (() => void) | null = null;
+  async listComments() {
+    this.commentReads++;
+    this.onCommentRead?.();
+    return this.issueComments;
+  }
   async requiredChecks() {
     return null;
   }
@@ -231,6 +239,53 @@ describe('tiers 0 and 1', () => {
     expect(gh.merges).toEqual([HEAD]);
     expect(gh.comments.filter((c) => c.includes('failed'))).toHaveLength(1);
     expect(dms.filter((d) => d.buttons?.length)).toEqual([]);
+  });
+});
+
+describe('Claude reviews (DESK_CLAUDE_REVIEWERS)', () => {
+  const claudeLine = { author: 'petedillo', body: `Claude review: No blocking findings at ${HEAD.slice(0, 12)}`, htmlUrl: 'https://github.com/c/1', updatedAt: '2026-11-15T01:00:00Z' };
+  const on = { claudeReviewers: new Set(['petedillo']), authors: new Set(['petedio-cloud-threads[bot]']) };
+  beforeEach(() => {
+    gh.pull.author = 'petedio-cloud-threads[bot]';
+    gh.reviews = [];
+  });
+
+  it('merges tier 0 on the Claude review of the head with no Codex queued, and says so in the evidence', async () => {
+    gh.issueComments = [claudeLine];
+    const desk = makeDesk(on);
+    await desk.poll();
+    expect(queued).toEqual([]);
+    expect(gh.merges).toEqual([HEAD]);
+    expect(gh.comments.at(-1)).toContain('Claude review: No blocking findings (https://github.com/c/1)');
+  });
+
+  it('waits and queues nothing while no Claude review names the head', async () => {
+    gh.issueComments = [{ ...claudeLine, body: `Claude review: No blocking findings at ${'d'.repeat(12)}` }];
+    const desk = makeDesk(on);
+    await desk.poll();
+    expect(queued).toEqual([]);
+    expect(gh.merges).toEqual([]);
+  });
+
+  it('holds the merge when a second opinion is marked between reading the PR and approving it', async () => {
+    gh.issueComments = [claudeLine];
+    const store = new DeskStore(':memory:');
+    gh.onCommentRead = () => store.update(REPO, 5, { secondOpinionAt: '2026-11-15T01:00:01Z' });
+    const desk = makeDesk(on, store);
+    await desk.poll();
+    expect(gh.approvals).toEqual([]);
+    expect(gh.merges).toEqual([]);
+  });
+
+  it('reads no comments and keeps the Codex gate while the setting is empty', async () => {
+    gh.reviews = [];
+    gh.issueComments = [claudeLine];
+    const desk = makeDesk({ authors: new Set(['petedio-cloud-threads[bot]']) });
+    await desk.poll();
+    await settle(desk);
+    expect(gh.commentReads).toBe(0);
+    expect(queued).toHaveLength(1);
+    expect(gh.merges).toEqual([]);
   });
 });
 

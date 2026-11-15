@@ -213,7 +213,7 @@ export class GitHubApp {
   /** The PR's conversation comments (not inline review comments), oldest first. */
   async listComments(repo: string, n: number): Promise<PullComment[]> {
     const raw = await this.pages<RawComment>(`listing ${repo}#${n}'s comments`, `${this.repoPath(repo)}/issues/${n}/comments`);
-    return raw.map((c) => ({ author: c.user?.login ?? '', body: c.body ?? '', htmlUrl: c.html_url, createdAt: c.created_at }));
+    return raw.map((c) => ({ author: c.user?.login ?? '', body: c.body ?? '', htmlUrl: c.html_url, updatedAt: c.updated_at ?? c.created_at }));
   }
 
   /**
@@ -402,6 +402,7 @@ interface RawComment {
   body: string | null;
   html_url: string;
   created_at: string;
+  updated_at?: string;
 }
 
 interface RawReview {

@@ -33,23 +33,30 @@ function facts(over: Partial<Facts> = {}): Facts {
 describe('parsing the Claude review line', () => {
   const at = (body: string, author = 'petedillo') => claudeReviewOf(author, body, 'u', 't', ALLOWED);
   it('reads both verdicts, an optional heading and an upper-case SHA', () => {
-    expect(at(`Claude review: No blocking findings at ${HEAD.slice(0, 7)}\nmore`)).toMatchObject({ verdict: 'no-blocking', sha: 'aaaaaaa' });
-    expect(at('## Claude review: Changes requested at ABCDEF1')).toMatchObject({ verdict: 'changes-requested', sha: 'abcdef1' });
+    expect(at(`Claude review: No blocking findings at ${HEAD.slice(0, 12)}\nmore`)).toMatchObject({ verdict: 'no-blocking', sha: 'aaaaaaaaaaaa' });
+    expect(at('## Claude review: Changes requested at ABCDEF123456')).toMatchObject({ verdict: 'changes-requested', sha: 'abcdef123456' });
   });
   it('refuses an unlisted login, a missing or short SHA, a non-first line and a free-form verdict', () => {
-    expect(at('Claude review: No blocking findings at aaaaaaa', 'someone-else')).toBeNull();
+    expect(at('Claude review: No blocking findings at aaaaaaaaaaaa', 'someone-else')).toBeNull();
     expect(at('Claude review: No blocking findings')).toBeNull();
-    expect(at('Claude review: No blocking findings at aaaaaa')).toBeNull();
-    expect(at('intro\nClaude review: No blocking findings at aaaaaaa')).toBeNull();
-    expect(at('Claude review: Looks fine at aaaaaaa')).toBeNull();
+    expect(at('Claude review: No blocking findings at aaaaaaaaaaa')).toBeNull();
+    expect(at('claude review: no blocking findings at aaaaaaaaaaaa')).toBeNull();
+    expect(at('intro\nClaude review: No blocking findings at aaaaaaaaaaaa')).toBeNull();
+    expect(at('Claude review: Looks fine at aaaaaaaaaaaa')).toBeNull();
   });
   it('reads reviews and comments together', () => {
-    const r = { id: 1, author: 'petedillo', commitId: HEAD, state: 'COMMENTED', body: 'Claude review: No blocking findings at aaaaaaa', htmlUrl: 'r', submittedAt: '1' };
-    const c = { author: 'petedillo', body: 'chatter', htmlUrl: 'c', createdAt: '2' };
+    const r = { id: 1, author: 'petedillo', commitId: HEAD, state: 'COMMENTED', body: 'Claude review: No blocking findings at aaaaaaaaaaaa', htmlUrl: 'r', submittedAt: '1' };
+    const c = { author: 'petedillo', body: 'chatter', htmlUrl: 'c', updatedAt: '2' };
     expect(claudeReviews([r], [c], ALLOWED)).toHaveLength(1);
   });
+  it('ignores a dismissed or pending review, and dates a comment by its last edit', () => {
+    const r = { id: 1, author: 'petedillo', commitId: HEAD, state: 'COMMENTED', body: 'Claude review: Changes requested at aaaaaaaaaaaa', htmlUrl: 'r', submittedAt: '1' };
+    expect(claudeReviews([{ ...r, state: 'DISMISSED' }, { ...r, state: 'PENDING', submittedAt: '' }], [], ALLOWED)).toEqual([]);
+    const edited = { author: 'petedillo', body: 'Claude review: No blocking findings at aaaaaaaaaaaa', htmlUrl: 'c', updatedAt: '9' };
+    expect(claudeReviews([], [edited], ALLOWED)[0]!.at).toBe('9');
+  });
   it('picks the newest review of exactly this head and never the PR author’s own', () => {
-    const list = [claude('no-blocking', 'bbbbbbb'), claude('changes-requested', 'aaaaaaa', 'petedillo', '1'), claude('no-blocking', 'aaaaaaa', 'petedillo', '2')];
+    const list = [claude('no-blocking', 'bbbbbbbbbbbb'), claude('changes-requested', 'aaaaaaa', 'petedillo', '1'), claude('no-blocking', 'aaaaaaa', 'petedillo', '2')];
     expect(claudeOnHead(list, HEAD, 'bot')?.verdict).toBe('no-blocking');
     expect(claudeOnHead(list, HEAD, 'PeteDillo')).toBeNull();
   });
@@ -61,7 +68,7 @@ describe('the decision with Claude reviews on', () => {
   });
   it('waits, and queues nothing, while no Claude review names the head', () => {
     expect(decide(facts())).toEqual({ kind: 'wait', reason: 'waiting for a Claude review of the head' });
-    expect(decide(facts({ claude: [claude('no-blocking', 'bbbbbbb')] })).kind).toBe('wait');
+    expect(decide(facts({ claude: [claude('no-blocking', 'bbbbbbbbbbbb')] })).kind).toBe('wait');
   });
   it('holds on a Claude "Changes requested" of the head', () => {
     expect(decide(facts({ claude: [claude('changes-requested')] }))).toMatchObject({ kind: 'wait', reason: 'Claude requested changes on the head' });

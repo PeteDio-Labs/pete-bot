@@ -650,6 +650,12 @@ export class MergeDesk {
       await this.report(repo, n, { comment: msg, dm: `**Merge desk** · ${this.link(repo, f)}: merge failed: ${why.slice(0, 200)}` });
       return { ok: false, message: msg };
     };
+    // A thread may have queued a Codex second opinion after facts() read the memory. Read it again
+    // right before the approval, so a mark saved in that window still holds the merge.
+    if (by === 'claude' && store.get(repo, n).secondOpinionAt) {
+      this.deps.log.info(`merge desk: ${repo}#${n} got a Codex second opinion while the desk decided; waiting for Codex`);
+      return { ok: false, message: 'A Codex second opinion was queued for this PR, so it waits for Codex.' };
+    }
     try {
       await github.approve(repo, n, sha, `Merge desk: ${evidence}.`);
     } catch (err) {

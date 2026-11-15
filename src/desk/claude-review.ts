@@ -7,14 +7,18 @@
  *   Claude review: No blocking findings at <sha>
  *   Claude review: Changes requested at <sha>
  *
- * `<sha>` is the head the reviewer read, 7 to 40 hex characters. The desk reads only the
+ * `<sha>` is the head the reviewer read, 12 to 40 hex characters. The desk reads only the
  * author login and that first line, never the rest of the body.
  *
  * ⚠ THIS IS AN ATTESTATION, NOT AUTHENTICATION. A thread posts under whichever identity its
  * GitHub connector holds, so the desk cannot tell a real review from a typed line. What it
  * checks is narrow and mechanical: the login is on DESK_CLAUDE_REVIEWERS, it is not the PR
  * author's login (nobody reviews their own PR), and the SHA is the current head, so any
- * push voids the review. A "Changes requested" on the head holds the merge.
+ * push voids the review. An edited comment counts from its edit time. A dismissed review does not count.
+ *
+ * ⚠ KNOWN GAP. A thread that wrote the PR can post this line for its own head, because every
+ * thread posts under the same connector identity. The gate cannot tell the author thread from
+ * a reviewer thread. Pedro chose the list of logins knowing that. A "Changes requested" on the head holds the merge.
  *
  * Tier 2, and any PR with a Codex second opinion queued, still need Codex (decide.ts).
  */
@@ -36,23 +40,28 @@ export interface PullComment {
   author: string;
   body: string;
   htmlUrl: string;
-  createdAt: string;
+  /** When the comment was last edited, or created. An edit counts as a new post, so editing an old comment to name a new head dates it now. */
+  updatedAt: string;
 }
 
-const HEADER = /^(?:#{1,6}\s+)?Claude review: (Changes requested|No blocking findings) at ([0-9a-f]{7,40})\s*$/i;
+// The words are case-sensitive. Only the SHA may be upper case, which GitHub never shows but a person may type.
+const HEADER = /^(?:#{1,6}\s+)?Claude review: (Changes requested|No blocking findings) at ([0-9a-fA-F]{12,40})\s*$/;
 
 export function claudeReviewOf(author: string, body: string, url: string, at: string, allowed: ReadonlySet<string>): ClaudeReview | null {
   if (!allowed.has(author.toLowerCase())) return null;
   const first = body.split('\n', 1)[0]?.trim() ?? '';
   const m = HEADER.exec(first);
   if (!m) return null;
-  return { verdict: m[1]!.toLowerCase() === 'changes requested' ? 'changes-requested' : 'no-blocking', sha: m[2]!.toLowerCase(), author, url, at };
+  return { verdict: m[1] === 'Changes requested' ? 'changes-requested' : 'no-blocking', sha: m[2]!.toLowerCase(), author, url, at };
 }
 
 export function claudeReviews(reviews: Review[], comments: PullComment[], allowed: ReadonlySet<string>): ClaudeReview[] {
   return [
-    ...reviews.map((r) => claudeReviewOf(r.author, r.body, r.htmlUrl, r.submittedAt, allowed)),
-    ...comments.map((c) => claudeReviewOf(c.author, c.body, c.htmlUrl, c.createdAt, allowed)),
+    // A dismissed review no longer counts, and a pending one is not posted yet.
+    ...reviews
+      .filter((r) => r.state !== 'DISMISSED' && r.state !== 'PENDING' && r.submittedAt !== '')
+      .map((r) => claudeReviewOf(r.author, r.body, r.htmlUrl, r.submittedAt, allowed)),
+    ...comments.map((c) => claudeReviewOf(c.author, c.body, c.htmlUrl, c.updatedAt, allowed)),
   ].filter((r): r is ClaudeReview => r !== null);
 }
 
