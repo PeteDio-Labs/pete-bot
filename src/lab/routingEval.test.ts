@@ -7,6 +7,6 @@ describe('routing eval cases', () => {
     const names = new Set(TRACERR_SPECS.map((s) => s.name));
     for (const c of CASES) for (const n of c.expect) expect(names.has(n)).toBe(true);
     const covered = new Set(CASES.flatMap((c) => c.expect));
-    expect([...names].filter((n) => !covered.has(n))).toEqual(['partial_files']);
+    expect([...names].filter((n) => !covered.has(n))).toEqual(['list_partial_files']);
   });
 });

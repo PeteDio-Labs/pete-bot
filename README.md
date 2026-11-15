@@ -176,7 +176,7 @@ answers 404, and `lab-agent` starts without the route.
 
 | Tool | Reads |
 |---|---|
-| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
+| `find_in_library`, `trace_request`, `list_queue`, `list_queue_errors`, `diagnose_dead_download`, `check_vpn`, `check_seerr_drift`, `get_now_playing`, `check_storage_pools`, `check_disk_space`, `check_indexers`, `check_app_versions`, `list_partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
 | `search_knowledge` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
 ### Claude review as the desk's required review
@@ -226,8 +226,8 @@ wrong-tool rate with the tool count. Each answered question also writes `toolsOf
 the journal line `media ask answered`.
 
 **Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (library, trace_request, list_queue,
-queue_errors), `health` (vpn_health, why_is_it_dead, pool_health, disk_free, indexer_health), `audit` (seerr_drift,
-stale_versions, partial_files, now_playing), `subtitles` (check_subtitles, find_subtitles, request_action) and `search`
+list_queue_errors), `health` (check_vpn, diagnose_dead_download, check_storage_pools, check_disk_space, check_indexers), `audit` (check_seerr_drift,
+check_app_versions, list_partial_files, get_now_playing), `subtitles` (check_subtitles, find_subtitles, request_action) and `search`
 (search_knowledge). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
 To compare tool counts, restart with a different list and read the `tools` and `toolkits` labels.
 

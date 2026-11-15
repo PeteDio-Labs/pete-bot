@@ -19,7 +19,7 @@ const find = (name: string, fetchImpl: typeof fetch) => tracerrTools({ ...CFG, f
 describe('tracerr tools', () => {
   it('offers exactly the thirteen read tools', () => {
     expect(TRACERR_SPECS.map((s) => s.name).sort()).toEqual(
-      ['disk_free', 'indexer_health', 'library', 'list_queue', 'now_playing', 'partial_files', 'pool_health', 'queue_errors', 'seerr_drift', 'stale_versions', 'trace_request', 'vpn_health', 'why_is_it_dead'],
+      ['check_app_versions', 'check_disk_space', 'check_indexers', 'check_seerr_drift', 'check_storage_pools', 'check_vpn', 'diagnose_dead_download', 'find_in_library', 'get_now_playing', 'list_partial_files', 'list_queue', 'list_queue_errors', 'trace_request'],
     );
   });
 
@@ -71,13 +71,13 @@ describe('tracerr tools', () => {
     ['a non-JSON body', new Response('<html>', { status: 200 }), 'not JSON'],
     ['a JSON array', json([1, 2]), 'not an object'],
   ])('fails on %s', async (_n, response, expected) => {
-    const res = await callTool(find('vpn_health', (async () => response) as never), {});
+    const res = await callTool(find('check_vpn', (async () => response) as never), {});
     expect(res.ok).toBe(false);
     expect(!res.ok && res.error).toContain(expected);
   });
 
   it('fails when tracerr is unreachable', async () => {
-    const res = await callTool(find('vpn_health', (async () => { throw new Error('ECONNRESET'); }) as never), {});
+    const res = await callTool(find('check_vpn', (async () => { throw new Error('ECONNRESET'); }) as never), {});
     expect(!res.ok && res.error).toContain('unreachable (ECONNRESET)');
   });
 });

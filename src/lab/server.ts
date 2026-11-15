@@ -41,7 +41,7 @@ export interface LabServerDeps {
   mediaTools?: Map<string, LabTool>;
   /** The confirmed subtitle search (PET-869). Absent, /v1/media/act answers 404. */
   actBazarr?: (kind: 'series' | 'movie', id: number) => Promise<string>;
-  /** The confirmed download search: tracerr's search_missing for one title. Absent, a download act answers 404. */
+  /** The confirmed download search: tracerr's request_missing_search for one title. Absent, a download act answers 404. */
   actDownload?: (title: string, season?: number, kind?: 'series' | 'movie') => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
