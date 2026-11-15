@@ -51,7 +51,7 @@ describe('loadLabConfig', () => {
     expect(() => loadLabConfig({ ...baseEnv, LAB_PROVIDER: 'gateway' }, read)).toThrow('retired (PET-744)');
   });
 
-  it('turns plane_item on only with a token, and defaults the rest', () => {
+  it('turns get_plane_item on only with a token, and defaults the rest', () => {
     const cfg = loadLabConfig({ ...baseEnv, LAB_PLANE_TOKEN: 'p'.repeat(40) }, read);
     expect(cfg.plane).toEqual({
       baseUrl: 'http://192.168.50.235:8080',
@@ -114,7 +114,7 @@ describe('loadLabConfig', () => {
 });
 
 const guestsTool: LabTool = {
-  name: 'pve_guests',
+  name: 'list_guests',
   description: 'test',
   input: z.object({}),
   async run() {
@@ -162,16 +162,16 @@ describe('ask', () => {
 
   it('hands a failed read to the model as an error, not as an empty result', async () => {
     const seen: Array<Record<string, unknown>> = [];
-    const result = await ask('is anything down', tools, scripted([toolUse('t1', 'pve_guests', {}), final('The Proxmox read failed: HTTP 401.')], seen), 'm');
+    const result = await ask('is anything down', tools, scripted([toolUse('t1', 'list_guests', {}), final('The Proxmox read failed: HTTP 401.')], seen), 'm');
     const tr = ((seen[1]!.messages as Array<{ content: unknown }>)[2]!.content as Array<Record<string, unknown>>)[0]!;
-    expect(tr).toMatchObject({ is_error: true, content: 'pve_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)' });
-    expect(result.toolCalls).toEqual([{ name: 'pve_guests', ok: false }]);
+    expect(tr).toMatchObject({ is_error: true, content: 'list_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)' });
+    expect(result.toolCalls).toEqual([{ name: 'list_guests', ok: false }]);
     expect(result.answer).toContain('401');
   });
 
   it('keeps the error text of a failed read for the journal', async () => {
-    const result = await ask('is anything down', tools, scripted([toolUse('t1', 'pve_guests', {}), final('The Proxmox read failed.')]), 'm');
-    expect(result.toolErrors).toEqual([{ name: 'pve_guests', error: 'pve_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)' }]);
+    const result = await ask('is anything down', tools, scripted([toolUse('t1', 'list_guests', {}), final('The Proxmox read failed.')]), 'm');
+    expect(result.toolErrors).toEqual([{ name: 'list_guests', error: 'list_guests: Proxmox refused the token lab-agent@pve!audit (HTTP 401)' }]);
   });
 
   it('sends a plain failure, not the raw text, when the final answer is an unfinished tool call', async () => {
@@ -346,11 +346,11 @@ describe('/lab in pete-bot', () => {
   it('colours an answer with a failed read yellow and names the tools', () => {
     const outcome: LabOutcome = {
       kind: 'answer',
-      result: { answer: 'Proxmox read failed.', turns: 2, toolCalls: [{ name: 'pve_guests', ok: false }, { name: 'find_host', ok: true }], incomplete: false, usage: { input: 10, output: 5, cacheRead: 0 } },
+      result: { answer: 'Proxmox read failed.', turns: 2, toolCalls: [{ name: 'list_guests', ok: false }, { name: 'find_host', ok: true }], incomplete: false, usage: { input: 10, output: 5, cacheRead: 0 } },
     };
     const embed = labEmbed('is anything down', outcome).toJSON();
     expect(embed.color).toBe(0xfee75c);
-    expect(embed.footer?.text).toBe('2 turns · tools: pve_guests, find_host (1 failed) · 10 in / 5 out tokens');
+    expect(embed.footer?.text).toBe('2 turns · tools: list_guests, find_host (1 failed) · 10 in / 5 out tokens');
     expect(labEmbed('q', { kind: 'failed', reason: 'boom' }).toJSON().color).toBe(0xed4245);
   });
 });

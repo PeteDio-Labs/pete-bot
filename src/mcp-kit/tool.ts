@@ -32,6 +32,8 @@ export interface ToolOutput {
 
 export interface McpTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
+  /** Earlier names that still answer `tools/call`. `tools/list` shows only `name`. Remove an alias one release after a rename. */
+  aliases?: readonly string[];
   description: string;
   input: S;
   /**

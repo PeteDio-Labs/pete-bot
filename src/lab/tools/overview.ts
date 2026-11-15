@@ -1,7 +1,7 @@
 /**
- * lab_overview: what is wrong in the lab right now, in one call (PET-860).
+ * get_overview: what is wrong in the lab right now, in one call (PET-860).
  *
- * It runs four existing tools (kuma_status, pve_guests, desk_status, systemd_status) in
+ * It runs four existing tools (check_monitors, list_guests, check_merge_desk, check_services) in
  * parallel and folds their answers into one view. It reads nothing the four do not read.
  *
  * ⚠ EACH SECTION SUCCEEDS OR FAILS ON ITS OWN. A section that cannot read its source is
@@ -18,7 +18,7 @@ import { LabToolError, type LabTool } from './types.js';
 /** A desk poll older than this is stalled. The poll runs every few minutes, so an hour is far past late. */
 export const DESK_STALE_MS = 60 * 60 * 1000;
 
-export const OVERVIEW_SOURCES = ['kuma_status', 'pve_guests', 'desk_status', 'systemd_status'] as const;
+export const OVERVIEW_SOURCES = ['check_monitors', 'list_guests', 'check_merge_desk', 'check_services'] as const;
 
 type Section = { ok: true; [k: string]: unknown } | { ok: false; error: string };
 
@@ -44,16 +44,17 @@ export function labOverviewTool(tools: Map<string, LabTool>, now: () => number =
   };
 
   return {
-    name: 'lab_overview',
+    name: 'get_overview',
+    aliases: ['lab_overview'],
     description:
       'Start here to learn what is wrong in the lab right now. One call returns the monitors that are not up, the guests that ' +
       'are not running, the merge desk state and the unit state on 237, each read on its own. `attention` lists what to look at. ' +
       '`allSectionsRead` is false when a source could not be read, and then an empty `attention` does not mean healthy. ' +
-      'Use kuma_status, pve_guests, desk_status or systemd_status for detail.',
+      'Use check_monitors, list_guests, check_merge_desk or check_services for detail.',
     input,
     async run() {
       const [monitors, guests, desk, services] = await Promise.all([
-        guard('kuma_status', (r) => {
+        guard('check_monitors', (r) => {
           const all = list<{ name: string; status: string; since: string | null; message: string }>(r, 'monitors');
           return {
             ok: true,
@@ -61,7 +62,7 @@ export function labOverviewTool(tools: Map<string, LabTool>, now: () => number =
             notUp: all.filter((m) => m.status !== 'up').map((m) => ({ name: m.name, status: m.status, since: m.since, message: m.message })),
           };
         }),
-        guard('pve_guests', (r) => {
+        guard('list_guests', (r) => {
           const all = list<{ vmid: number; name: string; node: string; status: string }>(r, 'guests');
           const byNode: Record<string, number> = {};
           for (const g of all) byNode[g.node] = (byNode[g.node] ?? 0) + 1;
@@ -72,7 +73,7 @@ export function labOverviewTool(tools: Map<string, LabTool>, now: () => number =
             notRunning: all.filter((g) => g.status !== 'running').map((g) => ({ vmid: g.vmid, name: g.name, node: g.node, status: g.status })),
           };
         }),
-        guard('desk_status', (r) => {
+        guard('check_merge_desk', (r) => {
           const desk = r.data.desk as { mode?: unknown; lastPollAt?: string | null; lastPollError?: string | null };
           const at = desk.lastPollAt ?? null;
           const age = at ? now() - Date.parse(at) : null;
@@ -80,7 +81,7 @@ export function labOverviewTool(tools: Map<string, LabTool>, now: () => number =
           const stalled = age === null || Number.isNaN(age) || age > DESK_STALE_MS;
           return { ok: true, mode: desk.mode ?? null, lastPollAt: at, lastPollError: desk.lastPollError ?? null, stalled };
         }),
-        guard('systemd_status', (r) => {
+        guard('check_services', (r) => {
           const units = list<{ unit: string; active: string; sub: string; restarts: number | null; result: string }>(r, 'units');
           return {
             ok: true,

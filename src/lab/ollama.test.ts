@@ -9,13 +9,13 @@ describe('toOllamaMessages', () => {
       { role: 'user', content: 'where is plane' },
       { role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: 'find_host', input: { query: 'plane' } }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'vmid 235', is_error: false }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'call_2', name: 'pve_guests', input: {} }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'call_2', name: 'list_guests', input: {} }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_2', content: 'boom', is_error: true }] },
     ]);
     expect(out[0]).toEqual({ role: 'system', content: 'rules' });
     expect(out[2]).toEqual({ role: 'assistant', content: '', tool_calls: [{ function: { name: 'find_host', arguments: { query: 'plane' } } }] });
     expect(out[3]).toEqual({ role: 'tool', content: 'vmid 235', tool_name: 'find_host' });
-    expect(out[5]).toEqual({ role: 'tool', content: 'ERROR: boom', tool_name: 'pve_guests' });
+    expect(out[5]).toEqual({ role: 'tool', content: 'ERROR: boom', tool_name: 'list_guests' });
   });
 });
 

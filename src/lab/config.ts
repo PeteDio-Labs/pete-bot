@@ -50,17 +50,17 @@ const EnvSchema = z.object({
   LAB_ACCESS_EMAILS: z.string().optional(),
   // Agent service tokens for the lab MCP, `<client id>=<name>,...` (PET-904).
   LAB_ACCESS_AGENTS: z.string().optional(),
-  // plane_item (PET-672). The tool is offered only when the token is set, so a deploy that
+  // get_plane_item (PET-672). The tool is offered only when the token is set, so a deploy that
   // runs before the seed still starts.
   LAB_PLANE_URL: z.string().url().default('http://192.168.50.235:8080'),
   LAB_PLANE_WORKSPACE: z.string().min(1).default('petedio'),
-  // Project identifiers plane_item may read (PET-859). GOOF stays out: it is personal.
+  // Project identifiers get_plane_item may read (PET-859). GOOF stays out: it is personal.
   LAB_PLANE_PROJECTS: z.string().regex(/^[A-Z][A-Z0-9]{1,9}(,[A-Z][A-Z0-9]{1,9})*$/, 'must be identifiers such as PET,FOL').default('PET,FOL'),
   LAB_PLANE_TOKEN: TOKEN.optional(),
-  // search_lab (PET-745). The tool is offered only when the token is set.
+  // search_knowledge (PET-745). The tool is offered only when the token is set.
   LAB_SEARCH_URL: z.string().url().default('http://192.168.50.12:8526'),
   LAB_SEARCH_TOKEN: TOKEN.optional(),
-  // queue_codex_review and codex_review_status (the lab MCP only). Offered when the token is set;
+  // request_codex_review and check_codex_review (the lab MCP only). Offered when the token is set;
   // it is pete-bot's CODEX_REVIEW_BEARER_TOKEN, which opens /v1/codex-review alone.
   LAB_CODEX_REVIEW_URL: z.string().url().default('http://127.0.0.1:3015/v1/codex-review'),
   LAB_CODEX_REVIEW_TOKEN: TOKEN.optional(),

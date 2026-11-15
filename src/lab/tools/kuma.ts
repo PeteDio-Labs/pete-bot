@@ -1,5 +1,5 @@
 /**
- * kuma_status: what Uptime Kuma sees right now (PET-668).
+ * check_monitors: what Uptime Kuma sees right now (PET-668).
  *
  * Reads the public status-page JSON on Pete-Pi (`http://192.168.50.4:3001`), which needs no
  * credential: `/api/status-page/<slug>` lists the monitors and
@@ -99,7 +99,8 @@ export function kumaStatusTool(cfg: KumaConfig): LabTool {
     name: z.string().max(64).optional().describe('Only monitors whose name contains this text, case-insensitive'),
   });
   return {
-    name: 'kuma_status',
+    name: 'check_monitors',
+    aliases: ['kuma_status'],
     description:
       "Uptime Kuma's view of the lab right now: each monitor's status, since when, its last message, ping " +
       'and 24-hour uptime percentage.',

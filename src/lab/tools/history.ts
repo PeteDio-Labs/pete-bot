@@ -1,8 +1,8 @@
 /**
- * git_history: commits in the iac repos, by path or by text (PET-668).
+ * get_git_history: commits in the iac repos, by path or by text (PET-668).
  *
  * It answers "what changed on X, and which PET did it". The PET key comes from the commit
- * subject, since every squash-merge here names one. plane_item (PET-672) then names those keys.
+ * subject, since every squash-merge here names one. get_plane_item (PET-672) then names those keys.
  */
 import { z } from 'zod';
 import { GitClone } from './git.js';
@@ -31,7 +31,7 @@ export function parseLog(out: string): Commit[] {
 
 export function gitHistoryTool(clones: GitClone[]): LabTool {
   const names = clones.map((c) => c.name);
-  if (names.length === 0) throw new Error('git_history needs at least one clone');
+  if (names.length === 0) throw new Error('get_git_history needs at least one clone');
   const byName = new Map(clones.map((c) => [c.name, c]));
   const input = z.object({
     repo: z.enum(names as [string, ...string[]]).describe('Which repository to read'),
@@ -50,7 +50,8 @@ export function gitHistoryTool(clones: GitClone[]): LabTool {
     limit: z.number().int().min(1).max(50).default(15).describe('How many commits, newest first'),
   });
   return {
-    name: 'git_history',
+    name: 'get_git_history',
+    aliases: ['git_history'],
     description:
       `Recent commits on the default branch of ${names.join(' or ')}, newest first, with any PET keys from ` +
       'each subject. Filter by path, by message text, or both.',

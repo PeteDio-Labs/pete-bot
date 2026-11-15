@@ -4,7 +4,7 @@
  * WHY. Claude's review is the review of record. Codex is an optional second opinion, and a
  * thread asks for one when it wants it. Threads cannot reach codex-248, but this process can:
  * the desk's CodexQueue already holds the forced-command key (roles/codex, PET-591). A thread
- * reaches it through lab-agent's `queue_codex_review` tool, which calls /v1/codex-review.
+ * reaches it through lab-agent's `request_codex_review` tool, which calls /v1/codex-review.
  *
  * ⚠ SAME PATH, SAME LIMITS. The request goes through the desk's own CodexQueue, so it runs one
  * review at a time and the gate's repo-name check applies. It is also limited to DESK_REPOS,
