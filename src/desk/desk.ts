@@ -67,6 +67,9 @@ export interface DeskStatus {
   lastPollError: string | null;
   /** PRs read on the last poll, so "nothing to merge" and "read nothing" differ. */
   lastPollPrs: number;
+  /** Repos the last poll listed without error, out of reposConfigured. A repo the desk could not read is not "no PRs". */
+  reposRead: number;
+  reposConfigured: number;
   merged: number;
 }
 
@@ -140,6 +143,8 @@ export class MergeDesk {
       lastPollAt: null,
       lastPollError: null,
       lastPollPrs: 0,
+      reposRead: 0,
+      reposConfigured: 0,
       merged: 0,
     };
   }
@@ -293,6 +298,7 @@ export class MergeDesk {
     this.polling = true;
     this.cache.clear();
     let prs = 0;
+    let reposRead = 0;
     const errors: string[] = [];
     try {
       await this.deliverPending(errors);
@@ -304,6 +310,7 @@ export class MergeDesk {
           errors.push(`${repo}: ${String(err)}`);
           continue;
         }
+        reposRead++;
         for (const pull of pulls) {
           prs++;
           try {
@@ -322,9 +329,11 @@ export class MergeDesk {
       this.polling = false;
       this.state.lastPollAt = new Date().toISOString();
       this.state.lastPollPrs = prs;
+      this.state.reposRead = reposRead;
+      this.state.reposConfigured = this.deps.settings.repos.length;
       this.state.lastPollError = errors.length ? errors.slice(0, 3).join('; ').slice(0, 500) : null;
       for (const e of errors) this.deps.log.warn(`merge desk: ${e}`);
-      this.deps.log.info(`merge desk: read ${prs} open PRs in ${this.deps.settings.repos.length} repos, ${errors.length} errors`);
+      this.deps.log.info(`merge desk: read ${prs} open PRs in ${reposRead} of ${this.deps.settings.repos.length} repos, ${errors.length} errors`);
     }
   }
 

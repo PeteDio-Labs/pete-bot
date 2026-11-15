@@ -196,7 +196,19 @@ describe('tiers 0 and 1', () => {
     expect(gh.merges).toEqual([HEAD]);
     expect(gh.comments.at(-1)).toContain('merged as `mmmmmmm` on `main`');
     expect(dms).toEqual([]);
-    expect(desk.status()).toMatchObject({ merged: 1, lastPollPrs: 1, lastPollError: null });
+    expect(desk.status()).toMatchObject({ merged: 1, lastPollPrs: 1, reposRead: 1, reposConfigured: 1, lastPollError: null });
+  });
+
+  it('counts a repo it could not list as unread, not as empty', async () => {
+    const desk = makeDesk({ repos: [REPO, 'other-repo'] });
+    const list = gh.listOpenPulls.bind(gh);
+    gh.listOpenPulls = (async (repo?: string) => {
+      if (repo === 'other-repo') throw new Error('404 Not Found');
+      return list();
+    }) as typeof gh.listOpenPulls;
+    await desk.poll();
+    expect(desk.status()).toMatchObject({ reposRead: 1, reposConfigured: 2 });
+    expect(desk.status().lastPollError).toContain('other-repo');
   });
 
   it('merges nothing in dry-run, and says what it would have merged once', async () => {
