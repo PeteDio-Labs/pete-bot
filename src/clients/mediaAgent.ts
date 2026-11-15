@@ -3,7 +3,7 @@
  * lab-agent's POST /v1/media/ask with the ask bearer, plus the last few turns, and the
  * answer comes back as text.
  *
- * ⚠ ONLY THE ASK BEARER CROSSES, as with /lab. lab-agent holds the mtrace, Bazarr and
+ * ⚠ ONLY THE ASK BEARER CROSSES, as with /lab. lab-agent holds the tracerr, Bazarr and
  * Plex credentials; pete-bot sends a question and its history and nothing else.
  */
 import type { Proposal } from '../lab/tools/propose.js';

@@ -14,8 +14,8 @@ something to tell the owner. It adds no incident state.
 **The merge desk** merges low-risk PRs after a clean Codex review, and DMs a Merge button
 for the rest (PET-645).
 
-It asks [mtrace](https://github.com/PeteDio-Labs/petedio-media-control) nothing itself.
-`/ask` and plain-DM questions went in PET-518, when Muse took over asking mtrace.
+It asks [tracerr](https://github.com/PeteDio-Labs/petedio-media-control) nothing itself.
+`/ask` and plain-DM questions went in PET-518, when Muse took over asking tracerr.
 
 **The media assistant (PET-869)** brings plain DMs back, behind `MEDIA_CHAT=on` and off by
 default. The owner's DM text goes to lab-agent's `POST /v1/media/ask` with the last six turns, and the
@@ -176,15 +176,15 @@ answers 404, and `lab-agent` starts without the route.
 
 | Tool | Reads |
 |---|---|
-| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | mtrace on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
+| `library`, `trace_request`, `list_queue`, `queue_errors`, `why_is_it_dead`, `vpn_health`, `seerr_drift`, `now_playing`, `pool_health`, `disk_free`, `indexer_health`, `stale_versions`, `partial_files` | tracerr on 237, `POST /api/tool/<name>`, read-only. An `ok:false` answer reaches the model as a finding |
 | `search_lab` | petedio-search, when `LAB_SEARCH_TOKEN` is set |
 
-`LAB_MTRACE_TOKEN` is lab-agent's own mtrace caller (`token_lab-agent`), never pete-bot's. 237 reaches mtrace on
+`LAB_MTRACE_TOKEN` is lab-agent's own tracerr caller (`token_lab-agent`), never pete-bot's. 237 reaches tracerr on
 its own LAN address through the `lo` rule in the nftables allowlist. `LAB_OLLAMA_URL` now defaults to
 CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the port.
 
 `scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
-mtrace's `GET /api/tools` with the list in `src/lab/tools/mtrace.ts` and fails on any difference, calls all
+tracerr's `GET /api/tools` with the list in `src/lab/tools/tracerr.ts` and fails on any difference, calls all
 thirteen tools, and with `--ask "<question>"` runs the model loop. A Mac session runs it (MED-4).
 
 ### Routing metrics
@@ -428,7 +428,7 @@ src/
 
 An Ollama tool-calling bot for Mission Control, ArgoCD and Kubernetes. All three are torn
 down, so the tool layer, the SSE event stream, the plan-expiry sweep and the HMAC-gated
-Mission Control routes are gone with them. It then forwarded `/ask` and plain DMs to mtrace
+Mission Control routes are gone with them. It then forwarded `/ask` and plain DMs to tracerr
 until PET-518 handed that job to Muse.
 
 ## Deployment

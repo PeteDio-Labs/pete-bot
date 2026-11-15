@@ -1,27 +1,27 @@
 /**
- * The media tools (PET-869): mtrace's thirteen read-only tools as lab tools, so the media
- * assistant's Qwen loop can ask "where is X stuck" and read the verdict mtrace computed.
+ * The media tools (PET-869): tracerr's thirteen read-only tools as lab tools, so the media
+ * assistant's Qwen loop can ask "where is X stuck" and read the verdict tracerr computed.
  *
- * mtrace picks nothing here. The model picks a tool by its description and mtrace's
- * backend decides the verdict (vault Systems/mtrace.md, "The router picks; the backend
- * decides"), so a wrong answer is an mtrace bug, not a prompt to retune.
+ * tracerr picks nothing here. The model picks a tool by its description and tracerr's
+ * backend decides the verdict (vault Systems/tracerr.md, "The router picks; the backend
+ * decides"), so a wrong answer is an tracerr bug, not a prompt to retune.
  *
- * ⚠ THE ARGUMENT SCHEMAS ARE COPIED FROM media-control/src/tools.ts (skill `mtrace`). They
- * can drift when mtrace changes, so scripts/media-probe.ts compares this list with the live
+ * ⚠ THE ARGUMENT SCHEMAS ARE COPIED FROM media-control/src/tools.ts (skill `tracerr`). They
+ * can drift when tracerr changes, so scripts/media-probe.ts compares this list with the live
  * `GET /api/tools` and fails on any difference.
  *
- * ⚠ `{ok:false}` FROM mtrace IS A FINDING, NOT A TOOL FAILURE. mtrace answers HTTP 200 with
+ * ⚠ `{ok:false}` FROM tracerr IS A FINDING, NOT A TOOL FAILURE. tracerr answers HTTP 200 with
  * `{ok:false, error}` when it cannot read a backend ("sonarr is not answering"). The tool
  * returns that text as data so the model reports it. A non-2xx, a non-JSON body or an
- * unreachable mtrace throws, because then mtrace itself did not answer.
+ * unreachable tracerr throws, because then tracerr itself did not answer.
  *
  * ⚠ READ-ONLY BY CONSTRUCTION. Only POST /api/tool/<name> for the thirteen names below is
- * called. mtrace has no write tool, and this module has no other route.
+ * called. tracerr has no write tool, and this module has no other route.
  */
 import { z } from 'zod';
 import { fetchWithTimeout, LabToolError, type LabTool } from './types.js';
 
-export interface MtraceConfig {
+export interface TracerrConfig {
   /** Such as http://192.168.50.237:8237 (237 reaches itself through the `lo` allowlist rule). */
   baseUrl: string;
   token: string;
@@ -41,7 +41,7 @@ interface Spec {
   input: z.ZodObject<z.ZodRawShape>;
 }
 
-export const MTRACE_SPECS: Spec[] = [
+export const TRACERR_SPECS: Spec[] = [
   {
     name: 'library',
     description: 'What is in the library: "do I have X", "how many seasons", "is X complete". With no title, a whole-library summary.',
@@ -89,12 +89,12 @@ export const MTRACE_SPECS: Spec[] = [
   },
 ];
 
-export function mtraceTools(cfg: MtraceConfig): LabTool[] {
-  return MTRACE_SPECS.map((spec) => ({
+export function tracerrTools(cfg: TracerrConfig): LabTool[] {
+  return TRACERR_SPECS.map((spec) => ({
     name: spec.name,
     description: spec.description,
     input: spec.input,
-    // The model passes `title` to no-argument tools. mtrace is read-only, so drop that key only.
+    // The model passes `title` to no-argument tools. tracerr is read-only, so drop that key only.
     ...(Object.keys(spec.input.shape).includes('title') ? {} : { ignoredKeys: ['title'] }),
     async run(args: Record<string, unknown>) {
       const url = `${cfg.baseUrl.replace(/\/$/, '')}/api/tool/${spec.name}`;
@@ -108,12 +108,12 @@ export function mtraceTools(cfg: MtraceConfig): LabTool[] {
           redirect: 'error',
         },
         cfg.timeoutMs ?? 40_000,
-        'mtrace',
+        'tracerr',
       );
-      if (res.status === 401 || res.status === 403) throw new LabToolError(`mtrace refused the lab-agent token (HTTP ${res.status})`);
-      if (res.status === 404) throw new LabToolError(`mtrace has no tool named ${spec.name} (HTTP 404); the tool list has drifted`);
+      if (res.status === 401 || res.status === 403) throw new LabToolError(`tracerr refused the lab-agent token (HTTP ${res.status})`);
+      if (res.status === 404) throw new LabToolError(`tracerr has no tool named ${spec.name} (HTTP 404); the tool list has drifted`);
       if (res.status === 502) {
-        // mtrace answers 502 with { ok: false, error } when a tool cannot read the stack (PET-638).
+        // tracerr answers 502 with { ok: false, error } when a tool cannot read the stack (PET-638).
         let detail = '';
         try {
           const failed = (await res.json()) as { error?: unknown };
@@ -121,19 +121,19 @@ export function mtraceTools(cfg: MtraceConfig): LabTool[] {
         } catch {
           // A 502 from a proxy has no JSON body; the status alone is the message.
         }
-        throw new LabToolError(`mtrace could not run ${spec.name} (HTTP 502)${detail}`);
+        throw new LabToolError(`tracerr could not run ${spec.name} (HTTP 502)${detail}`);
       }
-      if (!res.ok) throw new LabToolError(`mtrace answered HTTP ${res.status} for ${spec.name}`);
+      if (!res.ok) throw new LabToolError(`tracerr answered HTTP ${res.status} for ${spec.name}`);
       let body: unknown;
       try {
         body = await res.json();
       } catch {
-        throw new LabToolError(`mtrace answered ${spec.name} with a body that is not JSON`);
+        throw new LabToolError(`tracerr answered ${spec.name} with a body that is not JSON`);
       }
-      if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new LabToolError(`mtrace answered ${spec.name} with a body that is not an object`);
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new LabToolError(`tracerr answered ${spec.name} with a body that is not an object`);
       const ok = (body as { ok?: unknown }).ok;
       return {
-        source: `mtrace ${spec.name}${ok === false ? ' (mtrace reports a finding: ok=false)' : ''}`,
+        source: `tracerr ${spec.name}${ok === false ? ' (tracerr reports a finding: ok=false)' : ''}`,
         data: body,
       };
     },

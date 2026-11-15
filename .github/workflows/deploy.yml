@@ -271,7 +271,7 @@ jobs:
             kv/data/services/lab-agent-plane token | LAB_PLANE_TOKEN ;
             kv/data/services/lab-agent-search token | LAB_SEARCH_TOKEN
 
-      # The media assistant's mtrace token and Bazarr key (PET-869). Absent path allowed,
+      # The media assistant's tracerr token and Bazarr key (PET-869). Absent path allowed,
       # as above. The play refuses a deploy that would drop an installed token, so once
       # scripts/seed-lab-agent-media.sh has run, this read is what keeps deploy-on-merge
       # from failing closed. pete-bot-cd needs the policy from apply-vault-config.sh first:

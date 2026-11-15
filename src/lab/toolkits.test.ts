@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import { ALL_TOOLKITS, MEDIA_TOOLKITS, parseToolkits, selectMediaTools } from './toolkits.js';
-import { MTRACE_SPECS } from './tools/mtrace.js';
+import { TRACERR_SPECS } from './tools/tracerr.js';
 import type { LabTool } from './tools/types.js';
 
 const tool = (name: string): LabTool => ({ name, description: 'd', input: z.object({}), run: async () => ({ source: 's', data: {} }) });
@@ -26,9 +26,9 @@ describe('toolkits', () => {
     const placed = Object.values(MEDIA_TOOLKITS).flat();
     for (const n of ['bazarr_status', 'bazarr_find', 'search_lab', 'propose_action']) expect(placed).toContain(n);
   });
-  it('places every mtrace tool in exactly one kit', () => {
+  it('places every tracerr tool in exactly one kit', () => {
     const placed = Object.values(MEDIA_TOOLKITS).flat();
     expect(new Set(placed).size).toBe(placed.length);
-    for (const s of MTRACE_SPECS) expect(placed).toContain(s.name);
+    for (const s of TRACERR_SPECS) expect(placed).toContain(s.name);
   });
 });
