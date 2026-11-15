@@ -1,5 +1,5 @@
 /**
- * propose_action (PET-869): how the model asks for a change.
+ * request_action (PET-869): how the model asks for a change.
  *
  * ⚠ THIS TOOL CHANGES NOTHING. It validates a request and returns a proposal. The server
  * hands the proposal to pete-bot, which shows a Confirm button, and a tap by the owner runs
@@ -18,7 +18,7 @@ import { LabToolError, type LabTool } from './types.js';
 
 /** Mirrors UPDATE_TARGETS in src/clients/githubActions.ts. A test keeps the two equal. */
 export const PROPOSE_TARGETS = ['plex', 'sonarr', 'radarr', 'prowlarr', 'bazarr', 'arr', 'plex-and-arr'] as const;
-export const PROPOSE_TOOL = 'propose_action';
+export const PROPOSE_TOOL = 'request_action';
 
 export type Proposal =
   | { action: 'subtitles'; kind: BazarrKind; id: number; title: string; label: string; confirm: true }
@@ -71,19 +71,19 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
     input,
     async run({ action, title, target, season, question, options, kind }: z.infer<typeof input>) {
       if (action === 'choose') {
-        if (!question || !options) throw new LabToolError('propose_action: choose needs a question and two to four options');
+        if (!question || !options) throw new LabToolError('request_action: choose needs a question and two to four options');
         const proposal: Proposal = { action: 'choose', label: question, options, confirm: false };
         return { source: 'a clarification card', data: { proposal, pending: 'The user sees buttons and taps one. Nothing has run. Say only that you need them to pick.' } };
       }
       if (action === 'download' || action === 'subtitles') {
-        if (!title) throw new LabToolError(`propose_action: ${action} needs a title`);
-        if (!bazarr) throw new LabToolError('propose_action: the library list is not configured on this host, so a title cannot be resolved');
+        if (!title) throw new LabToolError(`request_action: ${action} needs a title`);
+        if (!bazarr) throw new LabToolError('request_action: the library list is not configured on this host, so a title cannot be resolved');
         const reply = (m: Item) =>
           action === 'subtitles'
             ? `Search subtitles for the ${m.kind} ${m.title}`
             : `Download ${m.kind === 'series' && season !== undefined ? `season ${season} of ` : ''}the ${m.kind} ${m.title}`;
         const r = resolve(await listItems(bazarr), title, kind, reply);
-        if ('none' in r) throw new LabToolError(`propose_action: no show or movie in the library matches "${title.slice(0, 60)}". Ask the user with a choose card whether to try another spelling.`);
+        if ('none' in r) throw new LabToolError(`request_action: no show or movie in the library matches "${title.slice(0, 60)}". Ask the user with a choose card whether to try another spelling.`);
         if ('card' in r) return { source: `library: "${title.slice(0, 60)}" needs a choice`, data: { proposal: r.card, pending: 'A card was made for the user. Nothing has run.' } };
         const m = r.item;
         if (action === 'subtitles') {
@@ -106,7 +106,7 @@ export function proposeActionTool(bazarr: BazarrConfig | undefined, tracerr?: Tr
         };
         return { source: `library: one title matched "${title.slice(0, 60)}"`, data: { proposal, pending: 'The user must tap Confirm. Nothing has run.' } };
       }
-      if (!target || (action !== 'update_check' && action !== 'update_apply')) throw new LabToolError(`propose_action: ${action} needs a target (${PROPOSE_TARGETS.join(', ')})`);
+      if (!target || (action !== 'update_check' && action !== 'update_apply')) throw new LabToolError(`request_action: ${action} needs a target (${PROPOSE_TARGETS.join(', ')})`);
       const proposal: Proposal =
         action === 'update_check'
           ? { action, target, label: `Check updates for ${target}`, confirm: false }

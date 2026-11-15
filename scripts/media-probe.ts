@@ -14,7 +14,7 @@
  *   3. All thirteen tools through the code the assistant uses (src/lab/tools/tracerr.ts), with
  *      timings. An `ok=false` finding is printed as a finding, not a failure.
  *   4. With BAZARR_API_KEY set (read the key in Bazarr's config.yaml on 222, never print it):
- *      bazarr_status, bazarr_find for PROBE_TITLE, and propose_action for it. These only read
+ *      check_subtitles, find_subtitles for PROBE_TITLE, and request_action for it. These only read
  *      and resolve. The probe never runs the subtitle search, which only a Confirm tap runs.
  *   5. With --ask, the whole loop: the question goes to Ollama (OLLAMA_URL, default
  *      http://192.168.50.246:11434) with the thirteen tools, and the probe prints which tools the
@@ -126,9 +126,9 @@ console.log(`      examined ${ran} of ${tools.length} tools; trace_request used 
 if (process.env.BAZARR_API_KEY) {
   const bz = { baseUrl: process.env.BAZARR_URL ?? 'http://192.168.50.222:6767', apiKey: process.env.BAZARR_API_KEY, timeoutMs: 30_000 };
   const checks: Array<[string, ReturnType<typeof bazarrFindTool>, Record<string, unknown>]> = [
-    ['bazarr_status', bazarrStatusTool(bz), {}],
-    ['bazarr_find', bazarrFindTool(bz), { title: TITLE }],
-    ['propose_action (resolve only)', proposeActionTool(bz), { action: 'subtitles', title: TITLE }],
+    ['check_subtitles', bazarrStatusTool(bz), {}],
+    ['find_subtitles', bazarrFindTool(bz), { title: TITLE }],
+    ['request_action (resolve only)', proposeActionTool(bz), { action: 'subtitles', title: TITLE }],
   ];
   for (const [label, tool, args] of checks) {
     const started = Date.now();

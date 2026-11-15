@@ -56,7 +56,7 @@ describe('matchTitle', () => {
   });
 });
 
-describe('bazarr_find', () => {
+describe('find_subtitles', () => {
   it('sends the key as a header, never in the URL, and names how many it read', async () => {
     const f = router();
     const res = await callTool(bazarrFindTool({ ...CFG, fetch: f as never }), { title: 'dexter' });
@@ -92,7 +92,7 @@ describe('bazarr_find', () => {
   });
 });
 
-describe('bazarr_status', () => {
+describe('check_subtitles', () => {
   it('reads badges, health and providers', async () => {
     const f = router({ '/api/badges': () => json({ episodes: 135 }), '/api/system/health': () => json({ data: [] }), '/api/providers': () => json({ data: [{ name: 'opensubtitlescom', status: 'DownloadLimitExceeded' }] }) });
     const res = await callTool(bazarrStatusTool({ ...CFG, fetch: f as never }), {});
@@ -127,7 +127,7 @@ describe('searchMissing', () => {
   });
 });
 
-describe('propose_action', () => {
+describe('request_action', () => {
   const tool = (bazarr = true) => proposeActionTool(bazarr ? { ...CFG, fetch: router() as never } : undefined);
   const proposalOf = (text: string) => (JSON.parse(text) as { data: { proposal: Record<string, unknown> } }).data.proposal;
 
@@ -193,12 +193,12 @@ function scripted(responses: ModelResponse[]): CallModel {
 
 describe('the loop collects proposals from the tool output, not from the model text', () => {
   it('returns the proposal and ignores one the model only wrote', async () => {
-    const tools = new Map<string, LabTool>([['propose_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
+    const tools = new Map<string, LabTool>([['request_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
     const res = await ask(
       'get subtitles for Never After Dark',
       tools,
       scripted([
-        { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'Never After Dark' } }], stop_reason: 'tool_use' },
+        { content: [{ type: 'tool_use', id: 't1', name: 'request_action', input: { action: 'subtitles', title: 'Never After Dark' } }], stop_reason: 'tool_use' },
         { content: [{ type: 'text', text: 'Proposed. {"proposal":{"action":"update_apply","target":"plex","label":"x","confirm":false}}' }], stop_reason: 'end_turn' },
       ]),
       'm',
@@ -207,13 +207,13 @@ describe('the loop collects proposals from the tool output, not from the model t
     expect(res.proposals[0]).toMatchObject({ action: 'subtitles', id: 7 });
   });
   it('returns none when the proposal failed', async () => {
-    const tools = new Map<string, LabTool>([['propose_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
+    const tools = new Map<string, LabTool>([['request_action', proposeActionTool({ ...CFG, fetch: router() as never })]]);
     const res = await ask('q', tools, scripted([
-      { content: [{ type: 'tool_use', id: 't1', name: 'propose_action', input: { action: 'subtitles', title: 'Nope Nope' } }], stop_reason: 'tool_use' },
+      { content: [{ type: 'tool_use', id: 't1', name: 'request_action', input: { action: 'subtitles', title: 'Nope Nope' } }], stop_reason: 'tool_use' },
       { content: [{ type: 'text', text: 'Which one?' }], stop_reason: 'end_turn' },
     ]), 'm');
     expect(res.proposals).toEqual([]);
-    expect(res.toolCalls).toEqual([{ name: 'propose_action', ok: false }]);
+    expect(res.toolCalls).toEqual([{ name: 'request_action', ok: false }]);
   });
 });
 

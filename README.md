@@ -227,7 +227,7 @@ the journal line `media ask answered`.
 
 **Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (library, trace_request, list_queue,
 queue_errors), `health` (vpn_health, why_is_it_dead, pool_health, disk_free, indexer_health), `audit` (seerr_drift,
-stale_versions, partial_files, now_playing), `subtitles` (bazarr_status, bazarr_find, propose_action) and `search`
+stale_versions, partial_files, now_playing), `subtitles` (check_subtitles, find_subtitles, request_action) and `search`
 (search_knowledge). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
 To compare tool counts, restart with a different list and read the `tools` and `toolkits` labels.
 
@@ -238,7 +238,7 @@ To compare tool counts, restart with a different list and read the `tools` and `
 
 ### Changes need your tap (PET-869)
 
-The model cannot change anything. Its `propose_action` tool validates a request and returns a
+The model cannot change anything. Its `request_action` tool validates a request and returns a
 proposal, and lab-agent hands the proposals to pete-bot with the answer. Three actions exist:
 
 | Action | Runs | Confirm |

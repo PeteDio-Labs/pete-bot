@@ -1,7 +1,7 @@
 /**
  * Bazarr for the media assistant (PET-869): two reads and one write.
  *
- * `bazarr_status` and `bazarr_find` are read tools the model may call. `searchMissing` is NOT
+ * `check_subtitles` and `find_subtitles` are read tools the model may call. `searchMissing` is NOT
  * a tool. Only POST /v1/media/act reaches it, after you tapped Confirm in Discord.
  *
  * ⚠ BAZARR'S API NEEDS THE KEY FOR EVERY CALL (401 without it, MED-3), sent as X-API-KEY.
@@ -9,7 +9,7 @@
  *
  * ⚠ THE WRITE IS ONE ACTION ON ONE ITEM. `search-missing` on a series id or `search-missing`
  * on a movie id asks the enabled providers for subtitles the item lacks. It deletes and
- * replaces nothing. The id must be a whole number found by bazarr_find, never a title.
+ * replaces nothing. The id must be a whole number found by find_subtitles, never a title.
  *
  * ⚠ A FAILED CALL IS AN ERROR. A 401, a timeout or a non-JSON body throws, so it never
  * reads as "no subtitles missing". OpenSubtitles.com's free tier stops at 20 downloads a
@@ -124,7 +124,8 @@ export function bazarrFindTool(cfg: BazarrConfig): LabTool {
     missingOnly: z.boolean().optional().describe('true lists the series and movies that lack subtitles. Use it with no title to answer "which titles are missing subtitles".'),
   });
   return {
-    name: 'bazarr_find',
+    name: 'find_subtitles',
+    aliases: ['bazarr_find'],
     description:
       'Find a series or movie in Bazarr and see how many subtitles it is missing, or list every title that lacks subtitles (missingOnly). Use it before proposing a subtitle search.',
     input,
@@ -144,7 +145,8 @@ export function bazarrFindTool(cfg: BazarrConfig): LabTool {
 export function bazarrStatusTool(cfg: BazarrConfig): LabTool {
   const input = z.object({});
   return {
-    name: 'bazarr_status',
+    name: 'check_subtitles',
+    aliases: ['bazarr_status'],
     description: 'Bazarr health: its problems, how many episodes and movies lack subtitles, and whether a subtitle provider is throttled.',
     input,
     async run() {

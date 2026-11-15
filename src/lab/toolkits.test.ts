@@ -16,7 +16,7 @@ describe('toolkits', () => {
     expect(() => parseToolkits('core,helth')).toThrow(/no such toolkit: helth/);
   });
   it('keeps only the tools of the chosen kits, in their original order', () => {
-    const all = ['library', 'vpn_health', 'seerr_drift', 'propose_action', 'search_knowledge'].map(tool);
+    const all = ['library', 'vpn_health', 'seerr_drift', 'request_action', 'search_knowledge'].map(tool);
     expect([...selectMediaTools(all, ['core', 'audit']).keys()]).toEqual(['library', 'seerr_drift']);
   });
   it('refuses names that only exist on Object.prototype', () => {
@@ -24,7 +24,7 @@ describe('toolkits', () => {
   });
   it('places the bazarr, search and propose tools in a kit', () => {
     const placed = Object.values(MEDIA_TOOLKITS).flat();
-    for (const n of ['bazarr_status', 'bazarr_find', 'search_knowledge', 'propose_action']) expect(placed).toContain(n);
+    for (const n of ['check_subtitles', 'find_subtitles', 'search_knowledge', 'request_action']) expect(placed).toContain(n);
   });
   it('places every tracerr tool in exactly one kit', () => {
     const placed = Object.values(MEDIA_TOOLKITS).flat();

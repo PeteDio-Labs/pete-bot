@@ -16,7 +16,7 @@ export const MEDIA_TOOLKITS: Record<string, readonly string[]> = {
   core: ['library', 'trace_request', 'list_queue', 'queue_errors'],
   health: ['vpn_health', 'why_is_it_dead', 'pool_health', 'disk_free', 'indexer_health'],
   audit: ['seerr_drift', 'stale_versions', 'partial_files', 'now_playing'],
-  subtitles: ['bazarr_status', 'bazarr_find', 'propose_action'],
+  subtitles: ['check_subtitles', 'find_subtitles', 'request_action'],
   search: ['search_knowledge'],
 };
 
