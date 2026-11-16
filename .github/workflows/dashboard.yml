@@ -31,6 +31,10 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
+      - name: Bundle the API Lambda
+        run: |
+          bun run build:api
+          test -s api/dist/handler.mjs
       - name: Accessibility (axe, WCAG 2.2 AA)
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome

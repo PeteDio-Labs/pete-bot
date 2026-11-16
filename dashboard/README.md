@@ -29,3 +29,10 @@ the service switch panel with a watchdog per side, and the Plane summary. Mobile
 ## Data
 
 The fixture holds synthetic values and example hostnames. Staging serves it and reads nothing from the lab.
+
+## The AWS API (`api/`)
+
+One Lambda (`nodejs22.x`, arm64, handler `handler.handler`) and one DynamoDB table `dash`. The header of
+`api/handler.ts` lists the routes and keys. `bun run build:api` writes `api/dist/handler.mjs`, with the AWS SDK left
+to the runtime. The function never stamps a check time, refuses a watchdog record dated in the future, and records a
+switch request without moving anything. Tests use an in-memory table.

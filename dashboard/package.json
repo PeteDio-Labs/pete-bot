@@ -8,7 +8,8 @@
     "dev": "bun run build.ts && bun run serve.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:a11y": "bun run test/a11y.ts"
+    "test:a11y": "bun run test/a11y.ts",
+    "build:api": "bun build api/handler.ts --target=node --format=esm --outfile=api/dist/handler.mjs --external '@aws-sdk/*'"
   },
   "dependencies": {
     "preact": "11.2.0",
