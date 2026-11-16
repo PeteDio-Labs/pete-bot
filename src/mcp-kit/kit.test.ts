@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { createMcpHandler, McpToolError, redact, type McpTool } from './index.js';
+import { callTool, createMcpHandler, McpToolError, redact, type McpTool } from './index.js';
 import { runContract } from './contract.js';
 
 // Credential-shaped canaries are joined at run time, so no literal in this file looks like a
@@ -138,5 +138,11 @@ describe('errors and the write tier', () => {
     expect(logs.at(-1)).toMatchObject({ tool: 'get_thing', alias: 'old_thing', ok: true });
     const list = (await (await rpc('tools/list', {})).json()) as { result: { tools: Array<{ name: string }> } };
     expect(list.result.tools.map((t) => t.name)).toEqual(['get_thing']);
+  });
+  test('nullMeansOmitted drops a null optional key, and a null required key is still missing', async () => {
+    const tool = (nullMeansOmitted: boolean): McpTool => ({ name: 't', nullMeansOmitted, description: 'x', input: z.object({ title: z.string(), season: z.number().int().optional() }), tier: 'read', run: async (i) => ({ source: 's', data: i }) });
+    expect(await callTool(tool(true), { title: 'X', season: null })).toMatchObject({ ok: true });
+    expect(await callTool(tool(true), { title: null })).toMatchObject({ ok: false });
+    expect(await callTool(tool(false), { title: 'X', season: null })).toMatchObject({ ok: false });
   });
 });

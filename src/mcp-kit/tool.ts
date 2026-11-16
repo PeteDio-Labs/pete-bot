@@ -44,6 +44,12 @@ export interface McpTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
    */
   ignoredKeys?: readonly string[];
   /**
+   * Treat a key whose value is `null` as not given. Models send `null` for an optional argument
+   * they skip, and a strict schema refuses it. A required key sent as `null` still fails as
+   * missing. Set it only on a read-only tool.
+   */
+  nullMeansOmitted?: boolean;
+  /**
    * `read` changes nothing outside this process. `write` starts or changes something, such as a
    * queued review, and sets `readOnlyHint` false. A server lists only the tiers it was built to
    * expose (see createMcpHandler `exposeTiers`), so a tool outside them is an unknown tool.
@@ -87,7 +93,11 @@ export async function callTool(
     ignored?.length && rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
       ? Object.fromEntries(Object.entries(rawInput).filter(([k]) => !ignored.includes(k)))
       : rawInput;
-  const parsed = schema.safeParse(input ?? {});
+  const cleaned =
+    tool.nullMeansOmitted && input && typeof input === 'object' && !Array.isArray(input)
+      ? Object.fromEntries(Object.entries(input).filter(([, v]) => v !== null))
+      : input;
+  const parsed = schema.safeParse(cleaned ?? {});
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`);
     return { ok: false, error: `${tool.name}: invalid input: ${issues.join('; ')}` };
