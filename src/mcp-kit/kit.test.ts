@@ -145,4 +145,9 @@ describe('errors and the write tier', () => {
     expect(await callTool(tool(true), { title: null })).toMatchObject({ ok: false });
     expect(await callTool(tool(false), { title: 'X', season: null })).toMatchObject({ ok: false });
   });
+  test('an object id is refused with 400', async () => {
+    const h = createMcpHandler({ serverInfo: { name: 'x', version: '0' }, instructions: 'x', path: '/mcp/x', tools: new Map(), allowedPeer: '1.2.3.4', verify: async () => ({ ok: true, email: 'a@b.c' }) });
+    const res = await h(new Request('http://x/mcp/x', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: { a: 1 }, method: 'ping' }) }), '1.2.3.4');
+    expect(res.status).toBe(400);
+  });
 });
