@@ -72,7 +72,8 @@ describe('callTool', () => {
     if (!r.ok) throw new Error(r.error);
     expect(r.truncated).toBe(true);
     expect(Buffer.byteLength(r.text)).toBeLessThanOrEqual(1000);
-    expect(r.text).toMatch(/truncated: \d+ of \d+ bytes dropped$/);
+    // The cut answer is still a valid envelope that says it was cut.
+    expect(JSON.parse(r.text)).toMatchObject({ truncated: true, note: expect.stringContaining('data cut to fit 1000 bytes') });
   });
 });
 

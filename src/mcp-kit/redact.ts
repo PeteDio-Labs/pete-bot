@@ -35,3 +35,23 @@ export function redact(text: string): { text: string; changed: boolean } {
   for (const [re, to] of PATTERNS) out = out.replace(re, to as string);
   return { text: out, changed: out !== text };
 }
+
+/**
+ * Redact every string inside a value, before the value is serialized. Serializing first escapes
+ * the quotes in `password="..."`, and the patterns above cannot cross the backslash.
+ */
+export function redactDeep(value: unknown): { value: unknown; changed: boolean } {
+  let changed = false;
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      const r = redact(v);
+      if (r.changed) changed = true;
+      return r.text;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    return v;
+  };
+  const out = walk(value);
+  return { value: out, changed };
+}

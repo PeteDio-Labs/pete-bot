@@ -134,7 +134,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
           inputLength,
           ok: result.ok,
           bytes: Buffer.byteLength(body.text),
-          redacted: body.changed,
+          redacted: body.changed || (result.ok && result.redacted),
           ms: Date.now() - started,
           ...(result.ok ? {} : { error: body.text }),
         });

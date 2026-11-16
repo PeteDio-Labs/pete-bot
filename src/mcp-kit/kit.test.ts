@@ -150,4 +150,24 @@ describe('errors and the write tier', () => {
     const res = await h(new Request('http://x/mcp/x', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: { a: 1 }, method: 'ping' }) }), '1.2.3.4');
     expect(res.status).toBe(400);
   });
+  test('a quoted credential inside string data is redacted before JSON escaping', async () => {
+    const secret = j('example-', 'pass-123');
+    const tool: McpTool = { name: 't', description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: 's', data: `queue error: password="${secret}" rejected` }) };
+    const r = await callTool(tool, {});
+    expect(r.ok && r.text).not.toContain(secret);
+    expect(r.ok && r.redacted).toBe(true);
+  });
+
+  test('an oversized answer stays a valid envelope and says it was cut', async () => {
+    const tool: McpTool = { name: 't', description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: '40000 rows', data: 'row "quoted" é😀\n'.repeat(5000) }) };
+    const r = await callTool(tool, {}, 4096);
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.truncated).toBe(true);
+    expect(Buffer.byteLength(r.text)).toBeLessThanOrEqual(4096);
+    const parsed = JSON.parse(r.text) as { source: string; truncated: boolean; data: string };
+    expect(parsed).toMatchObject({ source: '40000 rows', truncated: true });
+    expect(parsed.data.length).toBeGreaterThan(100);
+    const small = await callTool({ ...tool, run: async () => ({ source: 's', data: { a: 1 } }) }, {}, 4096);
+    expect(small.ok && JSON.parse(small.text)).toEqual({ source: 's', data: { a: 1 } });
+  });
 });
