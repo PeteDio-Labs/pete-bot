@@ -69,9 +69,12 @@ export function startDesk(client: Client, ownerUserId: string, env: DeskEnv = pr
   reviewRequests = new CodexReviewRequests({
     queue: codex,
     github,
-    repos: s.repos,
+    // A requested review may name a review-only repo, which the desk never polls, so only a desk repo gets the mark.
+    repos: [...s.repos, ...s.reviewOnlyRepos],
     log: logger,
-    onQueued: (repo, pr) => store.update(repo, pr, { secondOpinionAt: new Date().toISOString() }),
+    onQueued: (repo, pr) => {
+      if (s.repos.includes(repo)) store.update(repo, pr, { secondOpinionAt: new Date().toISOString() });
+    },
   });
   desk = new MergeDesk({
     settings: s,

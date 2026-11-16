@@ -43,7 +43,7 @@ export type RequestOutcome =
 export interface RequestDeps {
   queue: Pick<CodexQueue, 'enqueue'>;
   github: Pick<GitHubApp, 'getPull' | 'listReviews'>;
-  /** DESK_REPOS: the only repositories a request may name. */
+  /** DESK_REPOS and DESK_REVIEW_ONLY_REPOS: the only repositories a request may name. */
   repos: string[];
   log: { info(m: string): void; warn(m: string): void; error(m: string): void };
   /** Called once a request will queue, before the queue call, so the desk knows Codex is required for the PR. */

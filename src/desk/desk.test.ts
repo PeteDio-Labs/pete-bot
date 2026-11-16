@@ -22,6 +22,7 @@ const settings = (over: Partial<DeskSettings> = {}): DeskSettings => ({
   authors: new Set(['petedillo']),
   claudeReviewers: new Set(),
   noCiRepos: new Set(),
+  reviewOnlyRepos: [],
   appId: '1',
   installationId: '2',
   privateKeyPem: '',

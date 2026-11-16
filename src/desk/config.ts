@@ -35,6 +35,8 @@ export interface DeskSettings {
    * at all merge without a tap; anywhere else, an empty list may be CI that never started.
    */
   noCiRepos: ReadonlySet<string>;
+  /** Repositories a thread may ask Codex to review but the desk never decides, so it never merges there. */
+  reviewOnlyRepos: string[];
   appId: string;
   installationId: string;
   privateKeyPem: string;
@@ -68,6 +70,8 @@ export interface DeskEnv {
   DESK_ORG?: string;
   DESK_REPOS?: string;
   DESK_NO_CI_REPOS?: string;
+  /** Repos a thread may request a Codex second opinion on, with no desk decision or merge there. */
+  DESK_REVIEW_ONLY_REPOS?: string;
   DESK_AUTHORS?: string;
   DESK_CLAUDE_REVIEWERS?: string;
   DESK_APP_ID?: string;
@@ -123,6 +127,12 @@ export function loadDeskSettings(
   const noCiRepos = list(env.DESK_NO_CI_REPOS);
   const strayNoCi = noCiRepos.find((r) => !repos.includes(r));
   if (strayNoCi) return bad(`DESK_NO_CI_REPOS holds "${strayNoCi}", which is not on DESK_REPOS`);
+
+  const reviewOnlyRepos = list(env.DESK_REVIEW_ONLY_REPOS);
+  const badReviewOnly = reviewOnlyRepos.find((r) => !REPO_NAME.test(r));
+  if (badReviewOnly) return bad(`DESK_REVIEW_ONLY_REPOS holds "${badReviewOnly}", which is not a plain repository name`);
+  const overlap = reviewOnlyRepos.find((r) => repos.includes(r));
+  if (overlap) return bad(`DESK_REVIEW_ONLY_REPOS holds "${overlap}", which is already on DESK_REPOS`);
 
   const authors = list(env.DESK_AUTHORS);
   if (authors.length === 0) return bad('DESK_AUTHORS is empty, so no PR could ever merge');
@@ -194,6 +204,7 @@ export function loadDeskSettings(
       authors: new Set(authors.map((a) => a.toLowerCase())),
       claudeReviewers: new Set(claudeReviewers.map((a) => a.toLowerCase())),
       noCiRepos: new Set(noCiRepos),
+      reviewOnlyRepos,
       appId,
       installationId,
       privateKeyPem,
