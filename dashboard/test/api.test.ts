@@ -91,3 +91,19 @@ describe('switch', () => {
 test('unknown routes are 404', async () => {
   expect((await call(memDb(), { method: 'GET', path: '/nope', body: null })).statusCode).toBe(404);
 });
+
+describe('health', () => {
+  test('answers ok with no data when the table reads', async () => {
+    const db = memDb();
+    await call(db, post('/api/ingest/section', { name: 'cve', body: { secret: 'x' } }));
+    const r = await call(db, { method: 'GET', path: '/api/health', body: null });
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ ok: true });
+  });
+  test('is a 500 when the table cannot be read, so the health check goes red', async () => {
+    const broken: Db = { get: async () => { throw new Error('table gone'); }, put: async () => {} };
+    const r = await call(broken, { method: 'GET', path: '/api/health', body: null });
+    expect(r.statusCode).toBe(500);
+    expect(r.body).not.toContain('table gone');
+  });
+});

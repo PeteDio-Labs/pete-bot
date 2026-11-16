@@ -71,6 +71,16 @@ export interface RunnerDeps {
   onCve?: (run: CveRun, date: string, at: Date) => void;
   /** Called with the morning queue's snapshot, so the dashboard keeps the cycle. A throw is logged, never fatal. */
   onMorning?: (snap: Snapshot, date: string) => void;
+  /**
+   * When false, a report that ran is kept for the dashboard and not sent as a DM. Default true, so
+   * existing behaviour holds. A failed run (`ok` false) is always sent: that is an alert, not a report.
+   */
+  dm?: boolean;
+  /**
+   * Keeps a finished report for the dashboard. Returns true only when it was stored. When it returns
+   * false or throws, the report is sent as a DM instead, so turning the DMs off can never lose one.
+   */
+  keep?: (rec: { name: ReportName; date: string; at: Date; text: string; ok: boolean; incomplete: boolean }) => boolean;
 }
 
 /** Splits at line breaks so no DM passes Discord's 2000-character limit. */
@@ -187,8 +197,19 @@ export class ReportRunner {
       text = `⚠ **The ${name} report failed.** Nothing below was checked.\n${reason.slice(0, 500)}`;
       this.d.log.error(`[Reports] ${name} failed: ${reason}`);
     }
+    // ⚠ A report that cannot be kept is sent. Quiet is only allowed when the dashboard has the text.
+    let kept = false;
+    if (ok && this.d.dm === false && this.d.keep) {
+      try {
+        kept = this.d.keep({ name, date: localTime(at).date, at, text, ok, incomplete });
+      } catch (err) {
+        this.d.log.error(`[Reports] ${name} could not be kept for the dashboard, sending the DM: ${String(err)}`);
+      }
+      if (!kept) this.d.log.warn(`[Reports] ${name} was not kept for the dashboard, so it goes out as a DM`);
+    }
+    if (kept) detail = `kept for the dashboard${incomplete ? `, incomplete: ${incompleteReason(text)}` : ''}`;
     try {
-      for (const part of chunk(text)) await this.d.sender.send(part);
+      if (!kept) for (const part of chunk(text)) await this.d.sender.send(part);
     } catch (err) {
       this.d.log.error(`[Reports] ${name} could not be sent: ${String(err)}`);
       this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok: false, incomplete, detail: `DM failed: ${String(err).slice(0, 150)}` };
@@ -210,7 +231,7 @@ export class ReportRunner {
       this.dates[name] = localTime(at).date;
       this.save();
     }
-    this.d.log.info(`[Reports] ${name} sent (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
+    this.d.log.info(`[Reports] ${name} ${kept ? 'kept, no DM' : 'sent'} (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
     return true;
   }
 

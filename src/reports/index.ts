@@ -60,6 +60,13 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     plane: s.plane ? new PlaneClient(s.plane) : null,
     sender: discordSender(client, ownerUserId),
     log: logger,
+    // REPORTS_DM=on keeps the DMs. Without it a finished report goes to the dashboard hub, and a failure still DMs.
+    dm: (env as { REPORTS_DM?: string }).REPORTS_DM?.trim() === 'on',
+    keep: ({ name, date, at, text, ok, incomplete }) => {
+      if (!hub) return false;
+      hub.save(`report-${name}`, { id: date, generatedAt: at.toISOString(), name, text, ok, incomplete });
+      return true;
+    },
     onMorning: (snap, date) => {
       const rec = cycleRecord(snap, date);
       if (rec && hub) hub.save(CYCLE_KIND, rec);

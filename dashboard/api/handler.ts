@@ -2,6 +2,7 @@
  * The dashboard API for AWS: one Lambda behind an API Gateway HTTP API, one DynamoDB table.
  *
  *   GET  /api/dashboard       the DashboardData the SPA reads (Cognito JWT, checked by the gateway)
+ *   GET  /api/health          public, for the Route 53 health check. Reads one item and returns no data.
  *   POST /api/switch          writes a switch request and answers 202. It dispatches nothing.
  *   POST /api/ingest/status   one watchdog record (IAM, checked by the gateway)
  *   POST /api/ingest/section  one report section: needs, alerts, cve, plane, history, triage, services (IAM)
@@ -66,6 +67,11 @@ async function section(db: Db, name: string): Promise<unknown> {
 
 export async function handle(req: Req, db: Db, now: () => number = Date.now): Promise<Res> {
   try {
+    if (req.method === 'GET' && req.path === '/api/health') {
+      // A read that throws is a 500 below, so the check goes red when the table cannot be read. It returns no data.
+      await db.get('health#probe', 'ok');
+      return reply(200, { ok: true });
+    }
     if (req.method === 'GET' && req.path === '/api/dashboard') return await dashboard(db, now);
     if (req.method === 'POST' && req.path === '/api/ingest/status') return await ingestStatus(req, db, now);
     if (req.method === 'POST' && req.path === '/api/ingest/section') return await ingestSection(req, db, now);

@@ -384,6 +384,34 @@ describe('ReportRunner', () => {
     await r.tick();
     expect(sent.length).toBeGreaterThan(0);
   });
+  it('keeps a finished report for the dashboard and sends no DM when the DMs are off', async () => {
+    const sent: string[] = [];
+    const kept: { name: string; text: string }[] = [];
+    const r = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec), true) });
+    await r.tick();
+    expect(sent).toEqual([]);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept[0]!.text.length).toBeGreaterThan(0);
+    expect(r.status().last.morning?.detail).toContain('kept for the dashboard');
+  });
+  it('sends the DM when a report cannot be kept, so quiet never loses one', async () => {
+    const sent: string[] = [];
+    const notKept = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: () => false });
+    await notKept.tick();
+    expect(sent.length).toBeGreaterThan(0);
+    const throwing: string[] = [];
+    const r2 = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void throwing.push(t) }, log, now: () => AT, dm: false, keep: () => { throw new Error('disk full'); } });
+    await r2.tick();
+    expect(throwing.length).toBeGreaterThan(0);
+  });
+  it('still sends a failed report as a DM when the DMs are off', async () => {
+    const sent: string[] = [];
+    const gh = fakeGh();
+    gh.get = async () => { throw new Error('HTTP 401'); };
+    const r = new ReportRunner({ settings: settings(dir()), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: () => true });
+    await r.tick();
+    expect(sent[0]).toContain('report failed');
+  });
   it('reads Plane as not read when no key is set, and says so in the report', async () => {
     const sent: string[] = [];
     const r = new ReportRunner({ settings: settings(dir()), github: fakeGh({ open: [rawPr(1)] }), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT });

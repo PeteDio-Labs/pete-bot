@@ -122,6 +122,11 @@ hosts, package versions and advisories it examined. A host the collector could n
 item per exploited or high-severity finding, at most five a day; the finding's key is the item's
 `external_id`, so a finding is filed once. Container images are listed, not matched.
 
+**Reports go to the dashboard, not to Discord.** A finished report is saved to the dashboard's hub as the kind
+`report-<name>` and sends no DM. A run that failed (`ok` false) is still a DM, because that is an alert. If the hub is
+off or the save fails, the report goes out as a DM, so turning the DMs off cannot lose one. Set `REPORTS_DM=on` to
+get the DMs back. `/health` shows `kept for the dashboard` in each report's last result.
+
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
 that failed to read is listed under "Not read", and the title says INCOMPLETE. A run that
