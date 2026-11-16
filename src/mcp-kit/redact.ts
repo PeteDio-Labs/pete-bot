@@ -56,7 +56,7 @@ export function redactDeep(value: unknown): { value: unknown; changed: boolean }
         Object.entries(v).map(([k, x]) => {
           // A secret-named field is redacted by its key. Once the object is serialized into a string, the
           // escaped `"password":"..."` pair no longer matches the patterns above.
-          if (typeof x === 'string' && SECRET_KEY.test(k) && x.length >= 8 && !/^\d+$/.test(x) && x !== MARK) {
+          if (typeof x === 'string' && SECRET_KEY.test(k) && x.length >= 4 && x !== MARK) {
             changed = true;
             return [k, MARK];
           }

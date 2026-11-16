@@ -172,11 +172,13 @@ describe('errors and the write tier', () => {
   });
   test('a secret-named field in an oversized object is redacted by its key', async () => {
     const secret = j('canary-', 'value-123');
-    const tool: McpTool = { name: 't', description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: 's', data: { password: secret, nested: { api_key: secret }, padding: 'x'.repeat(20000) } }) };
+    const numeric = j('12345', '67890');
+    const tool: McpTool = { name: 't', description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: 's', data: { password: secret, pin_token: numeric, nested: { api_key: secret }, token_count: 4242, padding: 'x'.repeat(20000) } }) };
     for (const cap of [4096, 64 * 1024]) {
       const r = await callTool(tool, {}, cap);
       if (!r.ok) throw new Error('expected ok');
       expect(r.text).not.toContain(secret);
+      expect(r.text).not.toContain(numeric);
       expect(r.redacted).toBe(true);
     }
   });
