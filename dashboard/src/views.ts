@@ -1,5 +1,5 @@
 /** The kit's markup helpers, wrapped per section. Every helper escapes its input; this file adds no raw HTML from data. */
-import { bars, delta, disclosure, list, meter, meters, spark, esc } from 'toonish-ui/markup';
+import { bars, delta, disclosure, list, meter, meters, spark, statusTile, uptime, esc } from 'toonish-ui/markup';
 import { ageText, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
 
 const HEALTH_WORD: Record<Health, string> = { ok: 'healthy', down: 'down', unknown: 'unknown' };
@@ -134,4 +134,33 @@ export function drillChart(d: DashboardData): string {
     : '';
   const skipped = h.drills.length - ran.length;
   return examined(`Read ${h.drills.length} drills; ${ran.length} injected their fault and ${skipped} did not, which counts as not run, never as passed.`) + card(chart + (ran.length ? key(series) : '') + table('failover drills', ['Drill', 'Result', 'Detect (s)', 'Flip (s)', 'Client recovers (s)'], h.drills.map((x) => [x.label, x.result, String(x.detectS), String(x.flipS), String(x.clientS)])));
+}
+
+/** Four tiles for the top of the Now tab. A figure that was not read is `unknown` with no value, never a zero. */
+export function tiles(d: DashboardData, now: number): string {
+  const probes = d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]);
+  const unknown = probes.filter((h) => h === 'unknown').length;
+  const down = probes.filter((h) => h === 'down').length;
+  const downAlerts = d.alerts.filter((a) => a.state === 'down').length;
+  const kev = d.cve ? d.cve.findings.filter((f) => f.kev).length : null;
+  const t = [
+    statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
+    statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),
+    probes.length
+      ? statusTile({ label: 'Probes', value: `${probes.length - unknown - down} of ${probes.length} healthy`, state: down ? 'down' : unknown ? 'warn' : 'ok', detail: unknown ? `${unknown} unknown` : undefined, readAt: d.generatedAt })
+      : statusTile({ label: 'Probes', state: 'unknown' }),
+    kev === null ? statusTile({ label: 'Exploited CVEs', state: 'unknown' }) : statusTile({ label: 'Exploited CVEs', value: String(kev), state: kev ? 'down' : 'ok', readAt: d.cve!.checkedAt }),
+  ];
+  return `<div class="toon-tiles">${t.join('')}</div>`;
+}
+
+/** One strip per service that has history. A service with none says so, never an empty strip that reads as healthy. */
+export function uptimeStrips(d: DashboardData): string {
+  const h = d.history;
+  if (!h) return examined('The uptime history was not read, so there are no strips.');
+  const parts = d.services.map((s) => {
+    const cells = h.uptime[s.name];
+    return cells?.length ? card(uptime({ label: `${s.name} uptime`, windowLabel: `last ${cells.length} readings`, cells })) : card(p(`${s.name}: no uptime history was read.`));
+  });
+  return parts.join('');
 }

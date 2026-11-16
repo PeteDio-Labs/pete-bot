@@ -61,8 +61,10 @@ export interface DayAlerts { day: string; act: number; noAction: number; unreada
 export interface DayCve { day: string; critical: number; high: number; medium: number; low: number }
 export interface Drill { label: string; detectS: number; flipS: number; clientS: number; result: 'passed' | 'failed' | 'not injected' }
 
+export interface UptimeCell { at: string; state: 'ok' | 'down' | 'unknown'; detail?: string }
+
 export interface DashboardData {
-  history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[] } | null;
+  history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[]; uptime: Record<string, UptimeCell[]> } | null;
   generatedAt: string;
   source: string;
   triage: { read: number; cards: number; plain: number; failures: number; since: string } | null;
@@ -124,6 +126,24 @@ function side(v: unknown): SideStatus | null {
   return { ok: v.ok, checkedAt: str(v.checkedAt, 40), detail: str(v.detail, 200), lagS: num(v.lagS) };
 }
 
+/** Per-service strips. A bad state becomes `unknown`, never ok, and a strip keeps at most the newest 150 cells. */
+function parseUptime(v: unknown): Record<string, UptimeCell[]> {
+  const out: Record<string, UptimeCell[]> = {};
+  if (!isObj(v)) return out;
+  for (const [name, cells] of Object.entries(v).slice(0, 40)) {
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name) || !Array.isArray(cells)) continue;
+    const ok = cells
+      .filter((c) => isObj(c) && Number.isFinite(Date.parse(str(c.at, 40))))
+      .map((c) => {
+        const r = c as Record<string, unknown>;
+        const state = r.state === 'ok' || r.state === 'down' ? r.state : 'unknown';
+        return { at: str(r.at, 40), state, ...(str(r.detail, 80) ? { detail: str(r.detail, 80) } : {}) } as UptimeCell;
+      });
+    if (ok.length) out[name] = ok.slice(-150);
+  }
+  return out;
+}
+
 /**
  * Reads the feed's JSON. A section that does not parse is dropped and reported in `problems`,
  * never filled with a default that looks healthy.
@@ -181,6 +201,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     history = {
       alerts: h.alerts.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), act: n(r.act), noAction: n(r.noAction), unreadable: n(r.unreadable) }; }),
       cve: h.cve.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), critical: n(r.critical), high: n(r.high), medium: n(r.medium), low: n(r.low) }; }),
+      uptime: parseUptime(h.uptime),
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');

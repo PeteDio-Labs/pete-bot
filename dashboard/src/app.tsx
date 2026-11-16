@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { tabbar } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { type DashboardData, type Side } from './model.ts';
-import { alertsView, alertVolumeChart, cveHistoryChart, cveView, drillChart, nowView, planeView, serviceCards, watchdogMeters } from './views.ts';
+import { alertsView, alertVolumeChart, cveHistoryChart, cveView, drillChart, nowView, planeView, serviceCards, tiles, uptimeStrips, watchdogMeters } from './views.ts';
 
 export const TABS = [
   { id: 'now', label: 'Now' },
@@ -80,6 +80,8 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
         })}
       </ul>
       <p class="dash-status" role="status" aria-live="polite">{msg}</p>
+      <h3 class="dash-h3">Uptime</h3>
+      <Html html={uptimeStrips(data)} />
       <h3 class="dash-h3">Failover drills</h3>
       <Html html={drillChart(data)} />
     </>
@@ -114,7 +116,7 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
       {load.state === 'error' && <p class="dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
       {problems.length > 0 && <p class="dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
       {load.state === 'loading' && <p class="dash-examined" role="status">Reading the feed.</p>}
-      <Panel id="now" title="Needs you"><Html html={data ? nowView(data, n) : ''} /></Panel>
+      <Panel id="now" title="Needs you"><Html html={data ? tiles(data, n) + nowView(data, n) : ''} /></Panel>
       <Panel id="alerts" title="Alerts"><Html html={data ? alertsView(data, n) + alertVolumeChart(data) : ''} /></Panel>
       <Panel id="cve" title="CVE report"><Html html={data ? cveView(data, n) + cveHistoryChart(data) : ''} /></Panel>
       <Panel id="services" title="Services and switch">{data ? <Services data={data} now={n} feed={feed} /> : null}</Panel>

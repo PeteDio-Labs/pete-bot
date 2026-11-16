@@ -89,3 +89,12 @@ describe('httpFeed', () => {
     expect(JSON.parse(body)).toEqual({ service: 'dash', to: 'cloud' });
   });
 });
+
+test('uptime: a bad state is unknown, never ok, and a strip keeps the newest 150 cells', () => {
+  const cells = Array.from({ length: 160 }, (_, i) => ({ at: `2026-11-16T${String(i % 24).padStart(2, '0')}:00:00Z`, state: i === 159 ? 'fine' : 'ok' }));
+  const r = parseDashboard({ ...fixture, history: { ...fixture.history, uptime: { 'dash': cells, 'Bad Name': cells, 'x': [{ at: 'nope', state: 'ok' }] } } });
+  const u = r.data.history!.uptime;
+  expect(u['dash']?.length).toBe(150);
+  expect(u['dash']?.at(-1)?.state).toBe('unknown');
+  expect(Object.keys(u)).toEqual(['dash']);
+});
