@@ -37,7 +37,7 @@ export function cveView(d: DashboardData, now: number): string {
   if (c.findings.length === 0) return examined(read) + p('No exploited or high-severity finding has a fix.');
   const sorted = sortFindings(c.findings);
   const rows = sorted.map((f, i) =>
-    disclosure({ id: `cve-${i}`, lead: f.kev ? 'KEV' : f.severity.slice(0, 4).toUpperCase(), title: `${f.id} in ${f.pkg}`, value: f.severity, native: true, panel: `<p><strong>Host.</strong> ${esc(f.host)}</p><p><strong>Fix.</strong> ${f.fixed ? `Upgrade to ${esc(f.fixed)}.` : 'No fixed version is published.'}</p>${f.kev ? '<p>Exploited in the wild (CISA KEV).</p>' : ''}` }),
+    disclosure({ id: `cve-${i}`, lead: f.kev ? 'KEV' : ({ critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' } as const)[f.severity], title: `${f.id} in ${f.pkg}`, value: f.severity, native: true, panel: `<p><strong>Host.</strong> ${esc(f.host)}</p><p><strong>Fix.</strong> ${f.fixed ? `Upgrade to ${esc(f.fixed)}.` : 'No fixed version is published.'}</p>${f.kev ? '<p>Exploited in the wild (CISA KEV).</p>' : ''}` }),
   );
   return examined(read) + list(rows, { label: 'CVE findings' });
 }
