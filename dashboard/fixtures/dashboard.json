@@ -1,35 +1,275 @@
 {
   "generatedAt": "2026-11-16T22:00:00Z",
   "source": "fixture",
-  "triage": { "read": 14, "cards": 2, "plain": 12, "failures": 1, "since": "2026-11-09" },
+  "triage": {
+    "read": 14,
+    "cards": 2,
+    "plain": 12,
+    "failures": 1,
+    "since": "2026-11-09"
+  },
   "needs": [
-    { "id": "n1", "title": "Plex backup on pve03 failed", "why": "The nightly vzdump job for the Plex guest exited with an error.", "step": "Rerun the backup job, then check free space on the backup store.", "since": "2026-11-16T06:50:00Z" }
+    {
+      "id": "n1",
+      "title": "Plex backup on pve03 failed",
+      "why": "The nightly vzdump job for the Plex guest exited with an error.",
+      "step": "Rerun the backup job, then check free space on the backup store.",
+      "since": "2026-11-16T06:50:00Z"
+    }
   ],
   "alerts": [
-    { "monitor": "plex-backup", "state": "down", "since": "2026-11-16T06:50:00Z", "triage": "act", "step": "Rerun the backup job", "why": "vzdump exited with an error" },
-    { "monitor": "ollama", "state": "up", "since": "2026-11-16T03:10:00Z", "triage": "no_action" },
-    { "monitor": "vault", "state": "up", "since": "2026-11-16T02:48:00Z", "triage": "unreadable" }
+    {
+      "monitor": "plex-backup",
+      "state": "down",
+      "since": "2026-11-16T06:50:00Z",
+      "triage": "act",
+      "step": "Rerun the backup job",
+      "why": "vzdump exited with an error"
+    },
+    {
+      "monitor": "ollama",
+      "state": "up",
+      "since": "2026-11-16T03:10:00Z",
+      "triage": "no_action"
+    },
+    {
+      "monitor": "vault",
+      "state": "up",
+      "since": "2026-11-16T02:48:00Z",
+      "triage": "unreadable"
+    }
   ],
   "cve": {
-    "checkedAt": "2026-11-16T12:00:00Z", "hosts": 21, "packages": 4120, "advisories": 3,
-    "notChecked": ["pi1"],
+    "checkedAt": "2026-11-16T12:00:00Z",
+    "hosts": 21,
+    "packages": 4120,
+    "advisories": 3,
+    "notChecked": [
+      "pi1"
+    ],
     "findings": [
-      { "id": "CVE-2026-0001", "pkg": "openssl", "host": "example-host-a", "severity": "high", "fixed": "3.0.15-1", "kev": false },
-      { "id": "CVE-2026-0002", "pkg": "sudo", "host": "example-host-b", "severity": "critical", "fixed": "1.9.17", "kev": true },
-      { "id": "CVE-2026-0003", "pkg": "curl", "host": "example-host-a", "severity": "medium", "fixed": null, "kev": false }
+      {
+        "id": "CVE-2026-0001",
+        "pkg": "openssl",
+        "host": "example-host-a",
+        "severity": "high",
+        "fixed": "3.0.15-1",
+        "kev": false
+      },
+      {
+        "id": "CVE-2026-0002",
+        "pkg": "sudo",
+        "host": "example-host-b",
+        "severity": "critical",
+        "fixed": "1.9.17",
+        "kev": true
+      },
+      {
+        "id": "CVE-2026-0003",
+        "pkg": "curl",
+        "host": "example-host-a",
+        "severity": "medium",
+        "fixed": null,
+        "kev": false
+      }
     ]
   },
   "services": [
-    { "name": "dashboard-api", "hostname": "dash.example.test", "active": "cloud", "dataClass": "stateless", "pinned": false, "auto": true,
-      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200 in 41 ms", "lagS": null },
-      "cloud": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200 in 63 ms", "lagS": null } },
-    { "name": "authentik", "hostname": "auth.example.test", "active": "lab", "dataClass": "replicated", "pinned": false, "auto": false,
-      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null },
-      "cloud": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": 4 } },
-    { "name": "tracerr", "hostname": "trace.example.test", "active": "lab", "dataClass": "snapshot", "pinned": false, "auto": false,
-      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null }, "cloud": null },
-    { "name": "plex", "hostname": "plex.example.test", "active": "lab", "dataClass": "snapshot", "pinned": true, "auto": false,
-      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null }, "cloud": null }
+    {
+      "name": "dashboard-api",
+      "hostname": "dash.example.test",
+      "active": "cloud",
+      "dataClass": "stateless",
+      "pinned": false,
+      "auto": true,
+      "lab": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200 in 41 ms",
+        "lagS": null
+      },
+      "cloud": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200 in 63 ms",
+        "lagS": null
+      }
+    },
+    {
+      "name": "authentik",
+      "hostname": "auth.example.test",
+      "active": "lab",
+      "dataClass": "replicated",
+      "pinned": false,
+      "auto": false,
+      "lab": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200",
+        "lagS": null
+      },
+      "cloud": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200",
+        "lagS": 4
+      }
+    },
+    {
+      "name": "tracerr",
+      "hostname": "trace.example.test",
+      "active": "lab",
+      "dataClass": "snapshot",
+      "pinned": false,
+      "auto": false,
+      "lab": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200",
+        "lagS": null
+      },
+      "cloud": null
+    },
+    {
+      "name": "plex",
+      "hostname": "plex.example.test",
+      "active": "lab",
+      "dataClass": "snapshot",
+      "pinned": true,
+      "auto": false,
+      "lab": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "200",
+        "lagS": null
+      },
+      "cloud": null
+    }
   ],
-  "plane": { "checkedAt": "2026-11-16T21:50:00Z", "open": 96, "needsPedro": 7, "inReview": 4 }
+  "plane": {
+    "checkedAt": "2026-11-16T21:50:00Z",
+    "open": 96,
+    "needsPedro": 7,
+    "inReview": 4
+  },
+  "history": {
+    "alerts": [
+      {
+        "day": "2026-11-10",
+        "act": 0,
+        "noAction": 3,
+        "unreadable": 0
+      },
+      {
+        "day": "2026-11-11",
+        "act": 1,
+        "noAction": 4,
+        "unreadable": 0
+      },
+      {
+        "day": "2026-11-12",
+        "act": 0,
+        "noAction": 2,
+        "unreadable": 1
+      },
+      {
+        "day": "2026-11-13",
+        "act": 0,
+        "noAction": 5,
+        "unreadable": 0
+      },
+      {
+        "day": "2026-11-14",
+        "act": 2,
+        "noAction": 3,
+        "unreadable": 0
+      },
+      {
+        "day": "2026-11-15",
+        "act": 0,
+        "noAction": 1,
+        "unreadable": 0
+      },
+      {
+        "day": "2026-11-16",
+        "act": 1,
+        "noAction": 2,
+        "unreadable": 1
+      }
+    ],
+    "cve": [
+      {
+        "day": "2026-11-10",
+        "critical": 0,
+        "high": 2,
+        "medium": 4,
+        "low": 6
+      },
+      {
+        "day": "2026-11-11",
+        "critical": 0,
+        "high": 2,
+        "medium": 4,
+        "low": 6
+      },
+      {
+        "day": "2026-11-12",
+        "critical": 1,
+        "high": 2,
+        "medium": 3,
+        "low": 6
+      },
+      {
+        "day": "2026-11-13",
+        "critical": 1,
+        "high": 3,
+        "medium": 3,
+        "low": 5
+      },
+      {
+        "day": "2026-11-14",
+        "critical": 1,
+        "high": 3,
+        "medium": 3,
+        "low": 5
+      },
+      {
+        "day": "2026-11-15",
+        "critical": 1,
+        "high": 2,
+        "medium": 2,
+        "low": 5
+      },
+      {
+        "day": "2026-11-16",
+        "critical": 1,
+        "high": 1,
+        "medium": 1,
+        "low": 4
+      }
+    ],
+    "drills": [
+      {
+        "label": "Drill 1",
+        "detectS": 18,
+        "flipS": 9,
+        "clientS": 31,
+        "result": "passed"
+      },
+      {
+        "label": "Drill 2",
+        "detectS": 14,
+        "flipS": 8,
+        "clientS": 22,
+        "result": "passed"
+      },
+      {
+        "label": "Drill 3",
+        "detectS": 0,
+        "flipS": 0,
+        "clientS": 0,
+        "result": "not injected"
+      }
+    ]
+  }
 }

@@ -22,3 +22,10 @@
 .dash-main { max-width: 64rem; margin: 0 auto; }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
+.dash-h3 { font-size: 1.25rem; margin: 1.5rem 0 .5rem; }
+.dash-table { margin: .75rem 0 1rem; }
+.dash-table summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.dash-table table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .8125rem; margin-top: .5rem; overflow-wrap: anywhere; }
+.dash-table caption { text-align: left; font-weight: 600; padding-bottom: .25rem; }
+.dash-table th, .dash-table td { border: 2px solid currentColor; padding: .25rem .375rem; text-align: left; vertical-align: top; }
+.dash-main .toon-bars { margin-top: 1rem; }

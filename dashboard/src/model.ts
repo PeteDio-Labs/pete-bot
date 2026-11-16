@@ -57,7 +57,12 @@ export interface ServiceRow {
   cloud: SideStatus | null;
 }
 
+export interface DayAlerts { day: string; act: number; noAction: number; unreadable: number }
+export interface DayCve { day: string; critical: number; high: number; medium: number; low: number }
+export interface Drill { label: string; detectS: number; flipS: number; clientS: number; result: 'passed' | 'failed' | 'not injected' }
+
 export interface DashboardData {
+  history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[] } | null;
   generatedAt: string;
   source: string;
   triage: { read: number; cards: number; plain: number; failures: number; since: string } | null;
@@ -169,5 +174,15 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
   const pl = o.plane;
   const plane = isObj(pl) && str(pl.checkedAt) ? { checkedAt: str(pl.checkedAt, 40), open: num(pl.open) ?? 0, needsPedro: num(pl.needsPedro) ?? 0, inReview: num(pl.inReview) ?? 0 } : null;
   if (!plane) problems.push('the Plane summary is missing');
-  return { data: { generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane }, problems };
+  let history: DashboardData['history'] = null;
+  const h = o.history;
+  if (isObj(h) && Array.isArray(h.alerts) && Array.isArray(h.cve) && Array.isArray(h.drills)) {
+    const n = (v: unknown): number => Math.max(0, num(v) ?? 0);
+    history = {
+      alerts: h.alerts.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), act: n(r.act), noAction: n(r.noAction), unreadable: n(r.unreadable) }; }),
+      cve: h.cve.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), critical: n(r.critical), high: n(r.high), medium: n(r.medium), low: n(r.low) }; }),
+      drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
+    };
+  } else problems.push('the history section is missing');
+  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane }, problems };
 }

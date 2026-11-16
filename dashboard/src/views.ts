@@ -1,5 +1,5 @@
 /** The kit's markup helpers, wrapped per section. Every helper escapes its input; this file adds no raw HTML from data. */
-import { delta, disclosure, list, meter, meters, spark, esc } from 'toonish-ui/markup';
+import { bars, delta, disclosure, list, meter, meters, spark, esc } from 'toonish-ui/markup';
 import { ageText, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
 
 const HEALTH_WORD: Record<Health, string> = { ok: 'healthy', down: 'down', unknown: 'unknown' };
@@ -80,3 +80,58 @@ export function planeView(d: DashboardData, now: number): string {
 }
 
 export { delta, spark };
+
+// ---- Charts. Each is the kit's `bars()` with a key that names every tone in words and a table with the same numbers. ----
+
+interface Series { label: string; tone: 'red' | 'yellow' | 'violet' | 'blue' | 'mist' | 'hatch' }
+
+const key = (series: Series[]): string =>
+  `<ul class="toon-bars-key" aria-label="Chart key">${series.map((s) => `<li><i style="--toon-dot:${s.tone === 'hatch' ? '#4a4d78' : `var(--color-toon-${s.tone}, #3d7bff)`}" aria-hidden="true"></i>${esc(s.label)}</li>`).join('')}</ul>`;
+
+/** The numbers behind a chart, for anyone who cannot read the bars. */
+function table(caption: string, head: string[], rows: string[][]): string {
+  return `<details class="dash-table"><summary>Show ${esc(caption)} as a table</summary><table><caption>${esc(caption)}</caption><thead><tr>${head.map((h) => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr><th scope="row">${esc(r[0] ?? '')}</th>${r.slice(1).map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></details>`;
+}
+
+/** The kit draws charts for paper, so each sits in a card. */
+const card = (html: string): string => `<div class="toon-card dash-card">${html}</div>`;
+
+const shortDay = (d: string): string => d.slice(5);
+
+export function alertVolumeChart(d: DashboardData): string {
+  const h = d.history;
+  if (!h) return examined('The alert history was not read, so there is no chart.');
+  if (h.alerts.length === 0) return examined('Read 0 days of alert history.');
+  const series: Series[] = [{ label: 'Needs you', tone: 'red' }, { label: 'No action', tone: 'mist' }, { label: 'Triage unreadable', tone: 'hatch' }];
+  const total = h.alerts.reduce((a, x) => a + x.act + x.noAction + x.unreadable, 0);
+  const chart = bars({
+    label: 'Alerts per day',
+    columns: h.alerts.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.act, tone: 'red', label: 'needs you' }, { value: x.noAction, tone: 'mist', label: 'no action' }, { value: x.unreadable, tone: 'hatch', label: 'unreadable' }] })),
+  });
+  return examined(`Read ${h.alerts.length} days and ${total} alerts.`) + card(chart + key(series) + table('alerts per day', ['Day', 'Needs you', 'No action', 'Unreadable'], h.alerts.map((x) => [x.day, String(x.act), String(x.noAction), String(x.unreadable)])));
+}
+
+export function cveHistoryChart(d: DashboardData): string {
+  const h = d.history;
+  if (!h) return examined('The CVE history was not read, so there is no chart.');
+  if (h.cve.length === 0) return examined('Read 0 days of CVE history.');
+  const series: Series[] = [{ label: 'Critical', tone: 'red' }, { label: 'High', tone: 'yellow' }, { label: 'Medium', tone: 'violet' }, { label: 'Low', tone: 'hatch' }];
+  const chart = bars({
+    label: 'Open CVE findings with a fix, per day',
+    columns: h.cve.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.critical, tone: 'red', label: 'critical' }, { value: x.high, tone: 'yellow', label: 'high' }, { value: x.medium, tone: 'violet', label: 'medium' }, { value: x.low, tone: 'hatch', label: 'low' }] })),
+  });
+  return examined(`Read ${h.cve.length} days of CVE counts.`) + card(chart + key(series) + table('CVE findings per day', ['Day', 'Critical', 'High', 'Medium', 'Low'], h.cve.map((x) => [x.day, String(x.critical), String(x.high), String(x.medium), String(x.low)])));
+}
+
+export function drillChart(d: DashboardData): string {
+  const h = d.history;
+  if (!h) return examined('The drill history was not read, so there is no chart.');
+  if (h.drills.length === 0) return examined('Read 0 failover drills. None has run yet.');
+  const series: Series[] = [{ label: 'Detect', tone: 'yellow' }, { label: 'Flip', tone: 'violet' }, { label: 'Client recovers', tone: 'red' }];
+  const ran = h.drills.filter((x) => x.result !== 'not injected');
+  const chart = ran.length
+    ? bars({ label: 'Failover drill time in seconds', columns: ran.map((x) => ({ label: x.label, sub: x.result, segments: [{ value: x.detectS, tone: 'yellow', label: 'detect' }, { value: x.flipS, tone: 'violet', label: 'flip' }, { value: x.clientS, tone: 'red', label: 'client recovers' }] })) })
+    : '';
+  const skipped = h.drills.length - ran.length;
+  return examined(`Read ${h.drills.length} drills; ${ran.length} injected their fault and ${skipped} did not, which counts as not run, never as passed.`) + card(chart + (ran.length ? key(series) : '') + table('failover drills', ['Drill', 'Result', 'Detect (s)', 'Flip (s)', 'Client recovers (s)'], h.drills.map((x) => [x.label, x.result, String(x.detectS), String(x.flipS), String(x.clientS)])));
+}
