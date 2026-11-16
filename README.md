@@ -225,7 +225,7 @@ model did, not whether it was right. `scripts/media-routing-eval.ts` asks a fixe
 wrong-tool rate with the tool count. Each answered question also writes `toolsOffered`, `retries` and `noTool` to
 the journal line `media ask answered`.
 
-**Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (library, trace_request, list_queue,
+**Toolkits.** `LAB_MEDIA_TOOLKITS` is a comma list of kits: `core` (find_in_library, trace_request, list_queue,
 list_queue_errors), `health` (check_vpn, diagnose_dead_download, check_storage_pools, check_disk_space, check_indexers), `audit` (check_seerr_drift,
 check_app_versions, list_partial_files, get_now_playing), `subtitles` (check_subtitles, find_subtitles, request_action) and `search`
 (search_knowledge). Unset offers every kit. An unknown name stops startup, so a typo cannot silently shrink the tool set.
