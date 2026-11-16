@@ -649,3 +649,48 @@ describe('a held DOWN when Discord is unavailable', () => {
     expect(JSON.stringify(d.send.mock.calls[0])).toContain('down for 10m');
   });
 });
+
+// ── Qwen triage adds a hint and never gates the DM ───────────────────────────
+describe('triage on a new DOWN', () => {
+  beforeEach(() => {
+    config.alerts.maintenanceWindows = [];
+    config.alerts.baselinePath = '';
+    resetBaseline();
+    reset();
+  });
+  afterEach(() => reset());
+
+  async function post(triage: unknown) {
+    const express = (await import('express')).default;
+    const { createAlertHandler } = await import('./alert.js');
+    const d = fakeDiscord();
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
+    const res = await request(app)
+      .post('/v1/alert')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({ heartbeat: { status: 0, msg: 'vzdump failed' }, monitor: { name: 'plex-backup' } });
+    return { res, d };
+  }
+
+  it('adds the step when Qwen says the owner must act', async () => {
+    const { res, d } = await post(async () => ({ act: true, why: 'the backup job failed', step: 'Rerun the vzdump job' }));
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(d.send.mock.calls[0])).toContain('Rerun the vzdump job');
+  });
+
+  it('sends the plain DM when Qwen says no action', async () => {
+    const { res, d } = await post(async () => ({ act: false, why: 'blip', step: '' }));
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(d.send.mock.calls[0])).not.toContain('Needs you');
+  });
+
+  it('sends the plain DM when Qwen throws', async () => {
+    const { res, d } = await post(async () => {
+      throw new Error('ollama down');
+    });
+    expect(res.status).toBe(200);
+    expect(d.send).toHaveBeenCalledTimes(1);
+  });
+});

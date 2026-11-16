@@ -42,6 +42,7 @@ import {
 import { alertDms, alertBatchesOpen, alertDecisions } from '../../metrics/index.js';
 import { scheduleDecider, type MaintenanceDecider } from '../decider.js';
 import { addSample, deadlineMs, stats } from '../baseline.js';
+import { triagerFromEnv, triageNote, type Triager } from '../triage.js';
 
 // Kuma sends more than this; only these are depended on, and unknown keys are
 // ignored rather than rejected so a Kuma upgrade cannot break alerting.
@@ -139,6 +140,8 @@ export function createAlertHandler(
   decider: MaintenanceDecider = scheduleDecider(config.alerts.maintenanceWindows),
   /** How long to wait before trying a held DOWN's DM again. */
   retryMs = 30_000,
+  /** Adds a "Needs you" line to a new DOWN. Null is off. It never decides whether the DM goes. */
+  triage: Triager | null = triagerFromEnv(),
 ) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Monitors whose deadline DM is in flight, with a promise that settles when the attempt ends. */
@@ -147,7 +150,18 @@ export function createAlertHandler(
   /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
     const { batch, action } = recordDown(monitor, { since });
-    if (note) setNote(batch.id, monitor, note);
+    let line = note;
+    // Only a DOWN that opens a message gets a hint; an edit of an open incident does not ask again.
+    if (!line && triage && action !== 'edit') {
+      try {
+        const result = await triage({ monitor, detail });
+        line = triageNote(result);
+        logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable' : result.act ? 'act' : 'no_action'}`);
+      } catch (err) {
+        logger.warn(`[alert] triage failed for ${monitor}, sending the plain DM: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (line) setNote(batch.id, monitor, line);
     const embed = renderBatch(batch, detail);
     if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {
       alertDms.inc({ action: 'edited', status: 'success' });
