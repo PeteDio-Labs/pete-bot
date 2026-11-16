@@ -387,9 +387,16 @@ describe('ReportRunner', () => {
   it('keeps a finished report for the dashboard and sends no DM when the DMs are off', async () => {
     const sent: string[] = [];
     const kept: { name: string; text: string }[] = [];
-    const r = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec), true) });
+    // A Plane that reads cleanly, so no report is INCOMPLETE and none has a reason to DM.
+    const plane = {
+      read: async () => ({ ok: true as const, items: [], states: 0, labels: 0 }),
+      lastComment: async () => null,
+      cycles: async () => ({ ok: true as const, current: null, previous: null, next: null, upcoming: [], dated: 0, undated: 0 }),
+      createItem: async () => ({ status: 'exists' as const }),
+    };
+    const r = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec), true) });
     await r.tick();
-    expect(sent).toEqual([]);
+    expect(sent.filter((t) => !t.includes('INCOMPLETE'))).toEqual([]);
     expect(kept.length).toBeGreaterThan(0);
     expect(kept[0]!.text.length).toBeGreaterThan(0);
     expect(r.status().last.morning?.detail).toContain('kept for the dashboard');
@@ -403,6 +410,19 @@ describe('ReportRunner', () => {
     const r2 = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void throwing.push(t) }, log, now: () => AT, dm: false, keep: () => { throw new Error('disk full'); } });
     await r2.tick();
     expect(throwing.length).toBeGreaterThan(0);
+  });
+  it('sends an INCOMPLETE report as a DM even when it is kept', async () => {
+    const sent: string[] = [];
+    const kept: string[] = [];
+    const gh = fakeGh();
+    // A read that fails leaves the report marked INCOMPLETE; GitHub failing for one repo is enough.
+    const base = gh.get.bind(gh);
+    gh.get = async (...a: Parameters<typeof base>) => { if (String(a[0]).includes('pulls')) throw new Error('HTTP 502'); return base(...a); };
+    const r = new ReportRunner({ settings: settings(dir()), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec.name), true) });
+    await r.tick();
+    expect(r.status().last.morning?.incomplete).toBe(true);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(sent.some((t) => t.includes('INCOMPLETE'))).toBe(true);
   });
   it('still sends a failed report as a DM when the DMs are off', async () => {
     const sent: string[] = [];

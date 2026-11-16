@@ -39,7 +39,14 @@ const SYSTEM = [
   'If you cannot tell, set act to true and say what to check first.',
 ].join(' ');
 
-const cap = (v: unknown, n: number): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+/**
+ * The model's words come from untrusted Kuma text, so they are text for a human to weigh, never markup:
+ * links are cut, and the characters that make Discord markdown, mentions and links are dropped.
+ */
+export function plain(v: string): string {
+  return v.replace(/https?:\/\/\S+/gi, 'link removed').replace(/[<>@`*_~|\\[\]()#]/g, '').replace(/\s+/g, ' ').trim();
+}
+const cap = (v: unknown, n: number): string => (typeof v === 'string' ? plain(v).slice(0, n) : '');
 
 /** Reads the model's reply. Anything but the three fields is null. Exported for tests. */
 export function parseTriage(reply: string): TriageResult | null {
@@ -89,12 +96,32 @@ export function ollamaTriager(s: TriageSettings, fetchImpl: typeof fetch = fetch
 /** The line added under a DOWN. Null when triage says no action: the plain DM stands. */
 export function triageNote(r: TriageResult | null): string | undefined {
   if (!r || !r.act) return undefined;
-  return `**Needs you:** ${r.step}\nWhy: ${r.why}`;
+  return `**Suggested by the local model (unverified):** ${r.step}\nWhy: ${r.why}`;
+}
+
+/** 4 s by default. A bad or out-of-range value falls back to the default, so a typo cannot disable every call. */
+export function clampTimeout(raw: string | undefined): number {
+  const n = Number((raw ?? '').trim());
+  return Number.isFinite(n) && n >= 500 && n <= 15_000 ? Math.round(n) : 4000;
+}
+
+/** At most `max` calls run at once. A call over the limit is skipped, and its DM goes out plain. */
+export function limited(t: Triager, max = 2): Triager {
+  let running = 0;
+  return async (i) => {
+    if (running >= max) return null;
+    running++;
+    try {
+      return await t(i);
+    } finally {
+      running--;
+    }
+  };
 }
 
 /** Off unless TRIAGE_OLLAMA_URL names an Ollama server. */
 export function triagerFromEnv(env: Record<string, string | undefined> = process.env): Triager | null {
   const url = (env.TRIAGE_OLLAMA_URL ?? '').trim().replace(/\/+$/, '');
   if (!/^https?:\/\//.test(url)) return null;
-  return ollamaTriager({ url, model: (env.TRIAGE_MODEL ?? '').trim() || 'qwen3:8b', timeoutMs: Number(env.TRIAGE_TIMEOUT_MS) || 6000 });
+  return limited(ollamaTriager({ url, model: (env.TRIAGE_MODEL ?? '').trim() || 'qwen3:8b', timeoutMs: clampTimeout(env.TRIAGE_TIMEOUT_MS) }));
 }

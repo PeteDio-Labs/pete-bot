@@ -95,7 +95,7 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
         const r = await feed.load();
         if (alive) setLoad({ state: 'ready', data: r.data, problems: r.problems, readAt: Date.now() });
       } catch (err) {
-        if (alive) setLoad((prev) => ({ state: 'error', message: err instanceof Error ? err.message : 'unknown error', data: prev.state === 'loading' ? null : prev.data, problems: [] }));
+        if (alive) setLoad((prev) => ({ state: 'error', message: err instanceof Error ? err.message : 'unknown error', data: prev.state === 'loading' ? null : prev.data, problems: prev.state === 'loading' ? [] : prev.problems }));
       }
     };
     void tick();

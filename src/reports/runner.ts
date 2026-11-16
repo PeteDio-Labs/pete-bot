@@ -207,9 +207,11 @@ export class ReportRunner {
       }
       if (!kept) this.d.log.warn(`[Reports] ${name} was not kept for the dashboard, so it goes out as a DM`);
     }
-    if (kept) detail = `kept for the dashboard${incomplete ? `, incomplete: ${incompleteReason(text)}` : ''}`;
+    // ⚠ An INCOMPLETE report is loud: it is kept and also sent, because a partial read must not hide in a page.
+    const sendToo = kept && incomplete;
+    if (kept) detail = `kept for the dashboard${incomplete ? `, incomplete (DM sent): ${incompleteReason(text)}` : ''}`;
     try {
-      if (!kept) for (const part of chunk(text)) await this.d.sender.send(part);
+      if (!kept || sendToo) for (const part of chunk(text)) await this.d.sender.send(part);
     } catch (err) {
       this.d.log.error(`[Reports] ${name} could not be sent: ${String(err)}`);
       this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok: false, incomplete, detail: `DM failed: ${String(err).slice(0, 150)}` };
@@ -231,7 +233,7 @@ export class ReportRunner {
       this.dates[name] = localTime(at).date;
       this.save();
     }
-    this.d.log.info(`[Reports] ${name} ${kept ? 'kept, no DM' : 'sent'} (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
+    this.d.log.info(`[Reports] ${name} ${kept && !sendToo ? 'kept, no DM' : 'sent'} (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
     return true;
   }
 

@@ -678,12 +678,13 @@ describe('triage on a new DOWN', () => {
     const { res, d } = await post(async () => ({ act: true, why: 'the backup job failed', step: 'Rerun the vzdump job' }));
     expect(res.status).toBe(200);
     expect(JSON.stringify(d.send.mock.calls[0])).toContain('Rerun the vzdump job');
+    expect(JSON.stringify(d.send.mock.calls[0])).toContain('unverified');
   });
 
   it('sends the plain DM when Qwen says no action', async () => {
     const { res, d } = await post(async () => ({ act: false, why: 'blip', step: '' }));
     expect(res.status).toBe(200);
-    expect(JSON.stringify(d.send.mock.calls[0])).not.toContain('Needs you');
+    expect(JSON.stringify(d.send.mock.calls[0])).not.toContain('unverified');
   });
 
   it('sends the plain DM when Qwen throws', async () => {

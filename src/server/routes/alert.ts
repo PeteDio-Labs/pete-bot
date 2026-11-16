@@ -149,18 +149,21 @@ export function createAlertHandler(
 
   /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
-    const { batch, action } = recordDown(monitor, { since });
-    let line = note;
-    // Only a DOWN that opens a message gets a hint; an edit of an open incident does not ask again.
-    if (!line && triage && action !== 'edit') {
+    // ⚠ Triage runs BEFORE recordDown. A DOWN that waited on Qwen inside the batch would leave a second DOWN
+    // an open batch with no message to edit. A monitor already in a batch edits its message and asks nothing.
+    // A held DOWN announced at its deadline is triaged too: it is probably the outage that most needs a step.
+    let hint: string | undefined;
+    if (triage && !isInBatch(monitor)) {
       try {
         const result = await triage({ monitor, detail });
-        line = triageNote(result);
-        logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable' : result.act ? 'act' : 'no_action'}`);
+        hint = triageNote(result);
+        logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable_or_skipped' : result.act ? 'act' : 'no_action'}`);
       } catch (err) {
         logger.warn(`[alert] triage failed for ${monitor}, sending the plain DM: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    const { batch, action } = recordDown(monitor, { since });
+    const line = [note, action !== 'edit' ? hint : undefined].filter(Boolean).join('\n') || undefined;
     if (line) setNote(batch.id, monitor, line);
     const embed = renderBatch(batch, detail);
     if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {

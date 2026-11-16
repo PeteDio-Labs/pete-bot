@@ -15,7 +15,7 @@
  * This route refuses a pinned service and an unknown one, and records the rest with status `requested`.
  *
  * Table `dash`, keys pk and sk (strings), TTL attribute `expires` (epoch seconds):
- *   status   pk "<service>#<side>"   sk "status"   ok, checkedAt, detail, lagS
+ *   status   pk "<service>#<side>"   sk "status"   ok, checkedAt, detail, lagS, expires
  *   section  pk "section#<name>"     sk "latest"   body (JSON text), at
  *   switch   pk "switch#<service>"   sk <ISO time> to, status, expires
  */
@@ -40,6 +40,8 @@ const SIDES = ['lab', 'cloud'] as const;
 export const FUTURE_MS = 5 * 60_000;
 const MAX_BODY = 200_000;
 const SWITCH_TTL_S = 7 * 24 * 3600;
+/** A status row for a removed service expires after 30 days. A live watchdog rewrites its row long before. */
+const STATUS_TTL_S = 30 * 24 * 3600;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -94,11 +96,12 @@ async function dashboard(db: Db, now: () => number): Promise<Res> {
     for (const r of registry) {
       if (!isObj(r) || typeof r.name !== 'string' || !NAME.test(r.name)) continue;
       const row: Record<string, unknown> = { ...r };
-      for (const side of SIDES) {
-        const s = await db.get(`${r.name}#${side}`, 'status');
+      const reads = await Promise.all(SIDES.map((side) => db.get(`${r.name}#${side}`, 'status')));
+      SIDES.forEach((side, i) => {
+        const s = reads[i];
         // A missing item stays null, and the SPA shows it as unknown.
         row[side] = s ? { ok: s.ok === true, checkedAt: s.checkedAt, detail: s.detail ?? '', lagS: typeof s.lagS === 'number' ? s.lagS : null } : null;
-      }
+      });
       services.push(row);
     }
   }
@@ -117,7 +120,7 @@ async function ingestStatus(req: Req, db: Db, now: () => number): Promise<Res> {
   if (!Number.isFinite(at)) return reply(400, { error: 'checkedAt must be an ISO time' });
   if (at > now() + FUTURE_MS) return reply(400, { error: 'checkedAt is in the future' });
   if (lagS !== undefined && lagS !== null && (typeof lagS !== 'number' || !Number.isFinite(lagS) || lagS < 0)) return reply(400, { error: 'lagS must be a number of seconds or null' });
-  await db.put({ pk: `${service}#${side}`, sk: 'status', ok, checkedAt: new Date(at).toISOString(), detail: typeof detail === 'string' ? detail.slice(0, 200) : '', lagS: lagS ?? null });
+  await db.put({ pk: `${service}#${side}`, sk: 'status', ok, checkedAt: new Date(at).toISOString(), detail: typeof detail === 'string' ? detail.slice(0, 200) : '', lagS: lagS ?? null, expires: Math.floor(now() / 1000) + STATUS_TTL_S });
   return reply(200, { ok: true });
 }
 

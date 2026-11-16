@@ -61,9 +61,10 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     sender: discordSender(client, ownerUserId),
     log: logger,
     // REPORTS_DM=on keeps the DMs. Without it a finished report goes to the dashboard hub, and a failure still DMs.
-    dm: (env as { REPORTS_DM?: string }).REPORTS_DM?.trim() === 'on',
+    dm: reportsDm((env as { REPORTS_DM?: string }).REPORTS_DM),
     keep: ({ name, date, at, text, ok, incomplete }) => {
-      if (!hub) return false;
+      // Kept only where the dashboard that shows it is listening, so quiet never means unread.
+      if (!hub || !dashboardListening) return false;
       hub.save(`report-${name}`, { id: date, generatedAt: at.toISOString(), name, text, ok, incomplete });
       return true;
     },
@@ -85,6 +86,14 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
   logger.info(`[Reports] Scheduled ${[...s.enabled].join(', ')} for ${s.repos.join(', ')}${s.plane ? '' : ' (Plane key absent: Plane will be reported as not read)'}`);
 }
 
+/** REPORTS_DM: on, true, 1 or yes keeps the DMs; off, false, 0, no or empty turns them off. Anything else keeps them and is logged. */
+export function reportsDm(raw: string | undefined): boolean {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (['off', 'false', '0', 'no', ''].includes(v)) return false;
+  if (!['on', 'true', '1', 'yes'].includes(v)) logger.error(`[Reports] REPORTS_DM is "${v.slice(0, 20)}", which is not on or off, so the DMs stay on`);
+  return true;
+}
+
 export function getReports(): ReportRunner | null {
   return runner;
 }
@@ -99,6 +108,7 @@ export function reportsHealth(): { state: string; reason?: string } & Partial<Re
 let weekly: WeeklyState = { state: 'off' };
 let weeklyRunner: WeeklyRunner | null = null;
 let hub: ReportHub | null = null;
+let dashboardListening = false;
 let hubJobs: HubJobs | null = null;
 let backup: ReportBackup | null = null;
 let backupConfig: ReturnType<typeof loadBackupConfig> = { state: 'off' };
@@ -130,6 +140,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
       w.host,
       w.port,
     );
+    dashboardListening = true;
     weeklyRunner.start();
     const petClient = s.plane ? new PlaneClient(s.plane) : null;
     const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();

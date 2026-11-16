@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ollamaTriager, parseTriage, triageNote, triagerFromEnv } from './triage.js';
+import { clampTimeout, limited, ollamaTriager, parseTriage, plain, triageNote, triagerFromEnv } from './triage.js';
 
 const reply = (content: string) => (async () => new Response(JSON.stringify({ message: { content } }))) as unknown as typeof fetch;
 
@@ -20,7 +20,7 @@ describe('parseTriage', () => {
 
 describe('triageNote', () => {
   test('adds a line only when action is needed', () => {
-    expect(triageNote({ act: true, why: 'disk full', step: 'Free space on 244' })).toContain('Needs you');
+    expect(triageNote({ act: true, why: 'disk full', step: 'Free space on 244' })).toContain('unverified');
     expect(triageNote({ act: false, why: 'blip', step: '' })).toBeUndefined();
     expect(triageNote(null)).toBeUndefined();
   });
@@ -48,5 +48,38 @@ describe('triagerFromEnv', () => {
   });
   test('is on with a URL', () => {
     expect(triagerFromEnv({ TRIAGE_OLLAMA_URL: 'http://192.168.50.246:11434' })).not.toBeNull();
+  });
+});
+
+describe('untrusted text', () => {
+  test('plain removes links, mentions and markdown', () => {
+    expect(plain('open https://evil.example now @everyone `rm` [x](y) **bold**')).toBe('open link removed now everyone rm xy bold');
+  });
+  test('a parsed step carries no link or mention', () => {
+    const r = parseTriage(JSON.stringify({ act: true, why: 'see https://x.test', step: 'ping @here and paste your token' }));
+    expect(r?.why).toBe('see link removed');
+    expect(r?.step).not.toContain('@');
+  });
+  test('the note is framed as an unverified suggestion', () => {
+    expect(triageNote({ act: true, why: 'a', step: 'b' })).toContain('unverified');
+  });
+});
+
+describe('limits', () => {
+  test('clampTimeout falls back for a bad value', () => {
+    expect(clampTimeout('-1')).toBe(4000);
+    expect(clampTimeout('999999')).toBe(4000);
+    expect(clampTimeout('abc')).toBe(4000);
+    expect(clampTimeout('2500')).toBe(2500);
+    expect(clampTimeout(undefined)).toBe(4000);
+  });
+  test('a call over the concurrency limit is skipped, not queued', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const t = limited(async () => { await gate; return { act: true, why: 'a', step: 'b' }; }, 1);
+    const first = t({ monitor: 'a', detail: '' });
+    expect(await t({ monitor: 'b', detail: '' })).toBeNull();
+    release();
+    expect((await first)?.step).toBe('b');
   });
 });
