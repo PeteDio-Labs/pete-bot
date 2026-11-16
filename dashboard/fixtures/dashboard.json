@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-11-16T22:00:00Z",
+  "source": "fixture",
+  "triage": { "read": 14, "cards": 2, "plain": 12, "failures": 1, "since": "2026-11-09" },
+  "needs": [
+    { "id": "n1", "title": "Plex backup on pve03 failed", "why": "The nightly vzdump job for the Plex guest exited with an error.", "step": "Rerun the backup job, then check free space on the backup store.", "since": "2026-11-16T06:50:00Z" }
+  ],
+  "alerts": [
+    { "monitor": "plex-backup", "state": "down", "since": "2026-11-16T06:50:00Z", "triage": "act", "step": "Rerun the backup job", "why": "vzdump exited with an error" },
+    { "monitor": "ollama", "state": "up", "since": "2026-11-16T03:10:00Z", "triage": "no_action" },
+    { "monitor": "vault", "state": "up", "since": "2026-11-16T02:48:00Z", "triage": "unreadable" }
+  ],
+  "cve": {
+    "checkedAt": "2026-11-16T12:00:00Z", "hosts": 21, "packages": 4120, "advisories": 3,
+    "notChecked": ["pi1"],
+    "findings": [
+      { "id": "CVE-2026-0001", "pkg": "openssl", "host": "example-host-a", "severity": "high", "fixed": "3.0.15-1", "kev": false },
+      { "id": "CVE-2026-0002", "pkg": "sudo", "host": "example-host-b", "severity": "critical", "fixed": "1.9.17", "kev": true },
+      { "id": "CVE-2026-0003", "pkg": "curl", "host": "example-host-a", "severity": "medium", "fixed": null, "kev": false }
+    ]
+  },
+  "services": [
+    { "name": "dashboard-api", "hostname": "dash.example.test", "active": "cloud", "dataClass": "stateless", "pinned": false, "auto": true,
+      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200 in 41 ms", "lagS": null },
+      "cloud": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200 in 63 ms", "lagS": null } },
+    { "name": "authentik", "hostname": "auth.example.test", "active": "lab", "dataClass": "replicated", "pinned": false, "auto": false,
+      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null },
+      "cloud": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": 4 } },
+    { "name": "tracerr", "hostname": "trace.example.test", "active": "lab", "dataClass": "snapshot", "pinned": false, "auto": false,
+      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null }, "cloud": null },
+    { "name": "plex", "hostname": "plex.example.test", "active": "lab", "dataClass": "snapshot", "pinned": true, "auto": false,
+      "lab": { "ok": true, "checkedAt": "2026-11-16T22:00:00Z", "detail": "200", "lagS": null }, "cloud": null }
+  ],
+  "plane": { "checkedAt": "2026-11-16T21:50:00Z", "open": 96, "needsPedro": 7, "inReview": 4 }
+}

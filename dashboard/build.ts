@@ -1,0 +1,53 @@
+// Builds the dashboard into dist/: the Preact bundle, the Tailwind CSS, index.html, the kit's fonts and the fixtures.
+// Exits non-zero when a step fails or an output is missing, and says what it wrote.
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { TABBAR } from './src/app.tsx';
+import { skipLink, esc } from 'toonish-ui/markup';
+
+const out = 'dist';
+const feed = process.env.DASHBOARD_FEED ?? '/fixtures/dashboard.json';
+const switchUrl = process.env.DASHBOARD_SWITCH ?? '';
+await rm(out, { recursive: true, force: true });
+await mkdir(out, { recursive: true });
+
+const js = await Bun.build({ entrypoints: ['src/app.tsx'], outdir: out, naming: 'app.js', minify: true, target: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
+if (!js.success) {
+  for (const l of js.logs) console.error(l);
+  process.exit(1);
+}
+const css = Bun.spawnSync(['bunx', '--bun', '@tailwindcss/cli', '-i', 'src/app.css', '-o', `${out}/app.css`, '--minify'], { stdout: 'inherit', stderr: 'inherit' });
+if (css.exitCode !== 0) process.exit(1);
+
+const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="dashboard-feed" content="${esc(feed)}">
+${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
+<title>Lab dashboard</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+${skipLink('main', 'Skip to content')}
+<header class="dash-header"><h1 class="dash-title">Lab dashboard</h1></header>
+<main id="main" class="dash-main">
+${TABBAR}
+<div id="app"></div>
+<noscript><p>This dashboard needs JavaScript to read its feed.</p></noscript>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
+`;
+await Bun.write(`${out}/index.html`, html);
+await cp('fixtures', `${out}/fixtures`, { recursive: true });
+const fonts = Bun.spawnSync(['sh', '-c', `[ -d node_modules/toonish-ui/dist/fonts ] && cp -r node_modules/toonish-ui/dist/fonts ${out}/fonts`]);
+const need = ['index.html', 'app.js', 'app.css', 'fixtures/dashboard.json'];
+const missing = need.filter((f) => !Bun.file(`${out}/${f}`).size);
+if (missing.length) {
+  console.error(`build: missing or empty: ${missing.join(', ')}`);
+  process.exit(1);
+}
+console.log(`built ${need.length} outputs into ${out}/ (feed ${feed}, switch ${switchUrl || 'off'}, fonts ${fonts.exitCode === 0 ? 'copied' : 'not copied'})`);
