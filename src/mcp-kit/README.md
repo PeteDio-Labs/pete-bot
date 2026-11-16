@@ -24,6 +24,14 @@ Over MCP, a `write` tool requests; anything that changes host state goes through
 
 Set `aliases: ['old_name']` on the tool. The old name still answers `tools/call`, and the log line carries `alias`. `tools/list` shows only the new name. Remove the alias one release later.
 
+## Redaction and the size cap
+
+`callTool` redacts each string in a tool's output before it serializes the answer, because JSON escaping hides a quoted credential from the patterns. The handler redacts the final text again. An answer over the cap keeps a valid `{ source, truncated, note, data }` envelope with `data` cut to a string prefix.
+
+## Null arguments
+
+Models send `null` for an optional argument they skip. Set `nullMeansOmitted: true` on a read tool to drop such a key before validation. A required key sent as `null` still fails as missing.
+
 ## Use it from another repo
 
 Copy or pin `src/mcp-kit` by commit from `pete-bot` and run `runContract` in your tests. `petedio-media-control`

@@ -30,8 +30,42 @@ const PATTERNS: Array<[RegExp, string | ((...m: string[]) => string)]> = [
   [new RegExp(`\\b(${NAME})(["']?\\s*[:=]\\s*)(?!\\[redacted\\])(?!\\d+\\b)[^\\s"',;}]{8,}`, 'gi'), (_m, n, sep) => `${n}${sep}${MARK}`],
 ];
 
+const SECRET_KEY = new RegExp(`^${NAME}$`, 'i');
+
 export function redact(text: string): { text: string; changed: boolean } {
   let out = text;
   for (const [re, to] of PATTERNS) out = out.replace(re, to as string);
   return { text: out, changed: out !== text };
+}
+
+/**
+ * Redact every string inside a value, and every secret-named field, before the value is serialized. Serializing first escapes
+ * the quotes in `password="..."`, and the patterns above cannot cross the backslash.
+ */
+export function redactDeep(value: unknown): { value: unknown; changed: boolean } {
+  let changed = false;
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      const r = redact(v);
+      if (r.changed) changed = true;
+      return r.text;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(
+        Object.entries(v).map(([k, x]) => {
+          // A secret-named field is redacted by its key. Once the object is serialized into a string, the
+          // escaped `"password":"..."` pair no longer matches the patterns above.
+          if (typeof x === 'string' && SECRET_KEY.test(k) && x.length >= 4 && x !== MARK) {
+            changed = true;
+            return [k, MARK];
+          }
+          return [k, walk(x)];
+        }),
+      );
+    }
+    return v;
+  };
+  const out = walk(value);
+  return { value: out, changed };
 }

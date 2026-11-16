@@ -59,6 +59,8 @@ interface Jwk extends JsonWebKey {
 
 const JWKS_TTL_MS = 10 * 60_000;
 const CLOCK_SKEW_SEC = 60;
+/** Held keys stop counting after this long without a successful fetch, so a rotated-out key cannot verify forever. */
+const KEY_MAX_AGE_MS = 24 * 60 * 60_000;
 
 function b64urlJson(part: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as Record<string, unknown>;
@@ -67,6 +69,8 @@ function b64urlJson(part: string): Record<string, unknown> {
 export class AccessVerifier {
   private keys = new Map<string, Jwk>();
   private fetchedAt = 0;
+  private lastGoodAt = 0;
+  private inflight: Promise<void> | null = null;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
 
@@ -87,24 +91,40 @@ export class AccessVerifier {
 
   private async key(kid: string): Promise<Jwk | undefined> {
     const stale = this.now() - this.fetchedAt > JWKS_TTL_MS;
-    if (stale || !this.keys.has(kid)) {
+    if (this.inflight) {
+      // A fetch is already running (cold start or rotation): wait for it, so parallel first
+      // requests do not 403 as "unknown key".
+      try {
+        await this.inflight;
+      } catch (err) {
+        if (!this.keys.has(kid)) throw err;
+      }
+    } else if (stale || (!this.keys.has(kid) && this.now() - this.fetchedAt > 60_000)) {
       // Refetch on an unknown kid too, so a key rotation needs no restart. At most once a
       // minute, so a stream of forged kids can't turn into a stream of fetches.
-      if (stale || this.now() - this.fetchedAt > 60_000) {
-        try {
-          await this.refresh();
-        } catch (err) {
-          // A failed refetch keeps the keys already held, so one bad answer from Cloudflare
-          // can't lock everyone out. With no key for this kid, the failure is the answer.
-          if (!this.keys.has(kid)) throw err;
-        }
+      try {
+        await this.refresh();
+      } catch (err) {
+        // A failed refetch keeps the keys already held, so one bad answer from Cloudflare
+        // can't lock everyone out, up to KEY_MAX_AGE_MS. With no key for this kid, the failure is the answer.
+        if (!this.keys.has(kid)) throw err;
       }
+    }
+    if (this.keys.size > 0 && this.now() - this.lastGoodAt > KEY_MAX_AGE_MS) {
+      throw new Error('held Access keys are older than 24 hours and the certs endpoint does not answer');
     }
     return this.keys.get(kid);
   }
 
-  private async refresh(): Promise<void> {
+  private refresh(): Promise<void> {
     this.fetchedAt = this.now();
+    this.inflight = this.doRefresh().finally(() => {
+      this.inflight = null;
+    });
+    return this.inflight;
+  }
+
+  private async doRefresh(): Promise<void> {
     const res = await this.fetchImpl(`${this.issuer}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) throw new Error(`Access certs answered HTTP ${res.status}`);
     const body = (await res.json()) as { keys?: Jwk[] };
@@ -112,6 +132,7 @@ export class AccessVerifier {
     // An answer with no keys keeps the old ones, so one bad fetch can't lock everyone out.
     if (keys.size === 0) throw new Error('Access certs answered with no RSA keys');
     this.keys = keys;
+    this.lastGoodAt = this.now();
   }
 
   async verify(token: string | null): Promise<AccessResult> {
@@ -155,14 +176,17 @@ export class AccessVerifier {
     if (payload.iss !== this.issuer) return { ok: false, reason: 'JWT has the wrong issuer' };
     if (typeof payload.exp !== 'number' || payload.exp + CLOCK_SKEW_SEC < nowSec) return { ok: false, reason: 'JWT expired' };
     if (typeof payload.nbf === 'number' && payload.nbf - CLOCK_SKEW_SEC > nowSec) return { ok: false, reason: 'JWT not yet valid' };
-    const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : '';
-    if (email) {
-      if (!this.cfg.emails.includes(email)) return { ok: false, reason: 'email not allowed' };
+    // Any `email` claim, even an empty or non-string one, sends the token down the person path.
+    if (payload.email !== undefined) {
+      const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : '';
+      if (!email || !this.cfg.emails.includes(email)) return { ok: false, reason: 'email not allowed' };
       return { ok: true, email, kind: 'person' };
     }
     // No email: a service token. Only a client id in the agents map gets through.
+    // A service token has type "app" and an empty subject; a client-certificate JWT also carries common_name.
+    if (payload.type !== 'app' || (payload.sub !== undefined && payload.sub !== '')) return { ok: false, reason: 'email not allowed' };
     const cn = typeof payload.common_name === 'string' ? payload.common_name : '';
-    const agent = cn ? Object.hasOwn(this.cfg.agents ?? {}, cn) ? this.cfg.agents![cn] : undefined : undefined;
+    const agent = cn && Object.hasOwn(this.cfg.agents ?? {}, cn) ? this.cfg.agents![cn] : undefined;
     if (!agent) return { ok: false, reason: cn ? 'service token not allowed' : 'email not allowed' };
     return { ok: true, email: `agent:${agent}`, kind: 'agent' };
   }

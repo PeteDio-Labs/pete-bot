@@ -94,6 +94,9 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
     if (Array.isArray(msg) || msg?.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
       return rpcError(null, -32600, 'invalid request: one JSON-RPC 2.0 object per POST', 400);
     }
+    if (msg.id !== undefined && msg.id !== null && typeof msg.id !== 'string' && typeof msg.id !== 'number') {
+      return rpcError(null, -32600, 'invalid request: id must be a string, number or null', 400);
+    }
     const id = msg.id ?? null;
     if (msg.id === undefined) return new Response(null, { status: 202 });
 
@@ -131,7 +134,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request, peer: string | u
           inputLength,
           ok: result.ok,
           bytes: Buffer.byteLength(body.text),
-          redacted: body.changed,
+          redacted: body.changed || (result.ok && result.redacted),
           ms: Date.now() - started,
           ...(result.ok ? {} : { error: body.text }),
         });

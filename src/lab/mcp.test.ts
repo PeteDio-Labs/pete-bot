@@ -456,3 +456,54 @@ describe('check_secrets', () => {
     expect(() => new VaultMetadataClient({ ...cfg, caPem: '' })).toThrow('CA PEM');
   });
 });
+
+describe('AccessVerifier hardening (PET-929)', () => {
+  const CID = `${'d'.repeat(32)}.access`;
+  const agentClaims = (over: Record<string, unknown> = {}) => ({ aud: [AUD], iss: `https://${TEAM}`, exp: NOW / 1000 + 300, common_name: CID, type: 'app', ...over });
+  const withAgent = () =>
+    new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: ['pedelgadillo@gmail.com'], agents: { [CID]: 'batsy' }, now: () => NOW, fetch: (async () => json(jwks)) as unknown as typeof fetch });
+
+  it('admits a service token that has type app and no subject', async () => {
+    expect(await withAgent().verify(sign(agentClaims()))).toEqual({ ok: true, email: 'agent:batsy', kind: 'agent' });
+  });
+
+  it('never lets an empty or non-string email claim take the agent path', async () => {
+    for (const email of ['', null, 7, ['a']]) {
+      expect(await withAgent().verify(sign(agentClaims({ email })))).toEqual({ ok: false, reason: 'email not allowed' });
+    }
+  });
+
+  it('refuses a common_name without the service-token shape', async () => {
+    expect(await withAgent().verify(sign(agentClaims({ type: undefined })))).toEqual({ ok: false, reason: 'email not allowed' });
+    expect(await withAgent().verify(sign(agentClaims({ sub: 'someone' })))).toEqual({ ok: false, reason: 'email not allowed' });
+  });
+
+  it('shares one key fetch between parallel first requests', async () => {
+    let fetches = 0;
+    const v = new AccessVerifier({
+      teamDomain: TEAM,
+      aud: AUD,
+      emails: ['pedelgadillo@gmail.com'],
+      now: () => NOW,
+      fetch: (async () => {
+        fetches++;
+        await new Promise((r) => setTimeout(r, 30));
+        return json(jwks);
+      }) as unknown as typeof fetch,
+    });
+    const results = await Promise.all([1, 2, 3].map(() => v.verify(good())));
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(fetches).toBe(1);
+  });
+
+  it('stops counting held keys after 24 hours without a good fetch', async () => {
+    let now = NOW;
+    let down = false;
+    const v = new AccessVerifier({ teamDomain: TEAM, aud: AUD, emails: ['pedelgadillo@gmail.com'], now: () => now, fetch: (async () => (down ? new Response('no', { status: 500 }) : json(jwks))) as unknown as typeof fetch });
+    expect((await v.verify(good())).ok).toBe(true);
+    down = true;
+    now += 25 * 3600_000;
+    const later = sign({ aud: [AUD], iss: `https://${TEAM}`, email: 'pedelgadillo@gmail.com', exp: now / 1000 + 300 });
+    expect((await v.verify(later)).ok).toBe(false);
+  });
+});

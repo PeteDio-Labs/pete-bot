@@ -17,6 +17,7 @@
  * look alike.
  */
 import { z } from 'zod';
+import { redactDeep } from './redact.js';
 
 /** The most text one tool call returns. A model pays for every byte of a tool result. */
 export const DEFAULT_OUTPUT_CAP_BYTES = 16 * 1024;
@@ -44,6 +45,12 @@ export interface McpTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
    */
   ignoredKeys?: readonly string[];
   /**
+   * Treat a key whose value is `null` as not given. Models send `null` for an optional argument
+   * they skip, and a strict schema refuses it. A required key sent as `null` still fails as
+   * missing. Set it only on a read-only tool.
+   */
+  nullMeansOmitted?: boolean;
+  /**
    * `read` changes nothing outside this process. `write` starts or changes something, such as a
    * queued review, and sets `readOnlyHint` false. A server lists only the tiers it was built to
    * expose (see createMcpHandler `exposeTiers`), so a tool outside them is an unknown tool.
@@ -52,7 +59,7 @@ export interface McpTool<S extends z.ZodTypeAny = z.ZodTypeAny> {
   run(input: z.infer<S>): Promise<ToolOutput>;
 }
 
-export type ToolResult = { ok: true; text: string; truncated: boolean } | { ok: false; error: string };
+export type ToolResult = { ok: true; text: string; truncated: boolean; redacted: boolean } | { ok: false; error: string };
 
 /** A read that failed in a way the caller should see. The message must carry no secret. */
 export class McpToolError extends Error {
@@ -74,6 +81,32 @@ export function capText(text: string, capBytes: number): { text: string; truncat
   return { text: kept + note(bytes.length - Buffer.byteLength(kept, 'utf8')), truncated: true };
 }
 
+/**
+ * Render a tool's output as JSON text of at most `capBytes`. An answer that fits is returned as is.
+ * One that does not keeps a valid `{ source, truncated, note, data }` envelope, with `data` cut to a
+ * string prefix, so a caller that parses the text never meets a half-cut document.
+ */
+export function capEnvelope(out: ToolOutput, capBytes: number): { text: string; truncated: boolean } {
+  const full = JSON.stringify(out, null, 1);
+  const fullBytes = Buffer.byteLength(full, 'utf8');
+  if (fullBytes <= capBytes) return { text: full, truncated: false };
+  const dataText = typeof out.data === 'string' ? out.data : JSON.stringify(out.data, null, 1);
+  const build = (n: number) => {
+    let cut = dataText.slice(0, n);
+    if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1); // never end on half a surrogate pair
+    return JSON.stringify({ source: out.source, truncated: true, note: `data cut to fit ${capBytes} bytes; the full answer was ${fullBytes} bytes`, data: cut }, null, 1);
+  };
+  let lo = 0;
+  let hi = dataText.length;
+  if (Buffer.byteLength(build(0), 'utf8') > capBytes) return capText(full, capBytes); // the source line alone is over the cap
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (Buffer.byteLength(build(mid), 'utf8') <= capBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return { text: build(lo), truncated: true };
+}
+
 /** Validate the input, run the tool, and render the result as capped JSON text. */
 export async function callTool(
   tool: McpTool,
@@ -87,15 +120,21 @@ export async function callTool(
     ignored?.length && rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
       ? Object.fromEntries(Object.entries(rawInput).filter(([k]) => !ignored.includes(k)))
       : rawInput;
-  const parsed = schema.safeParse(input ?? {});
+  const cleaned =
+    tool.nullMeansOmitted && input && typeof input === 'object' && !Array.isArray(input)
+      ? Object.fromEntries(Object.entries(input).filter(([, v]) => v !== null))
+      : input;
+  const parsed = schema.safeParse(cleaned ?? {});
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`);
     return { ok: false, error: `${tool.name}: invalid input: ${issues.join('; ')}` };
   }
   try {
-    const out = await tool.run(parsed.data);
-    const { text, truncated } = capText(JSON.stringify(out, null, 1), capBytes);
-    return { ok: true, text, truncated };
+    const ran = await tool.run(parsed.data);
+    // Redact the values first: once serialized, a quoted credential is escaped and no longer matches.
+    const { value, changed } = redactDeep(ran);
+    const { text, truncated } = capEnvelope(value as ToolOutput, capBytes);
+    return { ok: true, text, truncated, redacted: changed };
   } catch (err) {
     // A McpToolError carries a message written for the caller. Anything else is a bug, and
     // its message may hold internals, so only its class name crosses.
