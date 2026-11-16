@@ -34,6 +34,16 @@ describe('loadDeskSettings', () => {
     expect(s.settings.noCiRepos.size).toBe(0);
   });
 
+  it('reads review-only repos, and refuses a bad or overlapping name', () => {
+    const none = load(good);
+    const some = load({ ...good, DESK_REVIEW_ONLY_REPOS: 'pete-bot, toonish-ui' });
+    if (none.state !== 'ready' || some.state !== 'ready') throw new Error('expected ready');
+    expect(none.settings.reviewOnlyRepos).toEqual([]);
+    expect(some.settings.reviewOnlyRepos).toEqual(['pete-bot', 'toonish-ui']);
+    expect(load({ ...good, DESK_REVIEW_ONLY_REPOS: 'PeteDio-Labs/x' }).state).toBe('misconfigured');
+    expect(load({ ...good, DESK_REVIEW_ONLY_REPOS: 'petedio-vault' }).state).toBe('misconfigured');
+  });
+
   it('keeps Claude reviews off until DESK_CLAUDE_REVIEWERS is set, and lower-cases the logins', () => {
     const off = load(good);
     const on = load({ ...good, DESK_CLAUDE_REVIEWERS: 'PeteDillo, claude-reviewer[bot]' });

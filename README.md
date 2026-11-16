@@ -198,7 +198,7 @@ Claude's review is the review of record. A thread that wants Codex as a second o
 `request_codex_review` (repo, PR, optional effort) and then polls `check_codex_review`. Only the lab MCP serves
 these two tools: the `/lab` model loop and the media assistant do not. lab-agent holds no key to codex-248. It
 calls `POST|GET /v1/codex-review` on pete-bot, which queues through the merge desk's own `CodexQueue`, so the
-gate's one-review-at-a-time lock and repo-name check apply. A request is limited to `DESK_REPOS`, to an open PR,
+gate's one-review-at-a-time lock and repo-name check apply. A request is limited to `DESK_REPOS` plus `DESK_REVIEW_ONLY_REPOS` (repos where a thread may ask for Codex but the desk never decides or merges), to an open PR,
 and to a head with no Codex review yet. A repeat for the same head answers `already-queued`.
 
 The queue call answers at once and the review takes minutes. A quota refusal (`rate_limit_reached` or
