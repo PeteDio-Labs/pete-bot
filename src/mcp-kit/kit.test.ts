@@ -170,4 +170,14 @@ describe('errors and the write tier', () => {
     const small = await callTool({ ...tool, run: async () => ({ source: 's', data: { a: 1 } }) }, {}, 4096);
     expect(small.ok && JSON.parse(small.text)).toEqual({ source: 's', data: { a: 1 } });
   });
+  test('a secret-named field in an oversized object is redacted by its key', async () => {
+    const secret = j('canary-', 'value-123');
+    const tool: McpTool = { name: 't', description: 'x', input: z.object({}), tier: 'read', run: async () => ({ source: 's', data: { password: secret, nested: { api_key: secret }, padding: 'x'.repeat(20000) } }) };
+    for (const cap of [4096, 64 * 1024]) {
+      const r = await callTool(tool, {}, cap);
+      if (!r.ok) throw new Error('expected ok');
+      expect(r.text).not.toContain(secret);
+      expect(r.redacted).toBe(true);
+    }
+  });
 });
