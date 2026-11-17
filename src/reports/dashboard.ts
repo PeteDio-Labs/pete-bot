@@ -13,6 +13,8 @@
  * 237 admits only the tunnel host (LXC 112); the JWT check holds even if that rule is lost
  * (the lab MCP uses the same two checks, lab/access.ts).
  */
+import { buildDashboardFeed } from './feed.js';
+import { activeBatches } from '../server/alertStore.js';
 import express, { type Express } from 'express';
 import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
@@ -141,6 +143,14 @@ export function createDashboardApp(d: DashboardDeps): Express {
       res.status(502).json({ error: `the summary was not written: ${(err as Error).message.slice(0, 120)}` });
     } finally {
       if (started) generating = false;
+    }
+  });
+
+  app.get('/api/dashboard', (_req, res) => {
+    try {
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now: new Date() }));
+    } catch (err) {
+      res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }
   });
 
