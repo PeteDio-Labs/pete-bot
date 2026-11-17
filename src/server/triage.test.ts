@@ -5,7 +5,7 @@ const reply = (content: string) => (async () => new Response(JSON.stringify({ me
 
 describe('parseTriage', () => {
   test('reads the three fields', () => {
-    expect(parseTriage('{"act":true,"why":"vzdump failed","step":"Rerun the backup"}')).toEqual({ act: true, why: 'vzdump failed', step: 'Rerun the backup' });
+    expect(parseTriage('{"act":true,"why":"vzdump failed","step":"The backup needs another run"}')).toEqual({ act: true, why: 'vzdump failed', step: 'The backup needs another run' });
   });
   test('strips think blocks and surrounding text', () => {
     expect(parseTriage('<think>x</think> ok {"act":false,"why":"blip","step":""} done')?.act).toBe(false);
@@ -20,7 +20,7 @@ describe('parseTriage', () => {
 
 describe('triageNote', () => {
   test('adds a line only when action is needed', () => {
-    expect(triageNote({ act: true, why: 'disk full', step: 'Free space on 244' })).toContain('unverified');
+    expect(triageNote({ act: true, why: 'disk full', step: 'Free space is low on 244' })).toContain('unverified');
     expect(triageNote({ act: false, why: 'blip', step: '' })).toBeUndefined();
     expect(triageNote(null)).toBeUndefined();
   });

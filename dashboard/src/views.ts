@@ -1,6 +1,6 @@
 /** The kit's markup helpers, wrapped per section. Every helper escapes its input; this file adds no raw HTML from data. */
 import { bars, delta, disclosure, list, meter, meters, spark, statusTile, uptime, esc } from 'toonish-ui/markup';
-import { ageText, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
+import { ageText, STALE_MS, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
 
 const HEALTH_WORD: Record<Health, string> = { ok: 'healthy', down: 'down', unknown: 'unknown' };
 const HEALTH_MARK: Record<Health, string> = { ok: '● ', down: '▲ ', unknown: '? ' };
@@ -9,10 +9,16 @@ const p = (text: string, cls = ''): string => `<p class="${cls}">${esc(text)}</p
 /** What the section read, always first. */
 const examined = (text: string): string => `<p class="dash-examined">${esc(text)}</p>`;
 
+/** Needs and alerts carry no time of their own, so they are unread when the feed said so or when the feed itself is older than STALE_MS (a cached copy after failed polls). */
+export function liveUnread(d: DashboardData, now: number, key: 'needs' | 'alerts'): boolean {
+  const at = Date.parse(d.generatedAt);
+  return d.unread.includes(key) || !Number.isFinite(at) || now - at > STALE_MS;
+}
+
 export function nowView(d: DashboardData, now: number): string {
   const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
   const read = `Read ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length, 'service')} and ${plural(d.needs.length, 'item')} that ${d.needs.length === 1 ? 'needs' : 'need'} you, ${ageText(d.generatedAt, now)}. Source: ${d.source}.`;
-  if (d.unread.includes('needs')) return examined(`The list of items that need you was not read in full, so it is unknown whether anything needs you. ${read}`);
+  if (liveUnread(d, now, 'needs')) return examined(`The list of items that need you was not read in full or is out of date, so it is unknown whether anything needs you. ${read}`);
   if (d.needs.length === 0) return examined(read) + p('Nothing needs you. Every item above was read and none asks for a step.', 'dash-calm');
   const rows = d.needs.map((n, i) =>
     disclosure({ id: `need-${i}`, lead: String(i + 1).padStart(2, '0'), title: n.title, value: ageText(n.since, now), native: true, open: i === 0, panel: `<p><strong>Why.</strong> ${esc(n.why)}</p><p><strong>Do this.</strong> ${esc(n.step)}</p>` }),
@@ -23,7 +29,7 @@ export function nowView(d: DashboardData, now: number): string {
 export function alertsView(d: DashboardData, now: number): string {
   const t = d.triage;
   const ledger = t ? `Triage read ${t.read} alerts since ${t.since}: ${t.cards} cards, ${t.plain} plain, ${t.failures} Qwen failures.` : 'The triage ledger is missing, so card and fallback counts are unknown.';
-  if (d.unread.includes('alerts') && d.alerts.length === 0) return examined(`The alert list was not read in full, so it is unknown whether any alert is open. ${ledger}`);
+  if (liveUnread(d, now, 'alerts') && d.alerts.length === 0) return examined(`The alert list was not read in full or is out of date, so it is unknown whether any alert is open. ${ledger}`);
   if (d.alerts.length === 0) return examined(`Read 0 alerts. ${ledger}`) + p('No alert records were returned.');
   const word = { act: 'Needs you', no_action: 'No action', unreadable: 'Triage unreadable, plain alert sent', off: 'Triage off' } as const;
   const rows = d.alerts.map((a, i) =>
@@ -148,8 +154,8 @@ export function tiles(d: DashboardData, now: number): string {
   const downAlerts = d.alerts.filter((a) => a.state === 'down').length;
   const kev = d.cve && d.cve.kevChecked ? d.cve.findings.filter((f) => f.kev).length : null;
   const t = [
-    d.unread.includes('needs') ? statusTile({ label: 'Needs you', state: 'unknown' }) : statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
-    d.unread.includes('alerts') ? statusTile({ label: 'Alerts down', state: 'unknown' }) : statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),
+    liveUnread(d, now, 'needs') ? statusTile({ label: 'Needs you', state: 'unknown' }) : statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
+    liveUnread(d, now, 'alerts') ? statusTile({ label: 'Alerts down', state: 'unknown' }) : statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),
     probes.length
       ? statusTile({ label: 'Probes', value: `${probes.length - unknown - down} of ${probes.length} healthy`, state: down ? 'down' : unknown ? 'warn' : 'ok', detail: unknown ? `${unknown} unknown` : undefined, readAt: d.generatedAt })
       : statusTile({ label: 'Probes', state: 'unknown' }),

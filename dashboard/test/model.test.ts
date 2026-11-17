@@ -137,3 +137,22 @@ describe('CVE coverage gaps', () => {
     expect(data.cve?.kevChecked).toBe(false);
   });
 });
+
+describe('stale cached live sections and dropped CVE findings', () => {
+  test('a cached feed older than five minutes shows needs and alerts as unknown', async () => {
+    const { tiles, nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', services: [], needs: [], alerts: [] });
+    const late = Date.parse('2026-11-16T22:06:00Z');
+    expect(nowView(data, late)).toContain('out of date');
+    expect(tiles(data, late)).not.toContain('>0<');
+    expect(nowView(data, Date.parse('2026-11-16T22:01:00Z'))).toContain('Nothing needs you');
+  });
+  test('a CVE finding that fails validation makes the coverage unknown, not clean', async () => {
+    const { tiles, cveView } = await import('../src/views.ts');
+    const now = Date.parse('2026-11-16T12:01:00Z');
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T12:00:00Z', services: [], needs: [], alerts: [], cve: { checkedAt: '2026-11-16T12:00:00Z', hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings: [{ id: 'CVE-1', pkg: 'p', severity: 'sideways', kev: true }] } });
+    expect(data.cve?.kevChecked).toBe(false);
+    expect(cveView(data, now)).toContain('not a clean result');
+    expect(tiles(data, now)).not.toMatch(/Exploited CVEs[^]*?>0</);
+  });
+});

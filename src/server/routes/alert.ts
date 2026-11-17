@@ -146,30 +146,43 @@ export function createAlertHandler(
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Monitors whose deadline DM is in flight, with a promise that settles when the attempt ends. */
   const announcing = new Map<string, Promise<void>>();
+  /** Monitors whose ordinary DOWN is waiting on triage. It settles when recordDown has registered the outage. */
+  const triaging = new Map<string, Promise<void>>();
 
-  /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
+  /**
+   * The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed.
+   *
+   * ⚠ An ordinary DOWN holds `triaging` from before triage until its message is sent and attached. A repeated DOWN
+   * for the same monitor waits for it, then finds the incident and edits it. An UP waits too, so a recovery is never
+   * taken for an orphan and no older DOWN opens a red incident after it. A deadline DM keeps its own `announcing`
+   * entry and is not serialised here.
+   */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
+    while (!announcing.has(monitor) && triaging.has(monitor)) await triaging.get(monitor);
+    let release: (() => void) | undefined;
+    if (!announcing.has(monitor) && !isInBatch(monitor)) triaging.set(monitor, new Promise<void>((r) => (release = r)));
+    try {
+      return await sendDownNow(dm, monitor, detail, note, since);
+    } finally {
+      if (release) {
+        triaging.delete(monitor);
+        release();
+      }
+    }
+  }
+
+  async function sendDownNow(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
     // ⚠ Triage runs BEFORE recordDown. A DOWN that waited on Qwen inside the batch would leave a second DOWN
     // an open batch with no message to edit. A monitor already in a batch edits its message and asks nothing.
     // A held DOWN announced at its deadline is triaged too: it is probably the outage that most needs a step.
     let hint: string | undefined;
     if (triage && !isInBatch(monitor)) {
-      // ⚠ An UP that lands while triage waits must not be taken for an orphan: it waits on `announcing` like an
-      // UP behind a deadline DM, and runs once recordDown has registered the outage. A deadline DM already holds
-      // its own entry, so this adds one only for an ordinary DOWN.
-      let release: (() => void) | undefined;
-      if (!announcing.has(monitor)) announcing.set(monitor, new Promise<void>((r) => (release = r)));
       try {
         const result = await triage({ monitor, detail });
         hint = triageNote(result);
         logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable_or_skipped' : result.act ? 'act' : 'no_action'}`);
       } catch (err) {
         logger.warn(`[alert] triage failed for ${monitor}, sending the plain DM: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        if (release) {
-          announcing.delete(monitor);
-          release();
-        }
       }
     }
     const { batch, action } = recordDown(monitor, { since });
@@ -324,7 +337,7 @@ export function createAlertHandler(
     if (up) {
       // An UP that lands while the deadline DM is in flight waits for it, then takes the
       // ordinary path below against the message that now exists.
-      while (announcing.has(monitor)) await announcing.get(monitor);
+      while (announcing.has(monitor) || triaging.has(monitor)) await (announcing.get(monitor) ?? triaging.get(monitor));
       // A held DOWN that recovers before its deadline is released with no DM, and its
       // recovery time trains the deadline.
       const hold = getHold(monitor);

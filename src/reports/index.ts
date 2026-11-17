@@ -122,12 +122,18 @@ export function getHub(): ReportHub | null {
  * A routine report that arrived over /v1/notify (the drift check). Kept as hub kind `report-drift`
  * only where the dashboard is listening, so quiet never means unread. One record per run. Returns false when it kept nothing, and the caller DMs.
  */
+/** `YYYY-MM-DD-hhmmxxxx`: the UTC minute plus four random characters, so two runs in one minute keep both records. */
+export function driftRecordId(at: Date, rand: () => number = Math.random): string {
+  const suffix = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, '0');
+  return `${at.toISOString().slice(0, 10)}-${at.toISOString().slice(11, 16).replace(':', '')}${suffix}`;
+}
+
 export function keepNotifyReport(from: string, text: string, at: Date): boolean {
   if (!hub || !dashboardListening) return false;
   const name = /drift/i.test(from) ? 'drift' : null;
   if (!name) return false;
-  // One record per run (date and UTC hour-minute), so a retry or manual run never replaces the first night's findings.
-  hub.save(`report-${name}`, { id: `${at.toISOString().slice(0, 10)}-${at.toISOString().slice(11, 16).replace(':', '')}`, generatedAt: at.toISOString(), name, text, ok: true, incomplete: false });
+  // One record per run (date, UTC minute and a random suffix), so a retry or manual run never replaces the first night's findings.
+  hub.save(`report-${name}`, { id: driftRecordId(at), generatedAt: at.toISOString(), name, text, ok: true, incomplete: false });
   return true;
 }
 

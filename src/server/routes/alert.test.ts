@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'bun:test';
 import request from 'supertest';
 import { createApp } from '../index.js';
-import { reset, heldCount, activeBatches } from '../alertStore.js';
+import { reset, heldCount, activeBatches, size } from '../alertStore.js';
 import { config } from '../../config.js';
 import { parseWindows } from '../decider.js';
 import { resetBaseline } from '../baseline.js';
@@ -675,9 +675,9 @@ describe('triage on a new DOWN', () => {
   }
 
   it('adds the step when Qwen says the owner must act', async () => {
-    const { res, d } = await post(async () => ({ act: true, why: 'the backup job failed', step: 'Rerun the vzdump job' }));
+    const { res, d } = await post(async () => ({ act: true, why: 'the backup job failed', step: 'The vzdump job needs another run' }));
     expect(res.status).toBe(200);
-    expect(JSON.stringify(d.send.mock.calls[0])).toContain('Rerun the vzdump job');
+    expect(JSON.stringify(d.send.mock.calls[0])).toContain('The vzdump job needs another run');
     expect(JSON.stringify(d.send.mock.calls[0])).toContain('unverified');
   });
 
@@ -722,5 +722,38 @@ describe('triage on a new DOWN', () => {
     // The recovery edits the DOWN's message, not a new orphan DM.
     expect(ur.body.action).toBe('edited');
     expect(d.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('serialises a repeated DOWN with the first triage, so a recovery leaves no red incident behind', async () => {
+    const express = (await import('express')).default;
+    const { createAlertHandler } = await import('./alert.js');
+    const d = fakeDiscord();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    const triage = async () => {
+      calls++;
+      await gate;
+      return { act: true, why: 'w', step: 'a step' };
+    };
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
+    const send = (status: number) =>
+      request(app).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send({ heartbeat: { status, msg: 'm' }, monitor: { name: 'plex-backup' } }).then((r) => r);
+    const first = send(0);
+    await new Promise((r) => setTimeout(r, 40));
+    const second = send(0);
+    await new Promise((r) => setTimeout(r, 40));
+    const up = send(1);
+    await new Promise((r) => setTimeout(r, 40));
+    release();
+    const [a, b, c] = await Promise.all([first, second, up]);
+    expect(calls).toBe(1);
+    expect(a.body.action).toBe('sent');
+    expect(b.body.action).toBe('edited');
+    expect(c.body.action).toBe('edited');
+    expect(d.send).toHaveBeenCalledTimes(1);
+    expect(size()).toBe(0);
   });
 });

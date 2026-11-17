@@ -13,7 +13,7 @@
       "id": "n1",
       "title": "Plex backup on pve03 failed",
       "why": "The nightly vzdump job for the Plex guest exited with an error.",
-      "step": "Rerun the backup job, then check free space on the backup store.",
+      "step": "The backup job needs another run, and the backup store has low free space.",
       "since": "2026-11-16T06:50:00Z"
     }
   ],
@@ -23,7 +23,7 @@
       "state": "down",
       "since": "2026-11-16T06:50:00Z",
       "triage": "act",
-      "step": "Rerun the backup job",
+      "step": "The backup job needs another run",
       "why": "vzdump exited with an error"
     },
     {

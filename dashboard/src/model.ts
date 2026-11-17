@@ -180,11 +180,15 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
   let cve: DashboardData['cve'] = null;
   if (isObj(o.cve) && str(o.cve.checkedAt) && Array.isArray(o.cve.findings)) {
     const findings: CveFinding[] = [];
+    let droppedFinding = false;
     for (const f of o.cve.findings) {
       if (isObj(f) && str(f.id) && str(f.pkg) && SEVERITY_ORDER.includes(f.severity as Severity)) findings.push({ id: str(f.id, 60), pkg: str(f.pkg, 100), host: str(f.host, 80), severity: f.severity as Severity, fixed: str(f.fixed, 60) || null, kev: f.kev === true });
-      else problems.push('a CVE finding was unreadable');
+      else {
+        problems.push('a CVE finding was unreadable');
+        droppedFinding = true;
+      }
     }
-    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, gaps: Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : [], kevChecked: o.cve.kevChecked === true };
+    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, gaps: [...(Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : []), ...(droppedFinding ? ['a finding could not be read, so the list may be missing an exploited one'] : [])], kevChecked: o.cve.kevChecked === true && !droppedFinding };
   } else problems.push('the CVE report is missing');
   const services: ServiceRow[] = [];
   for (const s of arr('services')) {

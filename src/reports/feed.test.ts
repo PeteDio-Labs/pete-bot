@@ -13,10 +13,10 @@ const batch = (monitors: AlertBatch['monitors']): AlertBatch => ({ id: 'b1', ope
 
 describe('buildDashboardFeed', () => {
   it('lists open alerts and turns a triage note into a needs row', () => {
-    const f = feed({ hub: null, now, batches: [batch({ 'Plex backup': { since: 1_000, checks: 1, note: '**Suggested by the local model (unverified):** Free space on pve03\nWhy: the vzdump failed' }, Grafana: { since: 2_000, checks: 1 } })] });
+    const f = feed({ hub: null, now, batches: [batch({ 'Plex backup': { since: 1_000, checks: 1, note: '**Suggested by the local model (unverified):** Free space is low on pve03\nWhy: the vzdump failed' }, Grafana: { since: 2_000, checks: 1 } })] });
     expect(f.alerts).toHaveLength(2);
     expect(f.needs).toHaveLength(1);
-    expect(f.needs[0]!).toMatchObject({ title: 'Plex backup', step: 'Free space on pve03', why: 'the vzdump failed' });
+    expect(f.needs[0]!).toMatchObject({ title: 'Plex backup', step: 'Free space is low on pve03', why: 'the vzdump failed' });
     expect(f.alerts.find((a: Row) => a.monitor === 'Grafana')?.triage).toBe('off');
   });
 

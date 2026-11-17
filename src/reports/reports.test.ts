@@ -473,3 +473,15 @@ describe('incompleteReason, redaction and caps', () => {
     expect(incompleteReason(text)).toBe('a; b (+1 more)');
   });
 });
+
+describe('driftRecordId', () => {
+  it('two runs in the same minute get different ids that fit the hub id format', async () => {
+    const { driftRecordId } = await import('./index.js');
+    const at = new Date('2026-11-17T11:15:30Z');
+    const a = driftRecordId(at, () => 0.1);
+    const b = driftRecordId(at, () => 0.7);
+    expect(a).not.toBe(b);
+    for (const id of [a, b]) expect(id).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z0-9]{1,16}$/);
+    expect(a.startsWith('2026-11-17-1115')).toBe(true);
+  });
+});
