@@ -1,0 +1,87 @@
+# Deploys the dashboard to its AWS primary: the SPA to S3 and CloudFront, the API handler to Lambda.
+#
+# Gated by the `dashboard-aws` environment, which holds AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for the deploy
+# user. Pedro places them with `scripts/dashboard-deploy-key.sh` in petedio-iac; no session places them. BUCKET and
+# DISTRIBUTION_ID are repository variables copied from the Terraform outputs after the apply.
+#
+# ⚠ THE LOG SAYS WHAT WAS SENT. Each step prints a count and the job fails on zero, so a deploy of nothing cannot
+# look like a success. Fixtures never reach the bucket: the AWS build reads /api/dashboard.
+name: dashboard-deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['dashboard/**', '.github/workflows/dashboard-deploy.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  AWS_DEFAULT_REGION: us-east-2
+  BUCKET: ${{ vars.DASHBOARD_BUCKET }}
+  DISTRIBUTION_ID: ${{ vars.DASHBOARD_DISTRIBUTION_ID }}
+  FUNCTION: petedio-dash-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dashboard-aws
+    steps:
+      - name: Refuse to run without its targets
+        run: |
+          test -n "$BUCKET" || { echo "::error::repository variable DASHBOARD_BUCKET is empty; set it from the Terraform output"; exit 1; }
+          test -n "$DISTRIBUTION_ID" || { echo "::error::repository variable DASHBOARD_DISTRIBUTION_ID is empty; set it from the Terraform output"; exit 1; }
+          test -n "${AWS_ACCESS_KEY_ID:-}" || { echo "::error::the dashboard-aws environment has no AWS_ACCESS_KEY_ID"; exit 1; }
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Build the SPA and the API handler
+        working-directory: dashboard
+        env:
+          DASHBOARD_FEED: /api/dashboard
+          DASHBOARD_SWITCH: /api/switch
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
+          bun run build:api
+          files=$(find dist -type f ! -path 'dist/fixtures/*' | wc -l)
+          test "$files" -ge 4 || { echo "::error::only $files files in dashboard/dist"; exit 1; }
+          test -s api/dist/handler.mjs || { echo "::error::the API handler is empty"; exit 1; }
+          echo "built $files SPA files and a $(stat -c %s api/dist/handler.mjs) byte handler"
+      - name: Sync the SPA to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          out=$(aws s3 sync dashboard/dist "s3://$BUCKET" --delete --exclude 'fixtures/*' 2>&1 | tee /dev/stderr)
+          uploaded=$(printf '%s\n' "$out" | grep -c '^upload:' || true)
+          present=$(aws s3 ls "s3://$BUCKET" --recursive | wc -l)
+          echo "uploaded $uploaded files; the bucket now holds $present objects"
+          test "$present" -ge 4 || { echo "::error::the bucket holds $present objects after the sync"; exit 1; }
+      - name: Invalidate CloudFront
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*' --query 'Invalidation.Id' --output text)
+          test -n "$id" && test "$id" != None || { echo "::error::no invalidation id came back"; exit 1; }
+          echo "invalidation $id created for /*"
+      - name: Update the Lambda
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          (cd dashboard/api/dist && zip -q ../handler.zip handler.mjs)
+          test -s dashboard/api/handler.zip || { echo "::error::the zip is empty"; exit 1; }
+          sha=$(aws lambda update-function-code --function-name "$FUNCTION" --zip-file fileb://dashboard/api/handler.zip --query 'CodeSha256' --output text)
+          test -n "$sha" && test "$sha" != None || { echo "::error::Lambda returned no CodeSha256"; exit 1; }
+          echo "updated $FUNCTION, CodeSha256 $sha"
