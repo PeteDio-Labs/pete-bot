@@ -111,3 +111,45 @@ describe('delivery', () => {
     expect(res.body.detail.length).toBe(300);
   });
 });
+
+describe('report kind', () => {
+  it('keeps a report for the dashboard and sends no DM when the keeper accepts it', async () => {
+    const { client, send } = fakeDiscord();
+    const kept: string[] = [];
+    const { createNotifyHandler } = await import('./notify.js');
+    const express = (await import('express')).default;
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/notify', createNotifyHandler(client, (from, msg) => (kept.push(`${from}|${msg}`), true)));
+    const res = await request(app).post('/v1/notify').set('authorization', `Bearer ${TOKEN}`).send({ from: 'lab-agent drift check', message: 'Drift: 1 finding.', kind: 'report' }).expect(200);
+    expect(res.body.action).toBe('kept');
+    expect(kept).toHaveLength(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('DMs when the keeper cannot keep it, or throws', async () => {
+    for (const keep of [() => false, () => { throw new Error('db'); }]) {
+      const { client, send } = fakeDiscord();
+      const { createNotifyHandler } = await import('./notify.js');
+      const express = (await import('express')).default;
+      const app = express();
+      app.use(express.json());
+      app.post('/v1/notify', createNotifyHandler(client, keep));
+      await request(app).post('/v1/notify').set('authorization', `Bearer ${TOKEN}`).send({ from: 'a', message: 'b', kind: 'report' }).expect(200);
+      expect(send).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('never keeps a message without the report kind', async () => {
+    const { client, send } = fakeDiscord();
+    const keep = vi.fn(() => true);
+    const { createNotifyHandler } = await import('./notify.js');
+    const express = (await import('express')).default;
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/notify', createNotifyHandler(client, keep));
+    await request(app).post('/v1/notify').set('authorization', `Bearer ${TOKEN}`).send({ from: 'a', message: 'Drift check FAILED' }).expect(200);
+    expect(keep).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});

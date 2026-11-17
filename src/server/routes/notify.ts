@@ -27,9 +27,14 @@ import { logger } from '../../utils/index.js';
 const NotifySchema = z.object({
   from: z.string().trim().min(1).max(100),
   message: z.string().trim().min(1).max(1800),
+  /** `report`: a routine finding list. The dashboard keeps it when it can, and the DM is the fallback. */
+  kind: z.enum(['report']).optional(),
 });
 
-export function createNotifyHandler(client: Client) {
+/** Where a report goes when the dashboard is listening. Returns false when it cannot keep it, so the DM still goes. */
+export type KeepReport = (from: string, message: string, at: Date) => boolean;
+
+export function createNotifyHandler(client: Client, keep: KeepReport = () => false) {
   return async function notifyHandler(req: Request, res: Response): Promise<void> {
     // The bearer check /v1/alert uses, against this route's own token.
     const expected = config.httpServer.notifyToken;
@@ -45,7 +50,19 @@ export function createNotifyHandler(client: Client) {
       return;
     }
 
-    const { from, message } = parsed.data;
+    const { from, message, kind } = parsed.data;
+    if (kind === 'report') {
+      try {
+        if (keep(from, message, new Date())) {
+          // Log who and how long, never the body.
+          logger.info(`/v1/notify kept a report from ${from} for the dashboard (${message.length} chars)`);
+          res.json({ ok: true, action: 'kept' });
+          return;
+        }
+      } catch (err) {
+        logger.error(`/v1/notify could not keep a report, so it DMs: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     try {
       const user = await client.users.fetch(config.discord.ownerUserId);
       const dm = (await user.createDM()) as DMChannel;

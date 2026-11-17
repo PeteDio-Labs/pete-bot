@@ -127,6 +127,10 @@ item per exploited or high-severity finding, at most five a day; the finding's k
 off or the save fails, the report goes out as a DM, so turning the DMs off cannot lose one. Set `REPORTS_DM=on` to
 get the DMs back. `/health` shows `kept for the dashboard` in each report's last result.
 
+The drift check posts its findings to `/v1/notify` with `kind: "report"`. When the dashboard is listening, pete-bot
+keeps them as `report-drift` and sends no DM. A failed drift read never sets `kind`, so it still DMs. If the hub is
+off or the save fails, the findings DM. `REPORTS_DM=on` keeps them in the DMs too.
+
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check
 that failed to read is listed under "Not read", and the title says INCOMPLETE. A run that
