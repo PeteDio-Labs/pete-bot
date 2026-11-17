@@ -12,6 +12,7 @@ const examined = (text: string): string => `<p class="dash-examined">${esc(text)
 export function nowView(d: DashboardData, now: number): string {
   const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
   const read = `Read ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length, 'service')} and ${plural(d.needs.length, 'item')} that ${d.needs.length === 1 ? 'needs' : 'need'} you, ${ageText(d.generatedAt, now)}. Source: ${d.source}.`;
+  if (d.unread.includes('needs')) return examined(`The list of items that need you was not read in full, so it is unknown whether anything needs you. ${read}`);
   if (d.needs.length === 0) return examined(read) + p('Nothing needs you. Every item above was read and none asks for a step.', 'dash-calm');
   const rows = d.needs.map((n, i) =>
     disclosure({ id: `need-${i}`, lead: String(i + 1).padStart(2, '0'), title: n.title, value: ageText(n.since, now), native: true, open: i === 0, panel: `<p><strong>Why.</strong> ${esc(n.why)}</p><p><strong>Do this.</strong> ${esc(n.step)}</p>` }),
@@ -22,6 +23,7 @@ export function nowView(d: DashboardData, now: number): string {
 export function alertsView(d: DashboardData, now: number): string {
   const t = d.triage;
   const ledger = t ? `Triage read ${t.read} alerts since ${t.since}: ${t.cards} cards, ${t.plain} plain, ${t.failures} Qwen failures.` : 'The triage ledger is missing, so card and fallback counts are unknown.';
+  if (d.unread.includes('alerts') && d.alerts.length === 0) return examined(`The alert list was not read in full, so it is unknown whether any alert is open. ${ledger}`);
   if (d.alerts.length === 0) return examined(`Read 0 alerts. ${ledger}`) + p('No alert records were returned.');
   const word = { act: 'Needs you', no_action: 'No action', unreadable: 'Triage unreadable, plain alert sent', off: 'Triage off' } as const;
   const rows = d.alerts.map((a, i) =>
@@ -33,8 +35,10 @@ export function alertsView(d: DashboardData, now: number): string {
 export function cveView(d: DashboardData, now: number): string {
   const c = d.cve;
   if (!c) return examined('The CVE report was not read, so the findings are unknown.');
-  const read = `Read ${c.packages} package versions on ${c.hosts} hosts against ${c.advisories} advisories, ${ageText(c.checkedAt, now)}.${c.notChecked.length ? ` Not checked: ${c.notChecked.join(', ')}.` : ''}`;
-  if (c.findings.length === 0) return examined(read) + p('No exploited or high-severity finding has a fix.');
+  const gaps = c.gaps.length ? ` The run could not examine: ${c.gaps.join('; ')}.` : '';
+  const kevNote = c.kevChecked ? '' : ' The exploited-vulnerability list was not read, so no finding is marked as exploited.';
+  const read = `Read ${c.packages} package versions on ${c.hosts} hosts against ${c.advisories} advisories, ${ageText(c.checkedAt, now)}.${c.notChecked.length ? ` Not checked: ${c.notChecked.join(', ')}.` : ''}${gaps}${kevNote}`;
+  if (c.findings.length === 0) return examined(read) + p(c.gaps.length || !c.kevChecked ? 'No finding was returned, but the run did not examine everything, so this is not a clean result.' : 'No exploited or high-severity finding has a fix.');
   const sorted = sortFindings(c.findings);
   const rows = sorted.map((f, i) =>
     disclosure({ id: `cve-${i}`, lead: f.kev ? 'KEV' : ({ critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' } as const)[f.severity], title: `${f.id} in ${f.pkg}`, value: f.severity, native: true, panel: `<p><strong>Host.</strong> ${esc(f.host)}</p><p><strong>Fix.</strong> ${f.fixed ? `Upgrade to ${esc(f.fixed)}.` : 'No fixed version is published.'}</p>${f.kev ? '<p>Exploited in the wild (CISA KEV).</p>' : ''}` }),
@@ -142,14 +146,14 @@ export function tiles(d: DashboardData, now: number): string {
   const unknown = probes.filter((h) => h === 'unknown').length;
   const down = probes.filter((h) => h === 'down').length;
   const downAlerts = d.alerts.filter((a) => a.state === 'down').length;
-  const kev = d.cve ? d.cve.findings.filter((f) => f.kev).length : null;
+  const kev = d.cve && d.cve.kevChecked ? d.cve.findings.filter((f) => f.kev).length : null;
   const t = [
     d.unread.includes('needs') ? statusTile({ label: 'Needs you', state: 'unknown' }) : statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
     d.unread.includes('alerts') ? statusTile({ label: 'Alerts down', state: 'unknown' }) : statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),
     probes.length
       ? statusTile({ label: 'Probes', value: `${probes.length - unknown - down} of ${probes.length} healthy`, state: down ? 'down' : unknown ? 'warn' : 'ok', detail: unknown ? `${unknown} unknown` : undefined, readAt: d.generatedAt })
       : statusTile({ label: 'Probes', state: 'unknown' }),
-    kev === null ? statusTile({ label: 'Exploited CVEs', state: 'unknown' }) : statusTile({ label: 'Exploited CVEs', value: String(kev), state: kev ? 'down' : 'ok', readAt: d.cve!.checkedAt }),
+    kev === null ? statusTile({ label: 'Exploited CVEs', state: 'unknown' }) : statusTile({ label: 'Exploited CVEs', value: String(kev), state: kev ? 'down' : d.cve!.gaps.length ? 'warn' : 'ok', detail: d.cve!.gaps.length ? 'run had gaps' : undefined, readAt: d.cve!.checkedAt }),
   ];
   return `<div class="toon-tiles">${t.join('')}</div>`;
 }

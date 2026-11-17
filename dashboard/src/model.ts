@@ -70,7 +70,7 @@ export interface DashboardData {
   triage: { read: number; cards: number; plain: number; failures: number; since: string } | null;
   needs: Needs[];
   alerts: AlertRow[];
-  cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[] } | null;
+  cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
@@ -160,14 +160,18 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     problems.push(`${k} is missing or not a list`);
     return [];
   };
-  const unread: ('needs' | 'alerts')[] = (['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k]));
+  const unread = new Set<'needs' | 'alerts'>((['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k])));
   const needs: Needs[] = [];
   for (const n of arr('needs')) if (isObj(n) && str(n.id) && str(n.title) && str(n.step)) needs.push({ id: str(n.id, 80), title: str(n.title, 160), why: str(n.why), step: str(n.step), since: str(n.since, 40) });
-  else problems.push('a needs row was unreadable');
+  else {
+    problems.push('a needs row was unreadable');
+    unread.add('needs');
+  }
   const alerts: AlertRow[] = [];
   for (const a of arr('alerts')) {
     if (!isObj(a) || !str(a.monitor) || (a.state !== 'down' && a.state !== 'up')) {
       problems.push('an alert row was unreadable');
+      unread.add('alerts');
       continue;
     }
     const t = a.triage;
@@ -180,7 +184,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       if (isObj(f) && str(f.id) && str(f.pkg) && SEVERITY_ORDER.includes(f.severity as Severity)) findings.push({ id: str(f.id, 60), pkg: str(f.pkg, 100), host: str(f.host, 80), severity: f.severity as Severity, fixed: str(f.fixed, 60) || null, kev: f.kev === true });
       else problems.push('a CVE finding was unreadable');
     }
-    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings };
+    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, gaps: Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : [], kevChecked: o.cve.kevChecked === true };
   } else problems.push('the CVE report is missing');
   const services: ServiceRow[] = [];
   for (const s of arr('services')) {
@@ -208,5 +212,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');
-  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread }, problems };
+  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread] }, problems };
 }

@@ -44,6 +44,8 @@
     "hosts": 21,
     "packages": 4120,
     "advisories": 3,
+    "gaps": [],
+    "kevChecked": true,
     "notChecked": [
       "pi1"
     ],

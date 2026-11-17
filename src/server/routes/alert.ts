@@ -154,12 +154,22 @@ export function createAlertHandler(
     // A held DOWN announced at its deadline is triaged too: it is probably the outage that most needs a step.
     let hint: string | undefined;
     if (triage && !isInBatch(monitor)) {
+      // ⚠ An UP that lands while triage waits must not be taken for an orphan: it waits on `announcing` like an
+      // UP behind a deadline DM, and runs once recordDown has registered the outage. A deadline DM already holds
+      // its own entry, so this adds one only for an ordinary DOWN.
+      let release: (() => void) | undefined;
+      if (!announcing.has(monitor)) announcing.set(monitor, new Promise<void>((r) => (release = r)));
       try {
         const result = await triage({ monitor, detail });
         hint = triageNote(result);
         logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable_or_skipped' : result.act ? 'act' : 'no_action'}`);
       } catch (err) {
         logger.warn(`[alert] triage failed for ${monitor}, sending the plain DM: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        if (release) {
+          announcing.delete(monitor);
+          release();
+        }
       }
     }
     const { batch, action } = recordDown(monitor, { since });

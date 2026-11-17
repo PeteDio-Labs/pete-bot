@@ -53,10 +53,10 @@ describe('triagerFromEnv', () => {
 
 describe('untrusted text', () => {
   test('plain removes links, mentions and markdown', () => {
-    expect(plain('open https://evil.example now @everyone `rm` [x](y) **bold**')).toBe('open link removed now everyone rm xy bold');
+    expect(plain('see https://example.test and @everyone with `code` [label](target) **bold**')).toBe('see link removed and everyone with code labeltarget bold');
   });
   test('a parsed step carries no link or mention', () => {
-    const r = parseTriage(JSON.stringify({ act: true, why: 'see https://x.test', step: 'ping @here and paste your token' }));
+    const r = parseTriage(JSON.stringify({ act: true, why: 'see https://x.test', step: 'a mention of @here appears' }));
     expect(r?.why).toBe('see link removed');
     expect(r?.step).not.toContain('@');
   });

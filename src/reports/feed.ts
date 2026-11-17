@@ -55,6 +55,9 @@ export function buildDashboardFeed({ hub, batches, now }: FeedInput): Record<str
         packages: ex.queries ?? 0,
         advisories: ex.advisories ?? 0,
         notChecked: Array.isArray(ex.hostsUnread) ? ex.hostsUnread : [],
+        // What the run could not examine, and whether the exploited list was read, so a gap never reads as clear.
+        gaps: Array.isArray(c.gaps) ? c.gaps : ['the record carries no gap list, so completeness is unknown'],
+        kevChecked: c.complete === true || (typeof ex.kevEntries === 'number' && ex.kevEntries > 0 && !(Array.isArray(c.gaps) && c.gaps.some((g) => /exploit|kev|cisa/i.test(String(g))))),
         findings: top.map((t) => {
           const f = rec(t);
           return { id: f.cve ?? 'unknown', pkg: f.package, host: Array.isArray(f.hosts) ? f.hosts[0] ?? '' : '', severity: SEVERITY[String(f.severity)] ?? 'low', fixed: f.fixed ?? null, kev: f.kev === true };

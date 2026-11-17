@@ -694,4 +694,33 @@ describe('triage on a new DOWN', () => {
     expect(res.status).toBe(200);
     expect(d.send).toHaveBeenCalledTimes(1);
   });
+
+  it('holds an UP that arrives during triage, so the recovery is not sent as an orphan', async () => {
+    const express = (await import('express')).default;
+    const { createAlertHandler } = await import('./alert.js');
+    const d = fakeDiscord();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const triage = async () => {
+      await gate;
+      return { act: true, why: 'w', step: 'a step' };
+    };
+    const app = express();
+    app.use(express.json());
+    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
+    const send = (status: number) =>
+      request(app).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send({ heartbeat: { status, msg: 'm' }, monitor: { name: 'plex-backup' } });
+    const down = send(0).then((r) => r);
+    await new Promise((r) => setTimeout(r, 50));
+    const up = send(1).then((r) => r);
+    await new Promise((r) => setTimeout(r, 50));
+    // The UP is still waiting: nothing has been sent for it.
+    expect(d.send).not.toHaveBeenCalled();
+    release();
+    const [dr, ur] = await Promise.all([down, up]);
+    expect(dr.body.action).toBe('sent');
+    // The recovery edits the DOWN's message, not a new orphan DM.
+    expect(ur.body.action).toBe('edited');
+    expect(d.send).toHaveBeenCalledTimes(1);
+  });
 });
