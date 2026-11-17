@@ -73,6 +73,8 @@ export interface DashboardData {
   cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[] } | null;
   services: ServiceRow[];
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number } | null;
+  /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
+  unread: ('needs' | 'alerts')[];
 }
 
 export interface Examined {
@@ -158,6 +160,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     problems.push(`${k} is missing or not a list`);
     return [];
   };
+  const unread: ('needs' | 'alerts')[] = (['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k]));
   const needs: Needs[] = [];
   for (const n of arr('needs')) if (isObj(n) && str(n.id) && str(n.title) && str(n.step)) needs.push({ id: str(n.id, 80), title: str(n.title, 160), why: str(n.why), step: str(n.step), since: str(n.since, 40) });
   else problems.push('a needs row was unreadable');
@@ -205,5 +208,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');
-  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane }, problems };
+  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread }, problems };
 }

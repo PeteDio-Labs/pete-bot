@@ -98,3 +98,14 @@ test('uptime: a bad state is unknown, never ok, and a strip keeps the newest 150
   expect(u['dash']?.at(-1)?.state).toBe('unknown');
   expect(Object.keys(u)).toEqual(['dash']);
 });
+
+describe('tiles with an unread live section', () => {
+  test('Needs you and Alerts down are unknown, not zero, when the feed lacked them', async () => {
+    const { tiles } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', services: [] });
+    expect(data.unread).toEqual(['needs', 'alerts']);
+    const html = tiles(data, Date.parse('2026-11-16T22:00:00Z'));
+    expect(html).not.toContain('>0<');
+    expect(html.match(/Unknown|unknown/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+});

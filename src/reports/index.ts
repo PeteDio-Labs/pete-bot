@@ -120,14 +120,14 @@ export function getHub(): ReportHub | null {
 
 /**
  * A routine report that arrived over /v1/notify (the drift check). Kept as hub kind `report-drift`
- * only where the dashboard is listening, so quiet never means unread. One record a day: a second
- * run the same day replaces the first. Returns false when it kept nothing, and the caller DMs.
+ * only where the dashboard is listening, so quiet never means unread. One record per run. Returns false when it kept nothing, and the caller DMs.
  */
 export function keepNotifyReport(from: string, text: string, at: Date): boolean {
   if (!hub || !dashboardListening) return false;
   const name = /drift/i.test(from) ? 'drift' : null;
   if (!name) return false;
-  hub.save(`report-${name}`, { id: at.toISOString().slice(0, 10), generatedAt: at.toISOString(), name, text, ok: true, incomplete: false });
+  // One record per run (date and UTC hour-minute), so a retry or manual run never replaces the first night's findings.
+  hub.save(`report-${name}`, { id: `${at.toISOString().slice(0, 10)}-${at.toISOString().slice(11, 16).replace(':', '')}`, generatedAt: at.toISOString(), name, text, ok: true, incomplete: false });
   return true;
 }
 

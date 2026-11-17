@@ -57,9 +57,18 @@ function json(body: string | null): unknown {
   return JSON.parse(body);
 }
 
-async function section(db: Db, name: string): Promise<unknown> {
+/** The live sections (`needs`, `alerts`) carry no time of their own, so one older than this is withheld rather than shown as current. */
+const LIVE_MAX_AGE_MS = 5 * 60_000;
+const LIVE_SECTIONS: readonly string[] = ['needs', 'alerts'];
+
+async function section(db: Db, name: string, now: number = Date.now()): Promise<unknown> {
   const item = await db.get(`section#${name}`, 'latest');
   if (!item || typeof item.body !== 'string') return null;
+  if (LIVE_SECTIONS.includes(name)) {
+    const at = typeof item.at === 'string' ? Date.parse(item.at) : NaN;
+    // An unreadable or old time reads as absent, so the SPA says it was not read.
+    if (!Number.isFinite(at) || now - at > LIVE_MAX_AGE_MS) return null;
+  }
   try {
     return JSON.parse(item.body);
   } catch {
@@ -89,7 +98,7 @@ export async function handle(req: Req, db: Db, now: () => number = Date.now): Pr
 
 async function dashboard(db: Db, now: () => number): Promise<Res> {
   const out: Record<string, unknown> = { generatedAt: new Date(now()).toISOString(), source: 'aws' };
-  for (const name of SECTIONS) if (name !== 'services') out[name] = await section(db, name);
+  for (const name of SECTIONS) if (name !== 'services') out[name] = await section(db, name, now());
   const registry = await section(db, 'services');
   const services: unknown[] = [];
   if (Array.isArray(registry)) {

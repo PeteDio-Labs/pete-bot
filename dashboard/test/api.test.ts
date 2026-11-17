@@ -60,6 +60,16 @@ describe('ingest section and the dashboard read', () => {
     expect(parsed.data.cve).toBeNull();
     expect(parsed.problems.length).toBeGreaterThan(0);
   });
+  test('withholds a live section older than 5 minutes, so an old empty list never reads as current', async () => {
+    const db = memDb();
+    await call(db, post('/api/ingest/section', { name: 'alerts', body: [] }));
+    await call(db, post('/api/ingest/section', { name: 'needs', body: [] }));
+    const later = await handle({ method: 'GET', path: '/api/dashboard', body: null }, db, () => NOW + 6 * 60_000);
+    const parsed = parseDashboard(JSON.parse(later.body));
+    expect(parsed.data.unread).toEqual(['needs', 'alerts']);
+    const fresh = parseDashboard(JSON.parse((await call(db, { method: 'GET', path: '/api/dashboard', body: null })).body));
+    expect(fresh.data.unread).toEqual([]);
+  });
   test('refuses an unknown section name', async () => {
     expect((await call(memDb(), post('/api/ingest/section', { name: 'secrets', body: {} }))).statusCode).toBe(400);
   });
