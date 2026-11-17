@@ -54,6 +54,8 @@ export function buildDashboardFeed({ hub, batches, now }: FeedInput): Record<str
         hosts: ex.hostsRead ?? 0,
         packages: ex.queries ?? 0,
         advisories: ex.advisories ?? 0,
+        // The detail list below is capped by the producer, so the full exploited count travels beside it.
+        exploited: typeof c.exploited === 'number' ? c.exploited : undefined,
         notChecked: Array.isArray(ex.hostsUnread) ? ex.hostsUnread : [],
         // What the run could not examine, and whether the exploited list was read, so a gap never reads as clear.
         gaps: Array.isArray(c.gaps) ? c.gaps : ['the record carries no gap list, so completeness is unknown'],

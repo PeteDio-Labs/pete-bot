@@ -156,3 +156,23 @@ describe('stale cached live sections and dropped CVE findings', () => {
     expect(tiles(data, now)).not.toMatch(/Exploited CVEs[^]*?>0</);
   });
 });
+
+describe('dropped services and capped CVE detail', () => {
+  test('a dropped service row makes the Probes tile unknown, not a green total', async () => {
+    const { tiles, watchdogMeters } = await import('../src/views.ts');
+    const now = Date.parse('2026-11-16T22:00:00Z');
+    const fresh = { ok: true, checkedAt: '2026-11-16T21:59:30Z', detail: '', lagS: null };
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', needs: [], alerts: [], services: [{ name: 'a', hostname: 'h', active: 'lab', lab: fresh, cloud: fresh }, { name: 'b', active: 'sideways' }] });
+    expect(data.droppedServices).toBe(1);
+    expect(tiles(data, now)).not.toContain('2 of 2 healthy');
+    expect(watchdogMeters(data, now)).toContain('1 service row unreadable');
+  });
+  test('the Exploited tile uses the full count when the detail list is capped', async () => {
+    const { tiles, cveView } = await import('../src/views.ts');
+    const now = Date.parse('2026-11-16T12:01:00Z');
+    const f = { id: 'CVE-1', pkg: 'p', host: 'h', severity: 'high', fixed: null, kev: true };
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T12:00:00Z', services: [], needs: [], alerts: [], cve: { checkedAt: '2026-11-16T12:00:00Z', hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, exploited: 16, findings: [f] } });
+    expect(tiles(data, now)).toContain('16');
+    expect(cveView(data, now)).toContain('capped');
+  });
+});

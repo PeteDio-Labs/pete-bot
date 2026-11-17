@@ -51,8 +51,8 @@ describe('buildDashboardFeed', () => {
   });
 
   it('marks a complete record as examined, and a record with no gap list as unknown', () => {
-    const ok = feed({ hub: fakeHub({ cve: [{ id: 'd', generatedAt: 'T', complete: true, examined: { kevEntries: 1200 }, gaps: [], top: [] }] }), now, batches: [] });
-    expect(ok.cve).toMatchObject({ kevChecked: true, gaps: [] });
+    const ok = feed({ hub: fakeHub({ cve: [{ id: 'd', generatedAt: 'T', complete: true, exploited: 16, examined: { kevEntries: 1200 }, gaps: [], top: [] }] }), now, batches: [] });
+    expect(ok.cve).toMatchObject({ kevChecked: true, gaps: [], exploited: 16 });
     const old = feed({ hub: fakeHub({ cve: [{ id: 'd', generatedAt: 'T', examined: {}, top: [] }] }), now, batches: [] });
     expect(old.cve).toMatchObject({ kevChecked: false });
   });

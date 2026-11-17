@@ -70,11 +70,13 @@ export interface DashboardData {
   triage: { read: number; cards: number; plain: number; failures: number; since: string } | null;
   needs: Needs[];
   alerts: AlertRow[];
-  cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
+  cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** The run's full exploited count. `findings` may be capped, so the tile uses this when present. */ exploited: number | null; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
   unread: ('needs' | 'alerts')[];
+  /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
+  droppedServices: number;
 }
 
 export interface Examined {
@@ -188,12 +190,14 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
         droppedFinding = true;
       }
     }
-    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, gaps: [...(Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : []), ...(droppedFinding ? ['a finding could not be read, so the list may be missing an exploited one'] : [])], kevChecked: o.cve.kevChecked === true && !droppedFinding };
+    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, exploited: num(o.cve.exploited) ?? null, gaps: [...(Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : []), ...(droppedFinding ? ['a finding could not be read, so the list may be missing an exploited one'] : [])], kevChecked: o.cve.kevChecked === true && !droppedFinding };
   } else problems.push('the CVE report is missing');
   const services: ServiceRow[] = [];
+  let droppedServices = 0;
   for (const s of arr('services')) {
     if (!isObj(s) || !str(s.name) || (s.active !== 'lab' && s.active !== 'cloud')) {
       problems.push('a service row was unreadable');
+      droppedServices++;
       continue;
     }
     const dc = s.dataClass === 'replicated' || s.dataClass === 'snapshot' ? s.dataClass : 'stateless';
@@ -216,5 +220,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');
-  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread] }, problems };
+  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices }, problems };
 }

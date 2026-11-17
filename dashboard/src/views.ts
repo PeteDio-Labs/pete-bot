@@ -45,11 +45,12 @@ export function cveView(d: DashboardData, now: number): string {
   const kevNote = c.kevChecked ? '' : ' The exploited-vulnerability list was not read, so no finding is marked as exploited.';
   const read = `Read ${c.packages} package versions on ${c.hosts} hosts against ${c.advisories} advisories, ${ageText(c.checkedAt, now)}.${c.notChecked.length ? ` Not checked: ${c.notChecked.join(', ')}.` : ''}${gaps}${kevNote}`;
   if (c.findings.length === 0) return examined(read) + p(c.gaps.length || !c.kevChecked ? 'No finding was returned, but the run did not examine everything, so this is not a clean result.' : 'No exploited or high-severity finding has a fix.');
+  const capNote = c.exploited !== null && c.exploited > c.findings.filter((f) => f.kev).length ? p(`The list shows ${c.findings.length} findings. The run found ${c.exploited} exploited in all, so the list is capped.`) : '';
   const sorted = sortFindings(c.findings);
   const rows = sorted.map((f, i) =>
     disclosure({ id: `cve-${i}`, lead: f.kev ? 'KEV' : ({ critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' } as const)[f.severity], title: `${f.id} in ${f.pkg}`, value: f.severity, native: true, panel: `<p><strong>Host.</strong> ${esc(f.host)}</p><p><strong>Fix.</strong> ${f.fixed ? `Upgrade to ${esc(f.fixed)}.` : 'No fixed version is published.'}</p>${f.kev ? '<p>Exploited in the wild (CISA KEV).</p>' : ''}` }),
   );
-  return examined(read) + list(rows, { label: 'CVE findings' });
+  return examined(read) + capNote + list(rows, { label: 'CVE findings' });
 }
 
 function sideLine(s: ServiceRow['lab'], now: number): { h: Health; text: string } {
@@ -69,13 +70,14 @@ export function watchdogMeters(d: DashboardData, now: number): string {
   const ok = checks.filter((h) => h === 'ok').length;
   const down = checks.filter((h) => h === 'down').length;
   const unknown = checks.length - ok - down;
+  const partial = d.droppedServices > 0 ? ` (${d.droppedServices} service row${d.droppedServices === 1 ? '' : 's'} unreadable, not counted)` : '';
   return meters(
     [
       meter({ label: 'Probes healthy', value: ok, max: Math.max(1, checks.length), tone: 'mist', valueText: `${ok} of ${checks.length}`, id: 'm-ok' }),
       meter({ label: 'Probes down', value: down, max: Math.max(1, checks.length), tone: 'red', valueText: `${down} of ${checks.length}`, id: 'm-down' }),
       meter({ label: 'Probes unknown', value: unknown, max: Math.max(1, checks.length), tone: 'yellow', valueText: `${unknown} of ${checks.length}`, id: 'm-unk' }),
     ],
-    { label: 'Watchdog summary' },
+    { label: `Watchdog summary${partial}` },
   );
 }
 
@@ -152,11 +154,13 @@ export function tiles(d: DashboardData, now: number): string {
   const unknown = probes.filter((h) => h === 'unknown').length;
   const down = probes.filter((h) => h === 'down').length;
   const downAlerts = d.alerts.filter((a) => a.state === 'down').length;
-  const kev = d.cve && d.cve.kevChecked ? d.cve.findings.filter((f) => f.kev).length : null;
+  const kev = d.cve && d.cve.kevChecked ? d.cve.exploited ?? d.cve.findings.filter((f) => f.kev).length : null;
   const t = [
     liveUnread(d, now, 'needs') ? statusTile({ label: 'Needs you', state: 'unknown' }) : statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
     liveUnread(d, now, 'alerts') ? statusTile({ label: 'Alerts down', state: 'unknown' }) : statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),
-    probes.length
+    d.droppedServices > 0
+      ? statusTile({ label: 'Probes', state: 'unknown', detail: `${d.droppedServices} service row${d.droppedServices === 1 ? '' : 's'} unreadable, so totals are incomplete` })
+      : probes.length
       ? statusTile({ label: 'Probes', value: `${probes.length - unknown - down} of ${probes.length} healthy`, state: down ? 'down' : unknown ? 'warn' : 'ok', detail: unknown ? `${unknown} unknown` : undefined, readAt: d.generatedAt })
       : statusTile({ label: 'Probes', state: 'unknown' }),
     kev === null ? statusTile({ label: 'Exploited CVEs', state: 'unknown' }) : statusTile({ label: 'Exploited CVEs', value: String(kev), state: kev ? 'down' : d.cve!.gaps.length ? 'warn' : 'ok', detail: d.cve!.gaps.length ? 'run had gaps' : undefined, readAt: d.cve!.checkedAt }),

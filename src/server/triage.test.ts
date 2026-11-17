@@ -53,11 +53,11 @@ describe('triagerFromEnv', () => {
 
 describe('untrusted text', () => {
   test('plain removes links, mentions and markdown', () => {
-    expect(plain('see https://example.test and @everyone with `code` [label](target) **bold**')).toBe('see link removed and everyone with code labeltarget bold');
+    expect(plain('a url https://example.test, a mention @everyone, `code`, [label](target) and **bold** appear')).toBe('a url link removed a mention everyone, code, labeltarget and bold appear');
   });
   test('a parsed step carries no link or mention', () => {
-    const r = parseTriage(JSON.stringify({ act: true, why: 'see https://x.test', step: 'a mention of @here appears' }));
-    expect(r?.why).toBe('see link removed');
+    const r = parseTriage(JSON.stringify({ act: true, why: 'a url https://x.test is present', step: 'a mention of @here appears' }));
+    expect(r?.why).toBe('a url link removed is present');
     expect(r?.step).not.toContain('@');
   });
   test('the note is framed as an unverified suggestion', () => {
