@@ -186,7 +186,7 @@ export function createAlertHandler(
       }
     }
     const { batch, action } = recordDown(monitor, { since });
-    const line = [note, action !== 'edit' ? hint : undefined].filter(Boolean).join('\n') || undefined;
+    const line = [note, hint].filter(Boolean).join('\n') || undefined;
     if (line) setNote(batch.id, monitor, line);
     const embed = renderBatch(batch, detail);
     if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {
@@ -319,7 +319,7 @@ export function createAlertHandler(
           res.json({ ok: true, action: 'held', monitor });
           return;
         }
-        const window = isInBatch(monitor) ? null : decider.isMaintenance(heartbeatTime(parsed.data.heartbeat?.time, received));
+        const window = isInBatch(monitor) || triaging.has(monitor) ? null : decider.isMaintenance(heartbeatTime(parsed.data.heartbeat?.time, received));
         if (window) {
           const wait = deadlineMs(monitor);
           addHold({ monitor, since: received, deadlineAt: received + wait, window, detail });

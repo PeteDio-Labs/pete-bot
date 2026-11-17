@@ -70,6 +70,13 @@ describe('ingest section and the dashboard read', () => {
     const fresh = parseDashboard(JSON.parse((await call(db, { method: 'GET', path: '/api/dashboard', body: null })).body));
     expect(fresh.data.unread).toEqual([]);
   });
+  test('counts registry rows it skipped, so the SPA says probe totals are incomplete', async () => {
+    const db = memDb();
+    await call(db, post('/api/ingest/section', { name: 'services', body: [...registry, { name: 'Bad Name', active: 'lab' }] }));
+    const parsed = parseDashboard(JSON.parse((await call(db, { method: 'GET', path: '/api/dashboard', body: null })).body));
+    expect(parsed.data.services.length).toBe(2);
+    expect(parsed.data.droppedServices).toBe(1);
+  });
   test('refuses an unknown section name', async () => {
     expect((await call(memDb(), post('/api/ingest/section', { name: 'secrets', body: {} }))).statusCode).toBe(400);
   });

@@ -72,8 +72,8 @@ export interface RunnerDeps {
   /** Called with the morning queue's snapshot, so the dashboard keeps the cycle. A throw is logged, never fatal. */
   onMorning?: (snap: Snapshot, date: string) => void;
   /**
-   * When false, a report that ran is kept for the dashboard and not sent as a DM. Default true, so
-   * existing behaviour holds. A failed run (`ok` false) is always sent: that is an alert, not a report.
+   * When false, a report that ran is kept for the dashboard and not sent as a DM. Left unset it means true, but
+   * `startReports` always passes it, and with REPORTS_DM unset that is false: reports go to the dashboard. A failed run (`ok` false) is always sent: that is an alert, not a report.
    */
   dm?: boolean;
   /**

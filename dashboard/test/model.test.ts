@@ -176,3 +176,19 @@ describe('dropped services and capped CVE detail', () => {
     expect(cveView(data, now)).toContain('capped');
   });
 });
+
+describe('no card is not the same as nothing wrong', () => {
+  test('Now says an alert is down when no action card was written', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const now = Date.parse('2026-11-16T22:00:30Z');
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', services: [], needs: [], alerts: [{ monitor: 'plex', state: 'down', since: '2026-11-16T21:00:00Z', triage: 'off' }] });
+    const html = nowView(data, now);
+    expect(html).toContain('1 alert is down');
+    expect(html).not.toContain('Nothing needs you');
+  });
+  test('a CVE run older than two days no longer gives a green Exploited tile', async () => {
+    const { tiles } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: '2026-11-20T00:00:00Z', services: [], needs: [], alerts: [], cve: { checkedAt: '2026-11-16T00:00:00Z', hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings: [] } });
+    expect(tiles(data, Date.parse('2026-11-20T00:00:30Z'))).not.toMatch(/Exploited CVEs[^]*?>0</);
+  });
+});

@@ -101,9 +101,13 @@ async function dashboard(db: Db, now: () => number): Promise<Res> {
   for (const name of SECTIONS) if (name !== 'services') out[name] = await section(db, name, now());
   const registry = await section(db, 'services');
   const services: unknown[] = [];
+  let dropped = 0;
   if (Array.isArray(registry)) {
     for (const r of registry) {
-      if (!isObj(r) || typeof r.name !== 'string' || !NAME.test(r.name)) continue;
+      if (!isObj(r) || typeof r.name !== 'string' || !NAME.test(r.name)) {
+        dropped++;
+        continue;
+      }
       const row: Record<string, unknown> = { ...r };
       const reads = await Promise.all(SIDES.map((side) => db.get(`${r.name}#${side}`, 'status')));
       SIDES.forEach((side, i) => {
@@ -115,6 +119,8 @@ async function dashboard(db: Db, now: () => number): Promise<Res> {
     }
   }
   out.services = services;
+  // Registry rows this handler skipped, so the SPA can say its probe totals are incomplete.
+  out.droppedServices = dropped;
   return reply(200, out);
 }
 

@@ -15,11 +15,18 @@ export function liveUnread(d: DashboardData, now: number, key: 'needs' | 'alerts
   return d.unread.includes(key) || !Number.isFinite(at) || now - at > STALE_MS;
 }
 
+/** The CVE run is daily, so one older than two days is out of date. */
+const CVE_STALE_MS = 48 * 3_600_000;
+
 export function nowView(d: DashboardData, now: number): string {
   const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
   const read = `Read ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length, 'service')} and ${plural(d.needs.length, 'item')} that ${d.needs.length === 1 ? 'needs' : 'need'} you, ${ageText(d.generatedAt, now)}. Source: ${d.source}.`;
   if (liveUnread(d, now, 'needs')) return examined(`The list of items that need you was not read in full or is out of date, so it is unknown whether anything needs you. ${read}`);
-  if (d.needs.length === 0) return examined(read) + p('Nothing needs you. Every item above was read and none asks for a step.', 'dash-calm');
+  if (d.needs.length === 0) {
+    const down = d.alerts.filter((a) => a.state === 'down').length;
+    if (down > 0) return examined(read) + p(`No action card was written, but ${down} alert${down === 1 ? ' is' : 's are'} down. Open the Alerts tab: a missing card does not mean nothing is wrong.`);
+    return examined(read) + p('Nothing needs you. Every item above was read and none asks for a step.', 'dash-calm');
+  }
   const rows = d.needs.map((n, i) =>
     disclosure({ id: `need-${i}`, lead: String(i + 1).padStart(2, '0'), title: n.title, value: ageText(n.since, now), native: true, open: i === 0, panel: `<p><strong>Why.</strong> ${esc(n.why)}</p><p><strong>Do this.</strong> ${esc(n.step)}</p>` }),
   );
@@ -31,11 +38,12 @@ export function alertsView(d: DashboardData, now: number): string {
   const ledger = t ? `Triage read ${t.read} alerts since ${t.since}: ${t.cards} cards, ${t.plain} plain, ${t.failures} Qwen failures.` : 'The triage ledger is missing, so card and fallback counts are unknown.';
   if (liveUnread(d, now, 'alerts') && d.alerts.length === 0) return examined(`The alert list was not read in full or is out of date, so it is unknown whether any alert is open. ${ledger}`);
   if (d.alerts.length === 0) return examined(`Read 0 alerts. ${ledger}`) + p('No alert records were returned.');
-  const word = { act: 'Needs you', no_action: 'No action', unreadable: 'Triage unreadable, plain alert sent', off: 'Triage off' } as const;
+  const word = { act: 'Needs you', no_action: 'No action', unreadable: 'Triage unreadable, plain alert sent', off: 'No triage result' } as const;
   const rows = d.alerts.map((a, i) =>
     disclosure({ id: `alert-${i}`, lead: a.state === 'down' ? '▲' : '●', title: `${a.monitor} is ${a.state}`, value: ageText(a.since, now), native: true, panel: `<p>${esc(word[a.triage])}.</p>${a.why ? `<p><strong>Why.</strong> ${esc(a.why)}</p>` : ''}${a.step ? `<p><strong>Do this.</strong> ${esc(a.step)}</p>` : ''}` }),
   );
-  return examined(`Read ${d.alerts.length} alerts. ${ledger}`) + list(rows, { label: 'Alerts' });
+  const caveat = liveUnread(d, now, 'alerts') ? ' This list is partial or out of date, so an open alert may be missing.' : '';
+  return examined(`Read ${d.alerts.length} alerts.${caveat} ${ledger}`) + list(rows, { label: 'Alerts' });
 }
 
 export function cveView(d: DashboardData, now: number): string {
@@ -154,7 +162,9 @@ export function tiles(d: DashboardData, now: number): string {
   const unknown = probes.filter((h) => h === 'unknown').length;
   const down = probes.filter((h) => h === 'down').length;
   const downAlerts = d.alerts.filter((a) => a.state === 'down').length;
-  const kev = d.cve && d.cve.kevChecked ? d.cve.exploited ?? d.cve.findings.filter((f) => f.kev).length : null;
+  const cveAge = d.cve ? now - Date.parse(d.cve.checkedAt) : 0;
+  const cveFresh = Number.isFinite(cveAge) && cveAge <= CVE_STALE_MS;
+  const kev = d.cve && d.cve.kevChecked && cveFresh ? d.cve.exploited ?? d.cve.findings.filter((f) => f.kev).length : null;
   const t = [
     liveUnread(d, now, 'needs') ? statusTile({ label: 'Needs you', state: 'unknown' }) : statusTile({ label: 'Needs you', value: String(d.needs.length), state: d.needs.length ? 'warn' : 'ok', readAt: d.generatedAt }),
     liveUnread(d, now, 'alerts') ? statusTile({ label: 'Alerts down', state: 'unknown' }) : statusTile({ label: 'Alerts down', value: String(downAlerts), state: downAlerts ? 'down' : 'ok', readAt: d.generatedAt }),

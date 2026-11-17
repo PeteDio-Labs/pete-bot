@@ -190,7 +190,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
         droppedFinding = true;
       }
     }
-    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, exploited: num(o.cve.exploited) ?? null, gaps: [...(Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : []), ...(droppedFinding ? ['a finding could not be read, so the list may be missing an exploited one'] : [])], kevChecked: o.cve.kevChecked === true && !droppedFinding };
+    cve = { checkedAt: str(o.cve.checkedAt, 40), hosts: num(o.cve.hosts) ?? 0, packages: num(o.cve.packages) ?? 0, advisories: num(o.cve.advisories) ?? 0, notChecked: Array.isArray(o.cve.notChecked) ? o.cve.notChecked.map((x) => str(x, 80)).filter(Boolean) : [], findings, exploited: num(o.cve.exploited) ?? null, gaps: [...(Array.isArray(o.cve.gaps) ? o.cve.gaps.map((x) => str(x, 200)).filter(Boolean) : []), ...(droppedFinding ? ['a finding could not be read, so the list may be missing an exploited one'] : []), ...(num(o.cve.hosts) === null || num(o.cve.packages) === null || num(o.cve.advisories) === null ? ['a coverage count was missing from the CVE report'] : [])], kevChecked: o.cve.kevChecked === true && !droppedFinding };
   } else problems.push('the CVE report is missing');
   const services: ServiceRow[] = [];
   let droppedServices = 0;
@@ -220,5 +220,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');
-  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices }, problems };
+  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
