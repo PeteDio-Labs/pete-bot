@@ -92,6 +92,12 @@ export function createDashboardApp(d: DashboardDeps): Express {
       res.status(403).json({ error: 'forbidden' });
       return;
     }
+    // A service token (the staging site's proxy) reads and nothing else: it cannot write a summary.
+    if (access.kind === 'agent' && req.method !== 'GET') {
+      d.log?.(`dashboard refused: ${access.email} tried ${req.method}`);
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
     next();
   });
 
