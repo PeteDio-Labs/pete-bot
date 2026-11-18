@@ -2,7 +2,7 @@
 // Exits non-zero when a step fails or an output is missing, and says what it wrote.
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { TABBAR } from './src/app.tsx';
-import { skipLink, esc } from 'toonish-ui/markup';
+import { masthead, skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
 const feed = process.env.DASHBOARD_FEED ?? '/fixtures/dashboard.json';
@@ -31,7 +31,7 @@ ${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<header class="dash-header"><h1 class="dash-title">Lab dashboard</h1></header>
+<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs', lede: 'What needs you, the step to take, and where each service runs.' })}</div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>

@@ -150,9 +150,116 @@
   ],
   "plane": {
     "checkedAt": "2026-11-16T21:50:00Z",
-    "open": 96,
-    "needsPedro": 7,
-    "inReview": 4
+    "open": 11,
+    "needsPedro": 3,
+    "inReview": 2,
+    "cycle": "Week of 2026-11-16",
+    "lost": 0,
+    "total": 18,
+    "done": 7,
+    "inProgress": 4,
+    "start": "2026-11-16",
+    "end": "2026-11-22",
+    "byRoute": {
+      "pedro": {
+        "total": 5,
+        "done": 1
+      },
+      "ai": {
+        "total": 11,
+        "done": 6
+      },
+      "other": {
+        "total": 2,
+        "done": 0
+      }
+    },
+    "openItems": [
+      {
+        "seq": 901,
+        "name": "Approve the lab-write run for the failover drill",
+        "state": "Todo",
+        "labels": [
+          "needs-pedro"
+        ]
+      },
+      {
+        "seq": 902,
+        "name": "Listen to the dashboard in VoiceOver",
+        "state": "Todo",
+        "labels": [
+          "needs-pedro"
+        ]
+      },
+      {
+        "seq": 903,
+        "name": "Pick the backup metric for the Now tab",
+        "state": "Backlog",
+        "labels": [
+          "needs-pedro"
+        ]
+      },
+      {
+        "seq": 904,
+        "name": "Service registry feeds the switch panel",
+        "state": "In Review",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 905,
+        "name": "Route 53 health checks for the cloud side",
+        "state": "In Review",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 906,
+        "name": "Chaos test that proves the failover",
+        "state": "In Progress",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 907,
+        "name": "Triage ledger in the feed",
+        "state": "In Progress",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 908,
+        "name": "Watchdog writes both sides",
+        "state": "In Progress",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 909,
+        "name": "Case study draft",
+        "state": "In Progress",
+        "labels": []
+      },
+      {
+        "seq": 910,
+        "name": "Uptime history for plex",
+        "state": "Todo",
+        "labels": [
+          "cloud"
+        ]
+      },
+      {
+        "seq": 911,
+        "name": "Retire the old report page",
+        "state": "Backlog",
+        "labels": []
+      }
+    ]
   },
   "history": {
     "alerts": [
@@ -571,5 +678,35 @@
         }
       ]
     }
+  },
+  "backups": {
+    "checkedAt": "2026-11-16T21:30:00Z",
+    "guests": [
+      {
+        "guest": "plex",
+        "lastGood": "2026-11-15T06:42:00Z",
+        "detail": "The last run failed: vzdump exited with an error."
+      },
+      {
+        "guest": "vault",
+        "lastGood": "2026-11-16T06:48:00Z",
+        "detail": ""
+      },
+      {
+        "guest": "authentik",
+        "lastGood": "2026-11-16T06:51:00Z",
+        "detail": ""
+      },
+      {
+        "guest": "pete-bot",
+        "lastGood": "2026-11-16T06:55:00Z",
+        "detail": ""
+      },
+      {
+        "guest": "prometheus",
+        "lastGood": "2026-11-16T07:02:00Z",
+        "detail": ""
+      }
+    ]
   }
 }

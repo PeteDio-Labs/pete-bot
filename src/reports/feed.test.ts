@@ -44,6 +44,14 @@ describe('buildDashboardFeed', () => {
     expect(f.plane).toEqual({ checkedAt: 'T2', open: 5, needsPedro: 2, inReview: 1 });
   });
 
+  it('passes the cycle detail through, and adds none for a record that lacks it', () => {
+    const items = [{ seq: 941, name: 'Review the dashboard', state: 'Todo', labels: ['needs-pedro'] }];
+    const hub = fakeHub({ cycle: [{ id: 'd', generatedAt: 'T2', open: 5, needsPedro: 2, inReview: 1, inProgress: 2, total: 9, done: 4, lost: 0, cycle: { name: 'Week of 2026-11-16', start: '2026-11-16', end: '2026-11-22' }, byRoute: { pedro: { total: 3, done: 1 }, ai: { total: 5, done: 3 }, other: { total: 1, done: 0 } }, openItems: items }] });
+    expect(feed({ hub, now, batches: [] }).plane).toMatchObject({ open: 5, total: 9, done: 4, inProgress: 2, start: '2026-11-16', end: '2026-11-22', byRoute: { pedro: { total: 3, done: 1 } }, openItems: items });
+    const old = fakeHub({ cycle: [{ id: 'd', generatedAt: 'T2', open: 5, needsPedro: 2, inReview: 1 }] });
+    expect('total' in feed({ hub: old, now, batches: [] }).plane!).toBe(false);
+  });
+
   it('carries the CVE gaps and an unread exploited list instead of reading as clear', () => {
     const hub = fakeHub({ cve: [{ id: 'd', generatedAt: 'T', complete: false, examined: { hostsRead: 3, hostsUnread: [], queries: 9, advisories: 4, kevEntries: 0 }, gaps: ['CISA fetch failed, so nothing is marked as exploited'], top: [] }] });
     const f = feed({ hub, now, batches: [] });
