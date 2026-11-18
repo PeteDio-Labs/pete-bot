@@ -1,6 +1,6 @@
 # Lab dashboard
 
-A Preact single-page app on toonish-ui v0.5.0. Mobile first, WCAG 2.2 AA.
+A Preact single-page app on toonish-ui v0.7.0. Mobile first, WCAG 2.2 AA.
 
 Each tab answers one question in its first 390 px screen, with a kit `verdict()`. The evidence sits under it in
 numbered sections, and a `readout()` says what the tab read. `QUESTIONS` in `src/views.ts` holds the questions.
