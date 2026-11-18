@@ -231,3 +231,15 @@ describe('a service whose data class cannot be read', () => {
     expect(problems.filter((x) => x === 'a service row was unreadable').length).toBe(2);
   });
 });
+
+describe('charts with no data to draw', () => {
+  const zero = { generatedAt: '2026-11-18T00:00:00Z', needs: [], alerts: [], services: [], history: { alerts: [{ day: '2026-11-17', act: 0, noAction: 0, unreadable: 0 }], cve: [{ day: '2026-11-17', critical: 0, high: 0, medium: 0, low: 0 }], drills: [{ label: 'd', detectS: 0, flipS: 0, clientS: 0, result: 'passed' }], uptime: {} } };
+  test('an all-zero history renders a note and its table instead of throwing', async () => {
+    const { alertVolumeChart, cveHistoryChart, drillChart } = await import('../src/views.ts');
+    const { data } = parseDashboard(zero);
+    for (const html of [alertVolumeChart(data), cveHistoryChart(data), drillChart(data)]) {
+      expect(html).toContain('Every value is zero');
+      expect(html).toContain('<table');
+    }
+  });
+});

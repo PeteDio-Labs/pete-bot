@@ -119,6 +119,22 @@ function table(caption: string, head: string[], rows: string[][]): string {
 /** The kit draws charts for paper, so each sits in a card. */
 const card = (html: string): string => `<div class="toon-card dash-card">${html}</div>`;
 
+type BarsOpts = Parameters<typeof bars>[0];
+
+/**
+ * The kit's `bars()` throws when every column is empty. A chart that cannot be drawn must never take the page down,
+ * so an all-zero or failing chart says so and leaves the table, which always carries the numbers.
+ */
+function drawBars(opts: BarsOpts): string {
+  const total = opts.columns.reduce((a, c) => a + c.segments.reduce((b, seg) => b + seg.value, 0), 0);
+  if (total <= 0) return p('Every value is zero, so there is no bar to draw. The table has the numbers.');
+  try {
+    return bars(opts);
+  } catch {
+    return p('The chart could not be drawn. The table has the numbers.');
+  }
+}
+
 const shortDay = (d: string): string => d.slice(5);
 
 export function alertVolumeChart(d: DashboardData): string {
@@ -127,7 +143,7 @@ export function alertVolumeChart(d: DashboardData): string {
   if (h.alerts.length === 0) return examined('Read 0 days of alert history.');
   const series: Series[] = [{ label: 'Needs you', tone: 'red' }, { label: 'No action', tone: 'mist' }, { label: 'Triage unreadable', tone: 'hatch' }];
   const total = h.alerts.reduce((a, x) => a + x.act + x.noAction + x.unreadable, 0);
-  const chart = bars({
+  const chart = drawBars({
     label: 'Alerts per day',
     columns: h.alerts.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.act, tone: 'red', label: 'needs you' }, { value: x.noAction, tone: 'mist', label: 'no action' }, { value: x.unreadable, tone: 'hatch', label: 'unreadable' }] })),
   });
@@ -139,7 +155,7 @@ export function cveHistoryChart(d: DashboardData): string {
   if (!h) return examined('The CVE history was not read, so there is no chart.');
   if (h.cve.length === 0) return examined('Read 0 days of CVE history.');
   const series: Series[] = [{ label: 'Critical', tone: 'red' }, { label: 'High', tone: 'yellow' }, { label: 'Medium', tone: 'violet' }, { label: 'Low', tone: 'hatch' }];
-  const chart = bars({
+  const chart = drawBars({
     label: 'Open CVE findings with a fix, per day',
     columns: h.cve.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.critical, tone: 'red', label: 'critical' }, { value: x.high, tone: 'yellow', label: 'high' }, { value: x.medium, tone: 'violet', label: 'medium' }, { value: x.low, tone: 'hatch', label: 'low' }] })),
   });
@@ -153,7 +169,7 @@ export function drillChart(d: DashboardData): string {
   const series: Series[] = [{ label: 'Detect', tone: 'yellow' }, { label: 'Flip', tone: 'violet' }, { label: 'Client recovers', tone: 'red' }];
   const ran = h.drills.filter((x) => x.result !== 'not injected');
   const chart = ran.length
-    ? bars({ label: 'Failover drill time in seconds', columns: ran.map((x) => ({ label: x.label, sub: x.result, segments: [{ value: x.detectS, tone: 'yellow', label: 'detect' }, { value: x.flipS, tone: 'violet', label: 'flip' }, { value: x.clientS, tone: 'red', label: 'client recovers' }] })) })
+    ? drawBars({ label: 'Failover drill time in seconds', columns: ran.map((x) => ({ label: x.label, sub: x.result, segments: [{ value: x.detectS, tone: 'yellow', label: 'detect' }, { value: x.flipS, tone: 'violet', label: 'flip' }, { value: x.clientS, tone: 'red', label: 'client recovers' }] })) })
     : '';
   const skipped = h.drills.length - ran.length;
   return examined(`Read ${h.drills.length} drills; ${ran.length} injected their fault and ${skipped} did not, which counts as not run, never as passed.`) + card(chart + (ran.length ? key(series) : '') + table('failover drills', ['Drill', 'Result', 'Detect (s)', 'Flip (s)', 'Client recovers (s)'], h.drills.map((x) => [x.label, x.result, String(x.detectS), String(x.flipS), String(x.clientS)])));
