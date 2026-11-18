@@ -2,7 +2,7 @@
 // Exits non-zero when a step fails or an output is missing, and says what it wrote.
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { TABBAR } from './src/app.tsx';
-import { buildBadge, masthead, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
+import { appbar, buildBadge, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
 const feed = process.env.DASHBOARD_FEED || '/fixtures/dashboard.json';
@@ -43,7 +43,7 @@ ${keysUrl ? `<meta name="dashboard-keys" content="${esc(keysUrl)}">` : ''}
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs' })}${settingsMenu({ id: 'settings', cls: 'dash-settings', items: [{ label: 'Secrets', href: '#secrets' }] })}</div>
+<div class="dash-header"><div id="top">${appbar({ title: 'Lab dashboard', sub: 'PeteDio Labs', cls: 'dash-appbar' })}</div>${settingsMenu({ id: 'settings', cls: 'dash-settings', items: [{ label: 'Secrets', href: '#secrets' }] })}</div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>

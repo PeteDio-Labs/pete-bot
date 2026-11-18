@@ -4,9 +4,9 @@
 
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
 /* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
-.dash-header { position: relative; max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
+.dash-header { position: relative; z-index: 60; max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
 .dash-settings { position: absolute; top: .75rem; right: 1rem; z-index: 20; }
-.dash-header .toon-masthead { padding-right: 4rem; }
+.dash-header .dash-appbar { padding-right: 4rem; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
