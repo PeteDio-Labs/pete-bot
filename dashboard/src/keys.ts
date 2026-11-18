@@ -27,6 +27,7 @@ export interface KeyList {
   unparsed: number;
 }
 export type RunState = 'queued' | 'running' | 'waiting_tap' | 'done' | 'failed' | 'not_found';
+const RUN_STATES: readonly RunState[] = ['queued', 'running', 'waiting_tap', 'done', 'failed', 'not_found'];
 export interface RunRead {
   state: RunState;
   url?: string;
@@ -75,6 +76,7 @@ export function keysApi(base: string, f: typeof fetch = fetch): KeysApi {
     async read(requestId, action) {
       const res = await f(`${base}/runs/${encodeURIComponent(requestId)}?action=${action}`, { headers: { accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' });
       const b = await json(res);
+      if (!RUN_STATES.includes(b.state as RunState)) throw new Error('the server sent a run state this page does not know');
       return { state: b.state as RunState, url: typeof b.url === 'string' ? b.url : undefined, list: b.list as KeyList | undefined, error: typeof b.logError === 'string' ? b.logError : undefined };
     },
   };
@@ -97,8 +99,18 @@ export async function follow(api: KeysApi, requestId: string, action: KeyAction,
   const end = now() + o.limitMs;
   let last: RunRead = { state: 'queued' };
   let misses = 0;
+  let errors = 0;
   for (;;) {
-    last = await api.read(requestId, action);
+    try {
+      last = await api.read(requestId, action);
+      errors = 0;
+    } catch (err) {
+      // One failed read says nothing about the run: a change may be waiting on a tap. Several in a row end the wait, and say so.
+      if (++errors >= 4) return { state: 'failed', error: `the page could not read the run (${err instanceof Error ? err.message : 'unknown error'}), so the run may still be going` };
+      if (now() >= end) return { state: 'failed', error: 'the run did not finish in time; check its page on GitHub' };
+      await sleep(o.pollMs ?? 3_000);
+      continue;
+    }
     o.onState?.(last);
     if (last.state === 'done' || last.state === 'failed') return last;
     // A run GitHub has not listed yet reads as not_found for a few seconds. Many in a row means it never started.

@@ -61,6 +61,15 @@ describe('follow', () => {
     expect(r.state).toBe('done');
     expect(seen).toEqual(['queued', 'waiting_tap', 'done']);
   });
+  it('rides out a failed read, and ends with a reason after four in a row', async () => {
+    let n = 0;
+    const flaky: KeysApi = { start: async () => ({ requestId: 'x', url: null }), read: async () => { if (++n === 2) throw new Error('offline'); return n > 2 ? { state: 'done' } : { state: 'waiting_tap' }; } };
+    expect((await follow(flaky, 'pb-a-000000', 'renew', { limitMs: 60_000, ...clock() })).state).toBe('done');
+    const dead: KeysApi = { start: async () => ({ requestId: 'x', url: null }), read: async () => { throw new Error('offline'); } };
+    const r = await follow(dead, 'pb-a-000000', 'renew', { limitMs: 600_000, ...clock() });
+    expect(r.state).toBe('failed');
+    expect(r.error).toContain('may still be going');
+  });
   it('turns a run that never ends into a failure that says so', async () => {
     const r = await follow(api([]), 'pb-a-000000', 'sync', { limitMs: 9_000, ...clock() });
     expect(r.state).toBe('failed');
@@ -86,6 +95,10 @@ describe('keysApi', () => {
     expect(calls[0]![1].credentials).toBe('same-origin');
     expect((await a.read('pb-a-000000', 'list')).list?.rows.length).toBe(1);
     expect(calls[1]![0]).toBe('/api/keys/runs/pb-a-000000?action=list');
+  });
+  it('refuses a run state it does not know', async () => {
+    const a = keysApi('/api/keys', (async () => Response.json({ state: 'exploded' })) as unknown as typeof fetch);
+    await expect(a.read('pb-a-000000', 'list')).rejects.toThrow('does not know');
   });
   it('throws the server’s reason on a refusal', async () => {
     const a = keysApi('/api/keys', (async () => Response.json({ error: 'too many key changes this hour' }, { status: 429 })) as unknown as typeof fetch);

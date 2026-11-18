@@ -184,7 +184,13 @@ try {
       runs++;
       for (const v of cr2.violations) fail.push(`secrets confirm @${w}: ${v.id} (${v.nodes.length}): ${v.help}; first ${v.nodes[0].target.join(' ')}`.slice(0, 300));
       if (posts.length !== 1) fail.push(`secrets @${w}: ${posts.length} requests before confirming; the list run only`);
+      await on.getByRole('button', { name: 'Cancel' }).click();
+      await on.waitForFunction(() => document.activeElement?.id === 'key-batsy-renew', null, { timeout: 3000 }).catch(() => {});
+      if ((await on.evaluate(() => document.activeElement?.id)) !== 'key-batsy-renew') fail.push(`secrets @${w}: Cancel did not return focus to the Renew button that opened the step`);
+      await on.getByRole('button', { name: 'Renew batsy' }).click();
+      await on.waitForFunction(() => document.activeElement?.textContent?.startsWith('Confirm'), null, { timeout: 3000 }).catch(() => {});
       await on.getByRole('button', { name: /^Confirm/ }).click();
+      if (!(await on.evaluate(() => document.activeElement?.classList.contains('dash-status')))) await on.waitForFunction(() => document.activeElement?.classList.contains('dash-status'), null, { timeout: 3000 }).catch(() => fail.push(`secrets @${w}: focus did not move to the status line after Confirm`));
       await on.waitForFunction(() => document.querySelector('#secrets .dash-status')?.textContent?.includes('waiting for your tap'));
       await on.waitForFunction(() => document.querySelector('#secrets .dash-status')?.textContent?.includes('done'), null, { timeout: 15000 });
       if (!posts.some((x) => x === '{"action":"renew","name":"batsy"}')) fail.push(`secrets @${w}: the renew request was ${JSON.stringify(posts)}`);
