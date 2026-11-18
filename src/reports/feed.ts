@@ -9,6 +9,7 @@
  * so they are absent on purpose.
  */
 import type { AlertBatch } from '../server/alertStore.js';
+import type { WeekRecord } from './weekly.js';
 import type { HubRecord, ReportHub } from './hub.js';
 import { CVE_KIND } from './hubCve.js';
 import { CYCLE_KIND } from './hubCycle.js';
@@ -48,9 +49,11 @@ export interface FeedInput {
   now: Date;
   /** Registry rows with their lab readings. Absent, the section is empty and the SPA reads every service as unknown. */
   services?: unknown[];
+  /** The newest stored weekly PR record, or null when none is stored. */
+  week?: WeekRecord | null;
 }
 
-export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, week }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -100,5 +103,24 @@ export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): 
     services: services ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
+    ...(week ? { shipped: shippedSection(week) } : {}),
+  };
+}
+
+/** The week's PR report, bounded: the newest ten PRs and the eight busiest repos. */
+function shippedSection(w: WeekRecord): Record<string, unknown> {
+  const repos = Object.entries(w.byRepo).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8).map(([repo, count]) => ({ repo, count }));
+  const prs = [...w.merged].sort((a, b) => b.mergedAt.localeCompare(a.mergedAt)).slice(0, 10).map((p) => ({ repo: p.repo, number: p.number, title: p.title, author: p.author }));
+  return {
+    week: w.week,
+    generatedAt: w.generatedAt,
+    total: w.total,
+    openNow: w.openNow,
+    reposRead: w.coverage.reposRead,
+    reposTotal: w.coverage.reposTotal,
+    unread: w.coverage.unread.slice(0, 10),
+    repos,
+    prs,
+    ...(w.summary.source === 'ollama' && w.summary.text ? { summary: w.summary.text.slice(0, 800) } : {}),
   };
 }

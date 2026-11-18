@@ -70,3 +70,7 @@ switch request without moving anything. Tests use an in-memory table.
 ## Services and watchdog state
 
 `src/failover/registry.ts` lists the services and which can move. The server reads each lab side's health URL on request (cached 20 seconds). A service with no URL, or a URL that redirects to a login, shows its lab side as unknown. Every cloud side reads unknown until the AWS watchdog exists.
+
+## Shipped this week
+
+The Work tab shows the newest stored weekly PR report (`shipped` in the feed): the merged count, the newest ten pull requests, the busiest repositories, the summary when Qwen wrote one, and how many repositories were read. The feed carries no PR links. The old reports page still serves `/` until this view is confirmed on staging.

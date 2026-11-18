@@ -21,7 +21,7 @@ import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
-import { WEEKLY_MODEL, type Summarize, type WeekStore, type WeeklyRunner } from './weekly.js';
+import { WEEKLY_MODEL, type Summarize, type WeekRecord, type WeekStore, type WeeklyRunner } from './weekly.js';
 
 export interface DashboardDeps {
   store: WeekStore;
@@ -34,6 +34,16 @@ export interface DashboardDeps {
   /** Reads the registry's service rows. Absent, it probes the lab sides. Tests inject a fake so they stay offline. */
   services?: (now: Date) => Promise<unknown[]>;
   log?: (msg: string) => void;
+}
+
+/** The newest stored week, or null when none is stored or it cannot be read: the section is then left out. */
+function newestWeek(store: WeekStore): WeekRecord | null {
+  try {
+    const w = store.weeks()[0];
+    return w ? store.get(w) : null;
+  } catch {
+    return null;
+  }
 }
 
 export const STAGING_ORIGIN = 'https://staging-dash.pdlab.dev';
@@ -171,7 +181,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/api/dashboard', async (_req, res) => {
     try {
       const now = new Date();
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now) }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), week: newestWeek(d.store) }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }
