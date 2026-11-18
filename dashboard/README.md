@@ -58,7 +58,7 @@ The dashboard is Pedro's phone remote for the lab. A tab leads with what he can 
 
 ## Data
 
-The fixture holds synthetic values and example hostnames. Staging serves it and reads nothing from the lab.
+The fixture holds synthetic values and example hostnames. Staging serves it and reads nothing from the lab. To see which commit a staging host serves, read `/build.json` there.
 
 ## The AWS API (`api/`)
 
