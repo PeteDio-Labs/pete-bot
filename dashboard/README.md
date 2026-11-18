@@ -66,3 +66,7 @@ One Lambda (`nodejs22.x`, arm64, handler `handler.handler`) and one DynamoDB tab
 `api/handler.ts` lists the routes and keys. `bun run build:api` writes `api/dist/handler.mjs`, with the AWS SDK left
 to the runtime. The function never stamps a check time, refuses a watchdog record dated in the future, and records a
 switch request without moving anything. Tests use an in-memory table.
+
+## Services and watchdog state
+
+`src/failover/registry.ts` lists the services and which can move. The server reads each lab side's health URL on request (cached 20 seconds). A service with no URL, or a URL that redirects to a login, shows its lab side as unknown. Every cloud side reads unknown until the AWS watchdog exists.
