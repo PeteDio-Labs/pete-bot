@@ -61,6 +61,16 @@ interface Config {
     pollMs: number;
   };
   /**
+   * The dashboard's Secrets screen. pete-bot starts petedio-iac's keys.yml and reads the run back; the run holds every
+   * privilege and waits on the lab-write tap. Both token and admins must be set, or /api/keys answers 404.
+   */
+  keys: {
+    token: string;
+    repo: string;
+    workflow: string;
+    admins: string[];
+  };
+  /**
    * /lab (PET-669). pete-bot posts the question to lab-agent on 127.0.0.1 and relays the
    * answer. lab-agent runs the model loop and holds the read credentials; pete-bot gives it
    * none of its own. An empty token leaves /lab answering "not configured".
@@ -150,6 +160,12 @@ export const config: Config = {
     // The workflow itself times out at 30 minutes, so following it longer is pointless.
     runTimeoutMs: parseInt(getEnvVar('UPDATES_RUN_TIMEOUT_MS', '1800000'), 10),
     pollMs: parseInt(getEnvVar('UPDATES_POLL_MS', '10000'), 10),
+  },
+  keys: {
+    token: getEnvVar('GITHUB_KEYS_TOKEN', ''),
+    repo: getEnvVar('KEYS_REPO', 'PeteDio-Labs/petedio-iac'),
+    workflow: getEnvVar('KEYS_WORKFLOW', 'keys.yml'),
+    admins: getEnvVar('KEYS_ADMIN_EMAILS', '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean),
   },
   lab: {
     url: getEnvVar('LAB_AGENT_URL', 'http://127.0.0.1:3016'),
