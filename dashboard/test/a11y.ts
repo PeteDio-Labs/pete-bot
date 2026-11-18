@@ -25,7 +25,7 @@ const states: Record<string, (p: Page) => Promise<void>> = {
 const TABS = ['now', 'act', 'services', 'health', 'work'];
 const RUN = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'];
 const fail: string[] = [];
-let runs = 0, rules = 0, measured = 0, polls = 0;
+let runs = 0, rules = 0, measured = 0, polls = 0, folds = 0;
 const state_demo = (text: string | null): boolean => !text?.includes('Demo data');
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 try {
@@ -44,6 +44,14 @@ try {
         const shown = await p.evaluate(() => [...document.querySelectorAll<HTMLElement>('[role=tabpanel]')].filter((e) => !e.hidden).map((e) => e.id));
         if (shown.length !== 1 || shown[0] !== tab) fail.push(`${state}/${tab} @${w}: visible panels are [${shown}]`);
         if (state === 'feed failed' && !(await p.locator('[role=alert]').count())) fail.push(`${state}/${tab} @${w}: a failed feed shows no alert`);
+        if (state === 'fixture' && w === 390) {
+          // Answer first: on a phone the question starts in the top third and the verdict ends above the fold.
+          const at = await p.evaluate(() => { const panel = [...document.querySelectorAll<HTMLElement>('[role=tabpanel]')].find((e) => !e.hidden)!; const q = panel.querySelector('.dash-q'), v = panel.querySelector('.toon-verdict'); return { q: q ? q.getBoundingClientRect().top : -1, v: v ? v.getBoundingClientRect().bottom : -1, small: [...document.querySelectorAll<HTMLElement>('body *')].filter((e) => !e.closest('svg, [aria-hidden="true"], [hidden]') && e.getClientRects().length && [...e.childNodes].some((t) => t.nodeType === 3 && t.textContent!.trim()) && parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${e.className || e.tagName} ${getComputedStyle(e).fontSize}`) }; });
+          folds++;
+          if (at.q < 0 || at.q > h / 3) fail.push(`fixture/${tab} @${w}: the question starts at ${Math.round(at.q)} px, below the top third of ${h} px`);
+          if (at.v < 0 || at.v > h * 0.62) fail.push(`fixture/${tab} @${w}: the verdict ends at ${Math.round(at.v)} px, past 62% of ${h} px`);
+          if (at.small.length) fail.push(`fixture/${tab} @${w}: text under 12 px: ${[...new Set(at.small)].join(', ')}`.slice(0, 300));
+        }
         if (state === 'fixture' && tab === 'now' && !(await p.textContent('main'))!.includes('Read ')) fail.push(`fixture/now @${w}: the view does not say what it read`);
         await p.close();
       }
@@ -180,6 +188,6 @@ try {
   await browser.close();
   server.stop(true);
 }
-console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the confirm state at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px; ${rules} rule passes, ${fail.length} failures`);
-if (runs !== TABS.length * Object.keys(states).length * 2 + 2 || measured < 20 || polls !== 2) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured`); process.exit(1); }
+console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the confirm state at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
+if (runs !== TABS.length * Object.keys(states).length * 2 + 2 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
 if (fail.length) { console.error('a11y check FAILED:\n- ' + fail.join('\n- ')); process.exit(1); }
