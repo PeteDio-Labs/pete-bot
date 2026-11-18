@@ -22,10 +22,11 @@ const states: Record<string, (p: Page) => Promise<void>> = {
   'feed empty': async (p) => void (await p.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { generatedAt: '2026-11-16T22:00:00Z', source: 'test', needs: [], alerts: [], services: [], triage: null, cve: null, plane: null } }))),
   'rows unreadable': async (p) => void (await p.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, services: [{ name: 'x' }, ...fixture.services], alerts: [{ monitor: 'm', state: 'x' }] } }))),
 };
-const TABS = ['now', 'alerts', 'cve', 'services', 'plane'];
+const TABS = ['now', 'act', 'services', 'health', 'work'];
 const RUN = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'];
 const fail: string[] = [];
-let runs = 0, rules = 0, measured = 0;
+let runs = 0, rules = 0, measured = 0, polls = 0;
+const state_demo = (text: string | null): boolean => !text?.includes('Demo data');
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 try {
   for (const [w, h] of [[390, 844], [1280, 800]] as const) {
@@ -47,45 +48,84 @@ try {
         await p.close();
       }
     }
-    // The switch panel in its confirm state, and a refused (disabled) switch with its reason.
+    // The switch panel: one pressed side per service, a reason under every card, and no way to ask on a read-only feed.
     const p = await ctx.newPage();
     await p.goto(`${server.url.origin}/#services`, { waitUntil: 'load' });
-    await p.waitForSelector('.dash-service');
-    const enabled = p.locator('.dash-btn:not([disabled])');
-    if ((await enabled.count()) !== 0) fail.push(`services @${w}: a switch is enabled on a read-only feed`);
-    for (const reason of await p.locator('.dash-reason').allTextContents()) if (!reason.trim()) fail.push(`services @${w}: a service shows no reason for its switch state`);
-    const sw = await p.evaluate(() => [...document.querySelectorAll('.dash-service')].filter((li) => { const b = li.querySelector('button[role="switch"]'); return !b || !b.getAttribute('aria-label') || !['true', 'false'].includes(b.getAttribute('aria-checked') ?? ''); }).length);
-    if (sw) fail.push(`services @${w}: ${sw} services lack a labelled switch with a checked state`);
-    const tall = await p.evaluate(() => [...document.querySelectorAll<HTMLElement>('.dash-btn')].filter((b) => b.getBoundingClientRect().height < 44).length);
-    if (tall) fail.push(`services @${w}: ${tall} buttons are under 44 px tall`);
+    await p.waitForSelector('.toon-switch-card');
+    const OPEN = '[data-toon-switch-to][aria-pressed="false"]:not([aria-disabled="true"])';
+    if ((await p.locator(OPEN).count()) !== 0) fail.push(`services @${w}: a switch is enabled on a read-only feed`);
+    for (const reason of await p.locator('.toon-switch-card-reason').allTextContents()) if (!reason.trim()) fail.push(`services @${w}: a service shows no reason for its switch state`);
+    const cards = await p.evaluate(() => { const cs = [...document.querySelectorAll('.toon-switch-card')]; return { n: cs.length, bad: cs.filter((c) => c.querySelectorAll('button[aria-pressed="true"]').length !== 1 || c.querySelectorAll('button[aria-pressed]').length !== 2 || !c.querySelector('.toon-switch-card-reason')).length, short: [...document.querySelectorAll<HTMLElement>('.toon-switch-card-side')].filter((b) => b.getBoundingClientRect().height < 44).length }; });
+    if (cards.n !== fixture.services.length) fail.push(`services @${w}: ${cards.n} cards for ${fixture.services.length} services`);
+    if (cards.bad) fail.push(`services @${w}: ${cards.bad} cards lack two sides, one pressed side or a reason`);
+    if (cards.short) fail.push(`services @${w}: ${cards.short} side buttons are under 44 px tall`);
+    if (state_demo(await p.textContent('main'))) fail.push(`services @${w}: the fixture feed shows no demo banner`);
     // The confirm flow, with a feed that can request a switch: the HTML gets the switch meta and /sw answers.
     {
       const q = await ctx.newPage();
       await q.route(server.url.origin + '/', async (r) => r.fulfill({ contentType: 'text/html', body: (await Bun.file(`${root}/index.html`).text()).replace('<title>', '<meta name="dashboard-switch" content="/sw"><title>') }));
       await q.route('**/sw', (r) => r.fulfill({ json: { message: 'Request queued. Waiting for the lab-write tap.' } }));
+      // A live feed with old watchdog records: every side reads as unknown, so no switch may be asked for.
+      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot' } }));
       await q.goto(`${server.url.origin}/#services`, { waitUntil: 'load' });
-      await q.waitForSelector('.dash-service');
-      // The fixture's timestamps are old, so the sides read as unknown and the switch refuses. A fresh feed makes it allowed.
-      const refused = await q.locator('.dash-btn:not([disabled])').count();
-      if (refused !== 0) fail.push(`services @${w}: a switch is enabled against stale watchdog records`);
+      await q.waitForSelector('.toon-switch-card');
+      if ((await q.locator(OPEN).count()) !== 0) fail.push(`services @${w}: a switch is enabled against stale watchdog records`);
+      if ((await q.textContent('main'))!.includes('Demo data')) fail.push(`services @${w}: a live feed shows the demo banner`);
       await q.unroute('**/fixtures/dashboard.json');
       await q.route('**/fixtures/dashboard.json', (r) => {
         const now = new Date().toISOString();
         const fresh = JSON.parse(JSON.stringify(fixture));
+        fresh.source = 'pete-bot';
+        fresh.generatedAt = now;
         for (const sv of fresh.services) for (const k of ['lab', 'cloud']) if (sv[k]) sv[k].checkedAt = now;
         return r.fulfill({ json: fresh });
       });
       await q.reload({ waitUntil: 'load' });
-      await q.waitForSelector('.dash-btn:not([disabled])');
-      await q.locator('.dash-btn:not([disabled])').first().click();
+      await q.waitForSelector(OPEN);
+      await q.locator(OPEN).first().click();
       const focused = await q.evaluate(() => document.activeElement?.textContent ?? '');
-      if (!focused.startsWith('Confirm')) fail.push(`services @${w}: focus is on "${focused}" after Switch, not the Confirm button`);
+      if (!focused.startsWith('Confirm')) fail.push(`services @${w}: focus is on "${focused}" after a tap on the idle side, not the Confirm button`);
       await q.addScriptTag({ url: '/__axe.js' });
       const cr = await q.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
       runs++;
       for (const v of cr.violations) fail.push(`confirm state @${w}: ${v.id}: ${v.help}`);
+      // Cancel returns focus to the side that opened the step, and a second tap confirms.
+      await q.getByRole('button', { name: 'Cancel' }).click();
+      const back = await q.evaluate(() => document.activeElement?.getAttribute('data-toon-switch-to') ?? '');
+      if (!back) fail.push(`services @${w}: Cancel did not return focus to the side button`);
+      await q.locator(OPEN).first().click();
       await q.getByRole('button', { name: /^Confirm/ }).click();
       await q.waitForFunction(() => document.querySelector('.dash-status')?.textContent?.includes('queued'));
+      // A pressed side asks for nothing.
+      await q.locator('.toon-switch-card-side[aria-pressed="true"]').first().click();
+      if (await q.getByRole('button', { name: /^Confirm/ }).count()) fail.push(`services @${w}: a tap on the serving side opened the confirm step`);
+      await q.close();
+    }
+    // A poll must not close a row the reader opened, or move their focus.
+    {
+      const q = await ctx.newPage();
+      let n = 0;
+      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot', needs: fixture.needs.map((x: { why: string }) => ({ ...x, why: `${x.why} Read ${n}.` })), generatedAt: new Date(Date.now() - n++ * 7000).toISOString() } }));
+      await q.goto(`${server.url.origin}/#act`, { waitUntil: 'load' });
+      await q.waitForSelector('#act details');
+      const last = q.locator('#act details.toon-disclosure-details summary').last();
+      await last.click();
+      const before = await q.evaluate(() => ({ open: [...document.querySelectorAll<HTMLDetailsElement>('#act details.toon-disclosure-details')].map((d) => d.open).join(), id: document.activeElement?.id }));
+      const html = await q.locator('#act').innerHTML();
+      await q.evaluate(() => (window as any).__dashPoll?.());
+      await q.waitForFunction((h) => document.getElementById('act')!.innerHTML !== h, html);
+      const after = await q.evaluate(() => ({ open: [...document.querySelectorAll<HTMLDetailsElement>('#act details.toon-disclosure-details')].map((d) => d.open).join(), id: document.activeElement?.id }));
+      if (before.open !== after.open || before.id !== after.id || !after.id) fail.push(`act @${w}: a poll changed the open rows or the focus (${JSON.stringify(before)} to ${JSON.stringify(after)})`);
+      // A link in an open row has no id. Each read changes the row's text, so the row is drawn again, and focus has to come back to the link.
+      const link = q.locator('#act details[open] .dash-go a').first();
+      await link.focus();
+      const linkText = await link.textContent();
+      const html2 = await q.locator('#act').innerHTML();
+      await q.evaluate(() => (window as any).__dashPoll?.());
+      await q.waitForFunction((h) => document.getElementById('act')!.innerHTML !== h, html2);
+      const on = await q.evaluate(() => { const a = document.activeElement; return a instanceof HTMLAnchorElement && !!a.closest('#act') ? a.textContent : `not a link: ${a?.tagName}`; });
+      if (!linkText || on !== linkText) fail.push(`act @${w}: a poll moved focus off a link in an open row (was "${linkText}", is "${on}")`);
+      polls++;
       await q.close();
     }
     // The skip link is the first stop on a fresh load with no hash; a hash makes the kit move focus to its tab.
@@ -109,8 +149,20 @@ try {
       const vw = document.documentElement.clientWidth;
       let n = 0;
       const out: string[] = [];
+      // A data table is the one thing WCAG 1.4.10 lets scroll in two dimensions. The kit puts it
+      // in .toon-table-wrap, so the cells are exempt here and the wrap is checked instead: it has
+      // to fit the page, and a keyboard has to reach it under a name.
+      for (const w of document.querySelectorAll<HTMLElement>('main .toon-table-wrap')) {
+        if (w.closest('[hidden]')) continue;
+        const r = w.getBoundingClientRect();
+        if (!r.width) continue;
+        n++;
+        if (r.right > vw + 2 || r.left < -2) out.push(`table wrap ${Math.round(r.left)} to ${Math.round(r.right)} of ${vw}`);
+        if (w.scrollWidth > w.clientWidth && !(w.tabIndex === 0 && w.getAttribute('role') === 'region' && (w.getAttribute('aria-label') || w.getAttribute('aria-labelledby'))))
+          out.push('table wrap scrolls with no keyboard reach or no name');
+      }
       for (const el of document.querySelectorAll<HTMLElement>('main *')) {
-        if (el.closest('[hidden], [aria-hidden="true"], svg')) continue;
+        if (el.closest('[hidden], [aria-hidden="true"], svg, .toon-table-wrap')) continue;
         if (![...el.childNodes].some((t) => t.nodeType === 3 && t.textContent!.trim())) continue;
         const r = el.getBoundingClientRect();
         if (!r.width) continue;
@@ -128,6 +180,6 @@ try {
   await browser.close();
   server.stop(true);
 }
-console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the confirm state at each width), the switch confirm flow and skip link at 2 widths, ${measured} elements measured at 320 px; ${rules} rule passes, ${fail.length} failures`);
-if (runs !== TABS.length * Object.keys(states).length * 2 + 2 || measured < 20) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured`); process.exit(1); }
+console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the confirm state at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px; ${rules} rule passes, ${fail.length} failures`);
+if (runs !== TABS.length * Object.keys(states).length * 2 + 2 || measured < 20 || polls !== 2) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured`); process.exit(1); }
 if (fail.length) { console.error('a11y check FAILED:\n- ' + fail.join('\n- ')); process.exit(1); }

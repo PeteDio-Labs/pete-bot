@@ -1,7 +1,19 @@
 # Lab dashboard
 
-A Preact single-page app on toonish-ui v0.3.0 that shows what needs you, the alerts and their triage, the CVE report,
-the service switch panel with a watchdog per side, and the Plane summary. Mobile first, WCAG 2.2 AA.
+A Preact single-page app on toonish-ui v0.5.0. Mobile first, WCAG 2.2 AA.
+
+Each tab answers one question in its first 390 px screen, with a kit `verdict()`. The evidence sits under it in
+numbered sections, and a `readout()` says what the tab read. `QUESTIONS` in `src/views.ts` holds the questions.
+
+| Tab | Question | Leads with | Under a row that opens |
+|---|---|---|---|
+| Now | Do I need to do anything? | "Nothing needs you" in green, or what needs you in order | Nothing. Now has no counts and no charts |
+| Act | What do I fix, in what order? | Each item with its step and a button | Recovered alerts and the triage record |
+| Services | Can I fail over, and should I? | One switch card per service | Drill history, uptime and watchdog readings |
+| Health | What is drifting toward trouble? | Backups and patches as two signals, then the last good backup per guest and the patch backlog | The alert and CVE trend charts |
+| Work | What is waiting on me, and what is stuck? | The Plane items that wait on Pedro | The cycle and the other open items |
+
+The dashboard is Pedro's phone remote for the lab. A tab leads with what he can act on, and insight sits lower.
 
 ## Commands
 
@@ -13,6 +25,7 @@ the service switch panel with a watchdog per side, and the Plane summary. Mobile
 | `bun test` | Tests the model and the feed |
 | `bun run typecheck` | Runs `tsc --noEmit` |
 | `bun run test:a11y` | Runs axe on 5 tabs, 4 feed states and 2 widths, and prints what it read |
+| `bun run test/shots.ts <dir> <prefix>` | Writes a screenshot of each tab, fresh and stale, at phone and desktop width |
 
 ## How it works
 
@@ -21,9 +34,26 @@ the service switch panel with a watchdog per side, and the Plane summary. Mobile
 - **Unknown is not healthy.** `src/model.ts` turns a missing, malformed or older-than-5-minutes record into `unknown`. A
   section that does not parse is dropped and listed in a banner.
 - **Every view says what it read,** with counts and the age of the read.
-- **The switch toggle only asks (a labelled `role="switch"`, checked when the service runs in the cloud; a tap opens a confirm step).** `DASHBOARD_SWITCH` names a URL that queues a request. Without it, the button is
-  disabled and says why. A switch is allowed only when the target side is fresh and healthy, and a service with a
+- **Act ranks everything with a step.** `actItems()` in `src/views.ts` lists, in order: a service down on the side that
+  serves, the action cards, a down alert with no card, exploited CVEs, a late backup, then critical and high CVEs with a
+  fix. Each item has a step and a button. The button opens the `lab-action` workflow page or the Services tab. A recovery
+  is not an item.
+- **Now is the top of Act and the top of Work.** `attention()` folds the CVEs into one line per class and adds the Plane
+  items that wait on Pedro. A source that was not read is listed last as `unknown`, so Now says all clear only when every
+  source the feed carries was read.
+- **Backups are an optional feed section.** `backups` holds `checkedAt` and one `{ guest, lastGood, detail }` per guest. A
+  guest is late after 36 hours, and missing after 72 hours or with no good run. A feed with no `backups` section shows
+  Backups as unknown on Health and does not hold Now at unknown. The fixture carries the section. The live feed in
+  `src/reports/feed.ts` does not carry it yet.
+- **Not in the feed yet:** drift, certificate expiry, pending `lab-write` taps and pull requests that wait for Pedro's
+  word. Health and Work say so in their readout.
+- **A switch card only asks.** Each service is a kit `switchCard()`: two buttons, with the serving side pressed. A tap on
+  the other side opens a confirm step. `DASHBOARD_SWITCH` names a URL that queues a request. Without it, the idle side
+  is disabled and says why. A switch is allowed only when the target side is fresh and healthy, and a service with a
   database needs a known replication lag.
+- **The fixture has its own clock.** A feed whose `source` is `fixture` is read one minute after its `generatedAt`
+  (`clockFor()` in `src/model.ts`), and a banner says the data is a demonstration. A live feed is read at the real time.
+- **A poll keeps your place.** The page reads the feed every 30 seconds. An open row stays open and focus stays put.
 - **Tabs belong to the kit.** `toonish-ui/toonish.js` switches the panels by hash. Preact leaves `hidden` alone.
 
 ## Data

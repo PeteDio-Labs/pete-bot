@@ -63,7 +63,34 @@ export interface Drill { label: string; detectS: number; flipS: number; clientS:
 
 export interface UptimeCell { at: string; state: 'ok' | 'down' | 'unknown'; detail?: string }
 
+export interface PlaneItemRow { seq: number; name: string; state: string; needsPedro: boolean }
+export interface PlaneDetail {
+  total: number;
+  done: number;
+  /** Null when the feed did not carry it. */
+  inProgress: number | null;
+  start: string;
+  end: string;
+  /** Who each cycle item waits on: Pedro, a cloud thread, or neither label. */
+  routes: { name: 'Pedro' | 'Claude' | 'Unlabelled'; total: number; done: number }[];
+  /** Open items, capped by the producer. `open` is the full count. */
+  items: PlaneItemRow[];
+}
+
+/** One guest's backup record. `lastGood` is null when no good run is on record. */
+export interface BackupRow { guest: string; lastGood: string | null; detail: string }
+/** A backup is nightly: late after 36 hours, and wrong after 72 hours or with no good run on record. */
+export const BACKUP_LATE_MS = 36 * 3_600_000;
+export const BACKUP_DOWN_MS = 72 * 3_600_000;
+export function backupState(b: BackupRow, now: number): 'ok' | 'warn' | 'down' {
+  const age = b.lastGood ? now - Date.parse(b.lastGood) : Number.NaN;
+  if (!isFresh(age, BACKUP_DOWN_MS)) return 'down';
+  return age > BACKUP_LATE_MS ? 'warn' : 'ok';
+}
+
 export interface DashboardData {
+  /** The last good backup per guest. Null when the feed carried no backup report or it did not parse. */
+  backups: { checkedAt: string; guests: BackupRow[] } | null;
   history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[]; uptime: Record<string, UptimeCell[]> } | null;
   generatedAt: string;
   source: string;
@@ -73,9 +100,9 @@ export interface DashboardData {
   cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** The run's full exploited count. `findings` may be capped, so the tile uses this when present. */ exploited: number | null; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
-  plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null } | null;
+  plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
-  unread: ('needs' | 'alerts')[];
+  unread: ('needs' | 'alerts' | 'backups')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
   droppedServices: number;
 }
@@ -85,10 +112,27 @@ export interface Examined {
   text: string;
 }
 
+/**
+ * The clock a view reads ages against. The fixture is a recording, so it is read one minute after it was written: staging
+ * then shows the page as designed, not a page of stale records. The page says so in a banner. A feed with any other
+ * source is read against the real clock, so a dead watchdog still ages into `unknown`. So is a feed from any address
+ * but the fixture file that ships with the page: a live feed cannot claim the demo clock by naming itself `fixture`.
+ */
+export const DEMO_SOURCE = 'fixture';
+export function clockFor(d: Pick<DashboardData, 'source' | 'generatedAt'>, now: number, shippedFixture: boolean): number {
+  if (!shippedFixture || d.source !== DEMO_SOURCE) return now;
+  const at = Date.parse(d.generatedAt);
+  return Number.isFinite(at) ? at + 60_000 : now;
+}
+
+/** A time more than five minutes ahead of the clock is not a reading of now, so it is not fresh either. */
+export const SKEW_MS = 5 * 60_000;
+export const isFresh = (age: number, maxMs: number): boolean => Number.isFinite(age) && age <= maxMs && age >= -SKEW_MS;
+
 export function healthOf(s: SideStatus | null, now: number): Health {
   if (!s) return 'unknown';
   const at = Date.parse(s.checkedAt);
-  if (!Number.isFinite(at) || now - at > STALE_MS) return 'unknown';
+  if (!isFresh(now - at, STALE_MS)) return 'unknown';
   return s.ok ? 'ok' : 'down';
 }
 
@@ -123,7 +167,8 @@ export function sortFindings(f: CveFinding[]): CveFinding[] {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const str = (v: unknown, n = 300): string => (typeof v === 'string' ? v.slice(0, n) : '');
+/** Trimmed, so a string of spaces is no string: the kit refuses an empty title, and a blank name names nothing. */
+const str = (v: unknown, n = 300): string => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 function side(v: unknown): SideStatus | null {
@@ -150,6 +195,35 @@ function parseUptime(v: unknown): Record<string, UptimeCell[]> {
 }
 
 /**
+ * The cycle detail. It is optional, so a feed without it is not a problem. A detail that is present but has a bad
+ * counter or a bad item is dropped whole and reported: half a progress bar would read as a real one.
+ */
+function planeDetail(pl: Record<string, unknown>, problems: string[]): PlaneDetail | null {
+  if (pl.total === undefined && pl.done === undefined) return null;
+  const total = num(pl.total);
+  const done = num(pl.done);
+  const bad = (): null => {
+    problems.push('the Plane cycle detail was unreadable, so only the counts are shown');
+    return null;
+  };
+  if (total === null || done === null || total < 0 || done < 0 || done > total) return bad();
+  const routes: PlaneDetail['routes'] = [];
+  const by = isObj(pl.byRoute) ? pl.byRoute : {};
+  for (const [key, name] of [['pedro', 'Pedro'], ['ai', 'Claude'], ['other', 'Unlabelled']] as const) {
+    const r = by[key];
+    if (r === undefined) continue;
+    if (!isObj(r) || num(r.total) === null || num(r.done) === null || num(r.done)! < 0 || num(r.done)! > num(r.total)!) return bad();
+    routes.push({ name, total: num(r.total)!, done: num(r.done)! });
+  }
+  const items: PlaneItemRow[] = [];
+  for (const it of Array.isArray(pl.openItems) ? pl.openItems.slice(0, 30) : []) {
+    if (!isObj(it) || num(it.seq) === null || !str(it.name)) return bad();
+    items.push({ seq: num(it.seq)!, name: str(it.name, 120), state: str(it.state, 40) || 'unknown state', needsPedro: Array.isArray(it.labels) && it.labels.includes('needs-pedro') });
+  }
+  return { total, done, inProgress: num(pl.inProgress), start: str(pl.start, 10), end: str(pl.end, 10), routes, items };
+}
+
+/**
  * Reads the feed's JSON. A section that does not parse is dropped and reported in `problems`,
  * never filled with a default that looks healthy.
  */
@@ -163,7 +237,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     problems.push(`${k} is missing or not a list`);
     return [];
   };
-  const unread = new Set<'needs' | 'alerts'>((['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k])));
+  const unread = new Set<'needs' | 'alerts' | 'backups'>((['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k])));
   const needs: Needs[] = [];
   for (const n of arr('needs')) if (isObj(n) && str(n.id) && str(n.title) && str(n.step)) needs.push({ id: str(n.id, 80), title: str(n.title, 160), why: str(n.why), step: str(n.step), since: str(n.since, 40) });
   else {
@@ -210,7 +284,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
   if (!triage) problems.push(isObj(tr) ? 'the triage ledger had an unreadable counter' : 'the triage ledger is missing');
   const pl = o.plane;
   const plNums = isObj(pl) ? [num(pl.open), num(pl.needsPedro), num(pl.inReview)] : [];
-  const plane = isObj(pl) && str(pl.checkedAt) && plNums.every((v) => v !== null) ? { checkedAt: str(pl.checkedAt, 40), open: plNums[0]!, needsPedro: plNums[1]!, inReview: plNums[2]!, cycle: str(pl.cycle, 60), lost: num(pl.lost) } : null;
+  const plane = isObj(pl) && str(pl.checkedAt) && plNums.every((v) => v !== null) ? { checkedAt: str(pl.checkedAt, 40), open: plNums[0]!, needsPedro: plNums[1]!, inReview: plNums[2]!, cycle: str(pl.cycle, 60), lost: num(pl.lost), detail: planeDetail(pl, problems) } : null;
   if (!plane) problems.push(isObj(pl) ? 'the Plane summary had an unreadable counter' : 'the Plane summary is missing');
   let history: DashboardData['history'] = null;
   const h = o.history;
@@ -226,5 +300,14 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       drills: h.drills.filter((x) => isObj(x) && str(x.label)).map((x) => { const r = x as Record<string, unknown>; return { label: str(r.label, 40), detectS: n(r.detectS), flipS: n(r.flipS), clientS: n(r.clientS), result: r.result === 'passed' || r.result === 'failed' ? r.result : 'not injected' }; }),
     };
   } else problems.push('the history section is missing');
-  return { data: { history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  let backups: DashboardData['backups'] = null;
+  const bk = o.backups;
+  if (bk !== undefined) {
+    const rows = isObj(bk) && Array.isArray(bk.guests) ? bk.guests : null;
+    if (!isObj(bk) || !str(bk.checkedAt) || !rows || rows.some((g) => !isObj(g) || !str(g.guest))) {
+      problems.push('the backup report was unreadable');
+      unread.add('backups');
+    } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
+  }
+  return { data: { backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }

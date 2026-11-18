@@ -23,6 +23,25 @@ function newest(hub: ReportHub, kind: string): HubRecord | null {
   return records[0] ?? null;
 }
 
+/**
+ * The cycle's progress, split and open items, passed through as the record holds them. A record from before these
+ * fields existed adds nothing, and the SPA then shows the counts alone.
+ */
+function cycleDetail(p: HubRecord): Record<string, unknown> {
+  if (typeof p.total !== 'number' || typeof p.done !== 'number') return {};
+  const c = rec(p.cycle);
+  return {
+    total: p.total,
+    done: p.done,
+    inProgress: typeof p.inProgress === 'number' ? p.inProgress : undefined,
+    start: c.start,
+    end: c.end,
+    byRoute: p.byRoute,
+    // The producer caps this list at 15, so `open` beside it is the full count.
+    openItems: Array.isArray(p.openItems) ? p.openItems : undefined,
+  };
+}
+
 export interface FeedInput {
   hub: ReportHub | null;
   batches: AlertBatch[];
@@ -70,7 +89,7 @@ export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): 
     }
     const p = newest(hub, CYCLE_KIND);
     // A cycle record with no cycle, or from before the in-review count existed, has nothing to show.
-    if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: typeof p.needsPedro === 'number' ? p.needsPedro : undefined, inReview: p.inReview, cycle: rec(p.cycle).name, lost: typeof p.lost === 'number' ? p.lost : undefined };
+    if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: typeof p.needsPedro === 'number' ? p.needsPedro : undefined, inReview: p.inReview, cycle: rec(p.cycle).name, lost: typeof p.lost === 'number' ? p.lost : undefined, ...cycleDetail(p) };
   }
 
   return {

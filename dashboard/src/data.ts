@@ -7,11 +7,16 @@ import { parseDashboard, type DashboardData, type Side } from './model.ts';
 export interface Feed {
   load(): Promise<{ data: DashboardData; problems: string[] }>;
   /** Null when this feed cannot request a switch. The panel then says so. */
+  /** True only for the fixture file that ships with the page. A feed read from any other address is never a demonstration, whatever it says about itself. */
+  demo: boolean;
   requestSwitch: ((service: string, to: Side) => Promise<{ ok: boolean; message: string }>) | null;
 }
 
+export const FIXTURE_URL = '/fixtures/dashboard.json';
+
 export function httpFeed(url: string, switchUrl: string | null, fetchImpl: typeof fetch = fetch): Feed {
   return {
+    demo: url === FIXTURE_URL,
     async load() {
       let res: Response;
       try {
@@ -38,5 +43,5 @@ export function httpFeed(url: string, switchUrl: string | null, fetchImpl: typeo
 /** The feed named by the page's `<meta name="dashboard-feed">`, or the fixture feed. */
 export function getFeed(doc: Document = document): Feed {
   const meta = (name: string): string | null => doc.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)?.content.trim() || null;
-  return httpFeed(meta('dashboard-feed') ?? '/fixtures/dashboard.json', meta('dashboard-switch'));
+  return httpFeed(meta('dashboard-feed') ?? FIXTURE_URL, meta('dashboard-switch'));
 }
