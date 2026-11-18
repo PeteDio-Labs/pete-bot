@@ -5,7 +5,7 @@ import { TABBAR } from './src/app.tsx';
 import { skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
-const feed = process.env.DASHBOARD_FEED ?? '/fixtures/dashboard.json';
+const feed = process.env.DASHBOARD_FEED || '/fixtures/dashboard.json';
 const switchUrl = process.env.DASHBOARD_SWITCH ?? '';
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });

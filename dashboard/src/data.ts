@@ -13,7 +13,15 @@ export interface Feed {
 export function httpFeed(url: string, switchUrl: string | null, fetchImpl: typeof fetch = fetch): Feed {
   return {
     async load() {
-      const res = await fetchImpl(url, { headers: { accept: 'application/json' }, cache: 'no-store' });
+      let res: Response;
+      try {
+        // `include` sends the Access cookie to a feed on another origin (reports.pdlab.dev).
+        res = await fetchImpl(url, { headers: { accept: 'application/json' }, cache: 'no-store', credentials: 'include' });
+      } catch {
+        // A blocked or redirected cross-origin read looks the same as an offline feed: say how to fix the likely cause.
+        const origin = /^https?:/i.test(url) ? new URL(url).origin : null;
+        throw new Error(origin ? `the feed could not be read; open ${origin} once to sign in, then reload` : 'the feed could not be read');
+      }
       if (!res.ok) throw new Error(`the feed answered ${res.status}`);
       return parseDashboard(await res.json());
     },

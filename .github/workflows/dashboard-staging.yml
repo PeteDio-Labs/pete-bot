@@ -30,6 +30,9 @@ jobs:
           bun-version: 1.4.2
       - name: Build
         working-directory: dashboard
+        env:
+          # Unset, the build reads the fixture. Set it to the real feed once its CORS rule is applied (petedio-iac#752).
+          DASHBOARD_FEED: ${{ vars.STAGING_DASHBOARD_FEED }}
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build
