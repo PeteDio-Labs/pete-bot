@@ -64,9 +64,9 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
               <p class="dash-meta">{`${s.hostname} · ${s.dataClass} · active on ${s.active === 'lab' ? 'on-prem' : 'cloud'}${s.pinned ? ' · pinned' : ''}`}</p>
               <p class={`dash-side dash-${c.lab.h}`}>{`On-prem: ${c.lab.text}`}</p>
               <p class={`dash-side dash-${c.cloud.h}`}>{`Cloud: ${c.cloud.text}`}</p>
-              {asked === s.name ? (
+              {asked === s.name && can ? (
                 <p>
-                  <button type="button" ref={confirmRef} class="toon-btn dash-btn" onClick={() => send(s.name, c.sw.to)}>{`Confirm: request switch to ${c.sw.to === 'cloud' ? 'cloud' : 'on-prem'}`}</button>{' '}
+                  <button type="button" ref={confirmRef} class="toon-btn dash-btn" onClick={() => (can ? send(s.name, c.sw.to) : setAsked(null))}>{`Confirm: request switch to ${c.sw.to === 'cloud' ? 'cloud' : 'on-prem'}`}</button>{' '}
                   <button type="button" class="toon-btn toon-btn-ghost dash-btn" onClick={() => setAsked(null)}>Cancel</button>
                 </p>
               ) : (
