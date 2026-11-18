@@ -14,6 +14,7 @@
  * (the lab MCP uses the same two checks, lab/access.ts).
  */
 import { buildDashboardFeed } from './feed.js';
+import { cachedServices } from '../failover/services.js';
 import { activeBatches } from '../server/alertStore.js';
 import express, { type Express } from 'express';
 import type { Server } from 'node:http';
@@ -146,9 +147,10 @@ export function createDashboardApp(d: DashboardDeps): Express {
     }
   });
 
-  app.get('/api/dashboard', (_req, res) => {
+  app.get('/api/dashboard', async (_req, res) => {
     try {
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now: new Date() }));
+      const now = new Date();
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await cachedServices(now) }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }
