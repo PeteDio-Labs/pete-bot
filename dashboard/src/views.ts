@@ -121,6 +121,8 @@ export interface Attention {
   why: string;
   step?: string;
   since?: string;
+  /** A short fact for the row's end slot, such as `1 exploited`. */
+  fact?: string;
   tab: Tab;
 }
 
@@ -136,7 +138,7 @@ export function attention(d: DashboardData, now: number): Attention[] {
     const group = items.filter((i) => i.kind === 'CVE' && !!i.exploited === exploited);
     if (!group.length) return;
     const n = exploited && d.cve?.exploited ? Math.max(d.cve.exploited, group.length) : group.length;
-    out.push({ state: exploited ? 'down' : 'warn', kind: 'CVE', title: exploited ? `${plural(n, 'CVE is', 'CVEs are')} exploited in the wild` : `${plural(n, 'critical or high CVE has', 'critical or high CVEs have')} a fix`, why: `First: ${group[0]!.title}${group[0]!.note ? ` on ${group[0]!.note}` : ''}.`, step: group[0]!.step, tab: 'act' });
+    out.push({ state: exploited ? 'down' : 'warn', kind: 'CVE', title: exploited ? `${plural(n, 'CVE is', 'CVEs are')} exploited in the wild` : `${plural(n, 'critical or high CVE has', 'critical or high CVEs have')} a fix`, why: `First: ${group[0]!.title}${group[0]!.note ? ` on ${group[0]!.note}` : ''}.`, step: group[0]!.step, fact: `${n} ${exploited ? 'exploited' : 'fixable'}`, tab: 'act' });
   };
   let foldedKev = false, foldedRest = false;
   for (const i of items) {
@@ -146,7 +148,7 @@ export function attention(d: DashboardData, now: number): Attention[] {
   }
   if (d.plane && planeFresh(d, now) && d.plane.needsPedro > 0) {
     const mine = d.plane.detail?.items.filter((i) => i.needsPedro) ?? [];
-    out.push({ state: 'warn', kind: 'PLANE', title: `${plural(d.plane.needsPedro, 'Plane item waits', 'Plane items wait')} on you`, why: mine[0] ? `First: PET-${mine[0].seq}, ${mine[0].name}.` : 'They carry the needs-pedro label.', tab: 'work' });
+    out.push({ state: 'warn', kind: 'PLANE', title: `${plural(d.plane.needsPedro, 'Plane item waits', 'Plane items wait')} on you`, why: mine[0] ? `First: PET-${mine[0].seq}, ${mine[0].name}.` : 'They carry the needs-pedro label.', fact: `${d.plane.needsPedro} waiting`, tab: 'work' });
   }
   if (liveUnread(d, now, 'needs')) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The list of items that need you was not read', why: 'It was not read in full, or it is out of date.', tab: 'act' });
   if (liveUnread(d, now, 'alerts')) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The alert list was not read in full', why: 'It was not read in full, or it is out of date, so an open alert may be missing.', tab: 'act' });
@@ -160,7 +162,7 @@ export function attention(d: DashboardData, now: number): Attention[] {
   else if (d.plane.lost && d.plane.lost > 0) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The Plane board counts are incomplete', why: `${plural(d.plane.lost, 'cycle item was', 'cycle items were')} not found on the board.`, tab: 'work' });
   if (d.services.length === 0) out.push({ state: 'unknown', kind: 'UNREAD', title: 'No service was read', why: 'So no probe stands behind this page.', tab: 'services' });
   const unknownProbes = d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]).filter((h) => h === 'unknown').length;
-  if (unknownProbes > 0 || d.droppedServices > 0) out.push({ state: 'unknown', kind: 'UNREAD', title: unknownProbes ? `${plural(unknownProbes, 'probe has', 'probes have')} no fresh reading` : 'A service row was unreadable', why: 'A missing or stale watchdog record shows as unknown, never as healthy.', tab: 'services' });
+  if (unknownProbes > 0 || d.droppedServices > 0) out.push({ state: 'unknown', kind: 'UNREAD', title: unknownProbes ? `${plural(unknownProbes, 'probe has', 'probes have')} no fresh reading` : 'A service row was unreadable', why: 'A missing or stale watchdog record shows as unknown, never as healthy.', fact: unknownProbes ? `${unknownProbes} unread` : undefined, tab: 'services' });
   return out;
 }
 
@@ -176,8 +178,8 @@ export function nowBlocks(d: DashboardData, now: number): string[] {
   const read = readout(`Read ${plural(checksRead(d), 'check')}, ${ageText(d.generatedAt, now)}: ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length * 2, 'probe')}${d.backups ? `, ${plural(d.backups.guests.length, 'backup record')}` : ''}${d.cve ? ', the CVE report' : ''}${d.plane ? ', the Plane board' : ''}. Source: ${d.source}.`);
   const row = (a: Attention, i: number, open: boolean): string =>
     disclosure({
-      id: `now-${i}`, lead: a.state === 'unknown' ? a.kind : `${i + 1} ${a.kind}`, title: a.title, note: a.since ? ageText(a.since, now) : undefined, native: true, open,
-      panel: kv([['Why', a.why], ...(a.step ? [['Do this', a.step] as [string, string]] : [])]) + tabLink(a.tab),
+      id: `now-${i}`, tone: ({ down: 'red', warn: 'yellow', unknown: 'mist' } as const)[a.state], lead: a.state === 'unknown' ? a.kind : `${i + 1} ${a.kind}`, title: a.title, sub: a.why, note: a.since ? ageText(a.since, now) : a.fact ?? TAB_LABEL[a.tab], native: true, open,
+      panel: (a.step ? kv([['Do this', a.step]]) : '') + tabLink(a.tab),
     });
   const unreadSection = (num: string): string[] => (unread.length ? [section(num, 'Not read', list(unread.map((a, i) => row(a, act.length + i, false)), { label: 'Sources that were not read' }))] : []);
   if (act.length) {
@@ -210,9 +212,9 @@ export function actBlocks(d: DashboardData, now: number): string[] {
   // A recovery closes the alert it ends, so it is not an item. It stays on record here.
   const quiet = d.alerts.filter((a) => a.state === 'up');
   const record: string[] = [
-    disclosure({ id: 'act-quiet', lead: 'UP', title: 'Recovered alerts', note: String(quiet.length), native: true, panel: quiet.length ? list(quiet.map((a) => row({ lead: 'UP', title: a.monitor, sub: `${word[a.triage]}.`, aside: ageText(a.since, now) })), { label: 'Recovered alerts' }) : p('No recovered alert is on the list.') }),
+    disclosure({ id: 'act-quiet', lead: 'UP', title: 'Recovered alerts', sub: 'Alerts that came back up. A recovery closes the alert, so none needs a step.', note: `${quiet.length} up`, native: true, panel: quiet.length ? list(quiet.map((a) => row({ lead: 'UP', title: a.monitor, sub: `${word[a.triage]}.`, aside: ageText(a.since, now) })), { label: 'Recovered alerts' }) : p('No recovered alert is on the list.') }),
     disclosure({
-      id: 'act-triage', lead: 'AI', title: 'Triage record', note: t ? `${t.read} read` : 'not read', native: true,
+      id: 'act-triage', lead: 'TRIAGE', title: 'Triage record', sub: 'How Qwen sorted the alerts into action cards and plain alerts.', note: t ? `${t.read} read` : 'not read', native: true,
       panel: t ? strip([{ value: String(t.read), label: 'alerts read' }, { value: String(t.cards), label: 'action cards' }, { value: String(t.plain), label: 'plain alerts' }, { value: String(t.failures), label: 'Qwen failures' }], { label: `Triage since ${t.since}` }) + p(`Counted since ${t.since}. A failed triage sends the plain alert, never silence.`) : p('The triage ledger is missing, so card and fallback counts are unknown.'),
     }),
   ];
@@ -229,8 +231,8 @@ export function actBlocks(d: DashboardData, now: number): string[] {
   const worst = items.some((i) => i.state === 'down') ? 'down' : 'warn';
   const rows = items.map((it, i) =>
     disclosure({
-      id: `act-${i}`, lead: `${i + 1} ${it.kind}`, title: it.title, badge: it.exploited ? { text: 'Exploited', tone: 'red' } : undefined, note: it.note ?? (it.since ? ageText(it.since, now) : undefined), native: true, open: i === 0,
-      panel: kv([['Do this', it.step], ['Why', it.why]]) + it.button,
+      id: `act-${i}`, tone: it.state === 'down' ? 'red' : 'yellow', lead: `${i + 1} ${it.kind}`, title: it.title, sub: it.why, badge: it.exploited ? { text: 'Exploited', tone: 'red' } : undefined, note: it.note ?? (it.since ? ageText(it.since, now) : undefined), native: true, open: i === 0,
+      panel: kv([['Do this', it.step]]) + it.button,
     }),
   );
   const answer = verdict({ state: worst, stateText: 'Fix', title: `${plural(items.length, 'thing')} to fix`, body: `Start with: ${items[0]!.title}. ${items[0]!.step}${caveat}` });
@@ -285,7 +287,7 @@ export function healthBlocks(d: DashboardData, now: number): string[] {
   if (b && b.guests.length) {
     const word = { ok: 'IN TIME', warn: 'LATE', down: 'MISSING' } as const;
     const rank = { down: 0, warn: 1, ok: 2 } as const;
-    const rows = [...b.guests].sort((x, y) => rank[backupState(x, now)] - rank[backupState(y, now)]).map((g) => row({ lead: backupsFresh(d, now) ? word[backupState(g, now)] : 'UNKNOWN', title: g.guest, sub: g.detail || undefined, aside: g.lastGood ? ageText(g.lastGood, now) : 'no good run' }));
+    const rows = [...b.guests].sort((x, y) => rank[backupState(x, now)] - rank[backupState(y, now)]).map((g) => row({ leadTone: backupsFresh(d, now) ? ({ ok: 'blue', warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist', lead: backupsFresh(d, now) ? word[backupState(g, now)] : 'UNKNOWN', title: g.guest, sub: g.detail || (g.lastGood ? 'The nightly backup finished.' : 'No good run is on record.'), aside: g.lastGood ? ageText(g.lastGood, now) : 'no good run', dot: backupsFresh(d, now) ? ({ ok: undefined, warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist' }));
     blocks.push(section(num(), 'Last good backup per guest', list(rows, { label: 'Last good backup per guest' })));
   }
   const c = d.cve;
@@ -293,16 +295,19 @@ export function healthBlocks(d: DashboardData, now: number): string[] {
     const short = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' } as const;
     const rows = sortFindings(c.findings).map((f, i) =>
       disclosure({
-        id: `cve-${i}`, lead: short[f.severity], title: `${f.id} in ${f.pkg}`, badge: f.kev && c.kevChecked ? { text: 'Exploited', tone: 'red' } : undefined, note: f.host || undefined, native: true,
+        id: `cve-${i}`, tone: ({ critical: 'red', high: 'red', medium: 'yellow', low: 'mist' } as const)[f.severity], lead: short[f.severity], title: `${f.id} in ${f.pkg}`, sub: f.fixed ? `Fixed in ${f.pkg} ${f.fixed}.` : 'No fixed version is published yet.', badge: f.kev && c.kevChecked ? { text: 'Exploited', tone: 'red' } : undefined, note: f.host || undefined, native: true,
         panel: kv([['Severity', f.severity], ['Host', f.host || 'unknown'], ['Fix', f.fixed ? `Upgrade to ${f.fixed}.` : 'No fixed version is published.'], ...(f.kev && c.kevChecked ? [['Exploited', 'In the wild, on the CISA KEV list.'] as [string, string]] : [])]),
       }),
     );
     blocks.push(section(num(), 'Patch backlog', list(rows, { label: 'CVE findings' })));
   }
   if (c) blocks.push(section(num(), 'What the CVE run covered', strip([{ value: String(c.packages), label: 'package versions' }, { value: String(c.hosts), label: 'hosts read' }, { value: String(c.advisories), label: 'advisories' }, { value: String(c.notChecked.length), label: c.notChecked.length === 1 ? 'host not checked' : 'hosts not checked' }], { label: 'What the CVE run covered' })));
+  const lastA = d.history?.alerts.at(-1), lastC = d.history?.cve.at(-1);
+  const trendAlerts = lastA ? `${lastA.act + lastA.noAction + lastA.unreadable} on ${shortDay(lastA.day)}` : 'not read';
+  const trendCve = lastC ? `${lastC.critical + lastC.high + lastC.medium + lastC.low} open` : 'not read';
   blocks.push(section(num(), 'Trends', list([
-    disclosure({ id: 'trend-alerts', lead: '7D', title: 'Alerts per day', native: true, panel: alertVolumeChart(d) }),
-    disclosure({ id: 'trend-cve', lead: '7D', title: 'Open CVE findings per day', native: true, panel: cveHistoryChart(d) }),
+    disclosure({ id: 'trend-alerts', lead: '7 DAYS', title: 'Alerts per day', sub: 'How many alerts fired each day this week.', note: trendAlerts, native: true, panel: alertVolumeChart(d) }),
+    disclosure({ id: 'trend-cve', lead: '7 DAYS', title: 'Open CVE findings per day', sub: 'Whether the patch backlog is shrinking or growing.', note: trendCve, native: true, panel: cveHistoryChart(d) }),
   ], { label: 'Trends' })));
   const gaps = c && c.gaps.length ? ` The CVE run could not examine: ${c.gaps.join('; ')}.` : '';
   const kevNote = c && !c.kevChecked ? ' The exploited-vulnerability list was not read, so no finding is marked as exploited.' : '';
@@ -376,9 +381,9 @@ export function servicesRecord(d: DashboardData, now: number): string {
   const drills = d.history?.drills ?? [];
   const ran = drills.filter((x) => x.result !== 'not injected').length;
   return list([
-    disclosure({ id: 'svc-drills', lead: 'DRILL', title: 'Drill history', note: d.history ? `${ran} run` : 'not read', native: true, panel: drillChart(d) }),
-    disclosure({ id: 'svc-uptime', lead: 'UP', title: 'Uptime per service', native: true, panel: uptimeStrips(d) }),
-    disclosure({ id: 'svc-watchdog', lead: 'PROBE', title: 'Watchdog readings', native: true, panel: card(watchdogMeters(d, now)) }),
+    disclosure({ id: 'svc-drills', lead: 'DRILL', title: 'Drill history', sub: 'Practice failovers: how long detection, the flip and recovery took.', note: d.history ? `${ran} run` : 'not read', native: true, panel: drillChart(d) }),
+    disclosure({ id: 'svc-uptime', lead: 'UPTIME', title: 'Uptime per service', sub: 'A strip of recent probe readings for each service.', note: `${d.services.length} read`, native: true, panel: uptimeStrips(d) }),
+    disclosure({ id: 'svc-watchdog', lead: 'PROBE', title: 'Watchdog readings', sub: 'How many probes read healthy, down and unknown.', note: `${d.services.length * 2} probes`, native: true, panel: card(watchdogMeters(d, now)) }),
   ], { label: 'Drills, uptime and watchdog readings' });
 }
 
@@ -404,7 +409,7 @@ export function workBlocks(d: DashboardData, now: number): string[] {
     { label: 'Open items by state' },
   );
   const read = (extra = ''): string => readout(`Read the PET board from the mirror, ${ageText(pl.checkedAt, now)}.${cyc}${lost}${extra} Need Pedro means the needs-pedro label. ${gap}`);
-  if (!det) return [answer, section('01', 'On record', list([disclosure({ id: 'work-counts', lead: 'PET', title: 'Open counts', note: `${pl.open} open`, native: true, panel: figures })], { label: 'Board counts' })), read(' The feed carried no cycle detail, so there is no item list.')];
+  if (!det) return [answer, section('01', 'On record', list([disclosure({ id: 'work-counts', lead: 'OPEN', title: 'Open counts', sub: 'Open, in progress, in review and waiting on you.', note: `${pl.open} open`, native: true, panel: figures })], { label: 'Board counts' })), read(' The feed carried no cycle detail, so there is no item list.')];
   const end = Date.parse(`${det.end}T23:59:59Z`);
   const left = Number.isFinite(end) ? Math.ceil((end - now) / 86_400_000) : null;
   const when = left === null ? 'The cycle has no readable end date.' : left > 0 ? `${plural(left, 'day')} left, to ${det.end}.` : left === 0 ? `The cycle ends today, ${det.end}.` : `The cycle ended on ${det.end}.`;
@@ -417,12 +422,12 @@ export function workBlocks(d: DashboardData, now: number): string[] {
       { label: 'Cycle progress, done of total' },
     ) + readout(when, { onPaper: true, label: 'Time' }),
   );
-  const itemRow = (i: (typeof det.items)[number]): string => row({ lead: `PET-${i.seq}`, title: i.name, aside: i.state });
+  const itemRow = (i: (typeof det.items)[number]): string => row({ lead: `PET-${i.seq}`, title: i.name, sub: i.needsPedro ? 'Needs you to decide.' : 'In the cycle.', aside: i.state, dot: i.needsPedro ? 'red' : undefined });
   const others = det.items.filter((i) => !i.needsPedro);
   const shown = det.items.length < pl.open ? ` The lists show ${det.items.length} of ${pl.open} open items.` : '';
   const record = [
-    disclosure({ id: 'work-cycle', lead: 'CYCLE', title: pl.cycle || 'Cycle', note: `${det.done} of ${det.total} done`, native: true, panel: progress + figures }),
-    ...(others.length ? [disclosure({ id: 'work-open', lead: 'PET', title: 'Also open, not waiting on you', note: String(others.length), native: true, panel: list(others.map(itemRow), { label: 'Other open items' }) })] : []),
+    disclosure({ id: 'work-cycle', lead: 'CYCLE', title: pl.cycle || 'Cycle', sub: 'Items done against the cycle total, and who owns the rest.', note: `${det.done} of ${det.total} done`, native: true, panel: progress + figures }),
+    ...(others.length ? [disclosure({ id: 'work-open', lead: 'OPEN', title: 'Also open, not waiting on you', sub: 'Open items with no needs-pedro label.', note: `${others.length} open`, native: true, panel: list(others.map(itemRow), { label: 'Other open items' }) })] : []),
   ];
   return [
     answer,

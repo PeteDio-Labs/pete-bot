@@ -6,7 +6,7 @@
       "name": "lab-dashboard",
       "dependencies": {
         "preact": "11.2.0",
-        "toonish-ui": "github:PeteDio-Labs/toonish-ui#8715aa610ec68122fad479e9cc8def561997aaee",
+        "toonish-ui": "github:PeteDio-Labs/toonish-ui#09d06d8125d37be8c433c7e2e2e54568d020ae19",
       },
       "devDependencies": {
         "@tailwindcss/cli": "4.3.5",
@@ -189,7 +189,7 @@
 
     "tapable": ["tapable@2.3.4", "", {}, "sha512-NHFiWnAbMJxNNpBwiO7jJVGDuqMxT9/oV8v57RR+fgBQShkJil5inGD8/xWy0hjLyHQyX1tu27QANhlz3KBqCg=="],
 
-    "toonish-ui": ["toonish-ui@github:PeteDio-Labs/toonish-ui#8715aa6", {}, "PeteDio-Labs-Toonish-ui-8715aa6", "sha512-6LFVfnWQnpd0gcYMCk2mCZRTAqihA+sI1Cv7/j9uQAgalHxjZD8CCkRAyIfcoJLoHnXLJ0rzdsbNDkBg9hbSgA=="],
+    "toonish-ui": ["toonish-ui@github:PeteDio-Labs/toonish-ui#09d06d8", {}, "PeteDio-Labs-Toonish-ui-09d06d8", "sha512-yJhW3pM9cx8Fn36WmBPexlu568EO2o9mC8EtpiXWsj1XSTL3Fwct2uw7BtYY4WPSgFu9hU9EjIiJlR38+f4YXQ=="],
 
     "typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
