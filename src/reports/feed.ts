@@ -4,9 +4,9 @@
  *
  * ⚠ A SECTION THIS BUILDER CANNOT READ IS LEFT OUT, NEVER FILLED WITH ZEROS. The SPA names a
  * missing section in a banner and treats it as unknown. Open alerts come from the alert store;
- * the CVE and Plane sections come from the newest hub record. `services`, `triage` and `history`
- * have no source here yet (the registry and the triage ledger are not built), so they are empty
- * or absent on purpose.
+ * the CVE and Plane sections come from the newest hub record. `services` comes from the failover registry
+ * and a live read of each lab side (src/failover). `triage` and `history` have no source here yet,
+ * so they are absent on purpose.
  */
 import type { AlertBatch } from '../server/alertStore.js';
 import type { HubRecord, ReportHub } from './hub.js';
@@ -27,9 +27,11 @@ export interface FeedInput {
   hub: ReportHub | null;
   batches: AlertBatch[];
   now: Date;
+  /** Registry rows with their lab readings. Absent, the section is empty and the SPA reads every service as unknown. */
+  services?: unknown[];
 }
 
-export function buildDashboardFeed({ hub, batches, now }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -76,7 +78,7 @@ export function buildDashboardFeed({ hub, batches, now }: FeedInput): Record<str
     source: 'pete-bot',
     needs,
     alerts,
-    services: [],
+    services: services ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
   };
