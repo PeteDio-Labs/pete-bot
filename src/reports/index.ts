@@ -11,6 +11,7 @@ import { AccessVerifier } from '../lab/access.js';
 import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
+import { readChangelog } from './changelog.js';
 import { ReportHub } from './hub.js';
 import { CYCLE_KIND, cycleRecord } from './hubCycle.js';
 import { CVE_KIND, cveRecord, shouldReplace } from './hubCve.js';
@@ -161,7 +162,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     hub = new ReportHub(w.dir);
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
     const summarize = ollamaSummarizer(w.ollamaUrl);
-    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
+    weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, readChanges: () => readChangelog(gh, s.org), log: logger });
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
     await listenDashboard(
       createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys: keysDeps(), log: (m) => logger.warn(`[Weekly] ${m}`) }),

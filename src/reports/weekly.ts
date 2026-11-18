@@ -24,6 +24,7 @@ import { collectGithub, type GithubReads } from './collect.js';
 import { AUTHOR_LABELS, countWeek, weekStart } from './merged.js';
 import { localTime } from './schedule.js';
 import type { Logger } from './runner.js';
+import { rowsForWeek, type ChangeRead, type WeekChanges } from './changelog.js';
 
 export const WEEKLY_MODEL = 'qwen3:8b';
 const DAY_MS = 86_400_000;
@@ -53,16 +54,19 @@ export interface WeekRecord {
   merged: WeekPr[];
   coverage: { reposRead: number; reposTotal: number; unread: string[]; floorRepos: string[] };
   summary: { source: 'ollama' | 'none'; model?: string; text: string; reason?: string };
+  /** The stack changelog rows dated inside the week. Absent on records built before the changelog. */
+  changes?: WeekChanges;
   /** Summaries of one repo's PRs, written on request from the dashboard. Absent on older records. */
   repoSummaries?: Record<string, { model: string; text: string; at: string; prs: number }>;
 }
 
 export type Summarize = (prs: WeekPr[], week: string) => Promise<string>;
+export type ReadChanges = () => Promise<ChangeRead>;
 
 const addDays = (date: string, n: number): string => new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
 /** Builds the record for the week starting `week`. Nothing is written. */
-export async function buildWeek(gh: GithubReads, org: string, repos: string[], week: string, at: Date, summarize: Summarize): Promise<WeekRecord> {
+export async function buildWeek(gh: GithubReads, org: string, repos: string[], week: string, at: Date, summarize: Summarize, readChanges?: ReadChanges): Promise<WeekRecord> {
   const reads = await collectGithub(gh, org, repos, at);
   const count = countWeek(reads, week);
   const inWeek = (m: string | null): boolean => !!m && weekStart(new Date(m)) === week;
@@ -93,6 +97,11 @@ export async function buildWeek(gh: GithubReads, org: string, repos: string[], w
       summary = { source: 'none', text: '', reason: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
     }
   }
+  let changes: WeekChanges | undefined;
+  if (readChanges) {
+    const c = await readChanges();
+    changes = c.read ? { read: true, rows: rowsForWeek(c.rows, week) } : { read: false, reason: c.reason };
+  }
   return {
     week,
     generatedAt: at.toISOString(),
@@ -103,6 +112,7 @@ export async function buildWeek(gh: GithubReads, org: string, repos: string[], w
     merged,
     coverage: { reposRead: read.length, reposTotal: reads.length, unread, floorRepos: count.floorRepos },
     summary,
+    ...(changes ? { changes } : {}),
   };
 }
 
@@ -298,7 +308,7 @@ export function needsRebuild(rec: WeekRecord, now: Date): boolean {
   if (now.getTime() - generated < REBUILD_GAP_MS) return false;
   // Monday 05:00 UTC is after Eastern midnight in both EST and EDT.
   const weekEnd = Date.parse(`${addDays(rec.week, 7)}T05:00:00Z`);
-  return generated < weekEnd || rec.coverage.unread.length > 0 || (rec.summary.source === 'none' && rec.total > 0);
+  return generated < weekEnd || rec.coverage.unread.length > 0 || (rec.summary.source === 'none' && rec.total > 0) || (rec.changes !== undefined && !rec.changes.read);
 }
 
 /** The first week the report exists for. Earlier weeks are not back-filled. */
@@ -310,6 +320,8 @@ export interface WeeklyDeps {
   repos: string[];
   store: WeekStore;
   summarize: Summarize;
+  /** Reads the vault's stack changelog. Absent turns the section off. */
+  readChanges?: ReadChanges;
   log: Logger;
   now?: () => Date;
 }
@@ -363,7 +375,7 @@ export class WeeklyRunner {
     const at = this.now();
     try {
       this.attempted.set(week, at.getTime());
-      const rec = await buildWeek(this.d.gh, this.d.org, this.d.repos, week, at, this.d.summarize);
+      const rec = await buildWeek(this.d.gh, this.d.org, this.d.repos, week, at, this.d.summarize, this.d.readChanges);
       const old = this.d.store.all().weeks.find((r) => r.week === week);
       if (old) {
         // A rebuild repairs a record, never degrades it: a worse read keeps the stored one.
@@ -375,6 +387,8 @@ export class WeeklyRunner {
         if (rec.summary.source === 'none' && old.summary.source === 'ollama') rec.summary = old.summary;
         // Summaries written on request outlive a rebuild; the page shows when each was written.
         if (old.repoSummaries) rec.repoSummaries = old.repoSummaries;
+        // A failed changelog read never replaces rows that were read.
+        if (rec.changes && !rec.changes.read && old.changes?.read) rec.changes = old.changes;
       }
       this.d.store.save(rec);
       this.last = { at: at.toISOString(), week, ok: true, detail: `${rec.total} merged, summary ${rec.summary.source}` };

@@ -30,6 +30,7 @@ h1{font-size:22px;font-weight:700;letter-spacing:-.3px;margin:0}
 .row{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:flex-end}
 #view:not([hidden]),#kindview:not([hidden]){display:flex;flex-direction:column;gap:var(--s3)}
 .mute{color:var(--label-2);font-size:13px}
+.chg{margin-bottom:12px}
 .title{font-size:15px;font-weight:650;letter-spacing:-.2px;color:var(--label);margin:0 0 var(--s2)}
 .warn{color:var(--orange);font-size:13px}
 select,input{font:inherit;font-size:15px;color:var(--label);background:rgba(255,255,255,.07);border:1px solid var(--glass-line);border-radius:var(--r-group);padding:var(--s2) var(--s3);min-height:36px}
@@ -251,6 +252,10 @@ dd{margin-bottom:var(--s2)}
     <h2>What shipped</h2>
     <div class="card"><div id="themes"></div></div>
   </section>
+  <section class="section" id="changesSec">
+    <h2>Stack changes</h2>
+    <div class="card"><div id="changes"></div></div>
+  </section>
   <details class="card">
     <summary id="listSum">All merged PRs</summary>
     <div class="row" style="margin-bottom:8px"><input id="q" type="search" placeholder="Filter by title or PET key" aria-label="Filter PRs"><div id="chips" class="row" style="gap:6px"></div></div>
@@ -327,6 +332,7 @@ function render(){
  rankList($('authors'),sortEnt(w.byAuthor).map(function(p){return{name:p[0],n:p[1]}}),5);themes($('themes'),w);
  var dc=[0,0,0,0,0,0,0];w.merged.forEach(function(p){var i=dayOf(p.mergedAt);if(i>=0)dc[i]++});var best=Math.max.apply(null,dc);
  chart($('days'),DAYS.map(function(d,i){return{k:i,l:d,v:dc[i],cur:best>0&&dc[i]===best&&dc.indexOf(best)===i,t:d+': '+dc[i]+' merged',tip:d}}));
+ changes($('changes'),w);
  $('listSum').textContent='All merged PRs ('+w.merged.length+')';
  var chips=$('chips');clear(chips);
  Object.keys(w.byRepo).sort().forEach(function(r){var b=el('button',r,{class:'chip','aria-pressed':String(repoFilter===r)});b.onclick=function(){repoFilter=repoFilter===r?null:r;render()};chips.appendChild(b)});
@@ -342,6 +348,14 @@ function render(){
  if(!shown){var r=el('tr'),t=el('td',w.merged.length?'No PR matches the filter.':'No merged PRs recorded for this week.',{colspan:'4',class:'mute'});r.appendChild(t);tb.appendChild(r)}
  var n=window.innerWidth<=640?6:8,ci=data.indexOf(w),s0=ci<n?0:ci-n+1,rev=data.slice(s0,s0+n).reverse();
  chart($('trend'),rev.map(function(x){var d=new Date(x.week+'T00:00:00Z');return{k:x.week,l:d.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}),v:x.total,cur:x.week===w.week,t:fmtWeek(x.week)+': '+x.total+' merged',tip:fmtWeek(x.week)}}),select)}
+function changes(host,w){clear(host);var c=w.changes;
+ if(!c){host.appendChild(el('p','This week was recorded before the stack changelog existed.',{class:'mute'}));return}
+ if(!c.read){host.appendChild(el('p','The changelog could not be read, so this week shows no changes. Reason: '+c.reason+'.',{class:'warn'}));return}
+ if(!c.rows.length){host.appendChild(el('p','No stack change recorded this week.',{class:'mute'}));return}
+ c.rows.forEach(function(r){var d=el('div',null,{class:'chg'});
+  d.appendChild(el('div',r.date+' · '+r.area+' · '+r.status,{class:'title'}));
+  d.appendChild(el('div','Before: '+r.before,{class:'mute'}));d.appendChild(el('div','Now: '+r.now,{class:'mute'}));
+  if(r.source)d.appendChild(el('div','Source: '+r.source,{class:'mute'}));host.appendChild(d)})}
 function select(week){cur=data.filter(function(x){return x.week===week})[0];repoFilter=null;$('weekSel').value=week;render()}
 
 var kinds=[],tab='weekly',kindData={},seq=0;
