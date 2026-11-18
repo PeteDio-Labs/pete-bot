@@ -2,7 +2,8 @@
  * The Secrets screen's API, mounted under /api/keys behind the Access check of the dashboard app.
  *
  *   POST /api/keys/runs        { action, name? } starts keys.yml. Answers { requestId, run }.
- *   GET  /api/keys/runs/:id    the run's state by request id; `list` adds the parsed rows when it is done.
+ *   GET  /api/keys/runs/:id?action=<a>   the run's state by request id. Pass the action you asked for: a `list` that
+ *                              finishes but prints no rows reads as failed, never as done.
  *
  * Every write waits on Pedro's lab-write tap on GitHub, so a request here only asks. Nothing here reads or returns a
  * secret. The routes answer 404 until a token and an admin list are set, so an unconfigured host exposes nothing.
@@ -29,12 +30,16 @@ export interface KeysRouteDeps {
 /** Writes allowed per hour, and the gap between two. A stolen session cannot flood the tap queue. */
 const WRITES_PER_HOUR = 6;
 const WRITE_GAP_MS = 5_000;
+/** A list starts a real run and holds the request while it looks for it, so it has its own, wider limit. */
+const LISTS_PER_HOUR = 30;
+const LIST_GAP_MS = 3_000;
 
 export function createKeysRouter(d: KeysRouteDeps, email: (req: Request) => string | undefined): Router {
   const r = Router();
   const now = d.now ?? Date.now;
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const writes: number[] = [];
+  const lists: number[] = [];
 
   r.use((req, res, next) => {
     const who = email(req)?.toLowerCase();
@@ -66,12 +71,14 @@ export function createKeysRouter(d: KeysRouteDeps, email: (req: Request) => stri
     if (!named && body.name !== undefined) return void res.status(400).json({ error: `${action} takes no name` });
     const name = named ? (body.name as string) : undefined;
 
-    if (action !== 'list') {
+    {
       const t = now();
-      while (writes.length && t - writes[0]! > 3_600_000) writes.shift();
-      if (writes.length >= WRITES_PER_HOUR) return void res.status(429).json({ error: 'too many key changes this hour; wait, or approve the ones already waiting' });
-      if (writes.length && t - writes[writes.length - 1]! < WRITE_GAP_MS) return void res.status(429).json({ error: 'wait a few seconds between key changes' });
-      writes.push(t);
+      const isList = action === 'list';
+      const log = isList ? lists : writes;
+      while (log.length && t - log[0]! > 3_600_000) log.shift();
+      if (log.length >= (isList ? LISTS_PER_HOUR : WRITES_PER_HOUR)) return void res.status(429).json({ error: isList ? 'too many refreshes this hour' : 'too many key changes this hour; wait, or approve the ones already waiting' });
+      if (log.length && t - log[log.length - 1]! < (isList ? LIST_GAP_MS : WRITE_GAP_MS)) return void res.status(429).json({ error: 'wait a few seconds' });
+      log.push(t);
     }
 
     const requestId = newRequestId(now());
@@ -95,6 +102,8 @@ export function createKeysRouter(d: KeysRouteDeps, email: (req: Request) => stri
   r.get('/runs/:id', async (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!REQUEST_ID_RE.test(id)) return void res.status(400).json({ error: 'bad request id' });
+    const asked = req.query.action;
+    if (asked !== undefined && !(typeof asked === 'string' && KEY_ACTIONS.includes(asked as KeyAction))) return void res.status(400).json({ error: 'bad action' });
     try {
       const run = await d.client.findRun(id);
       if (!run) return void res.json({ state: 'not_found' });
@@ -102,12 +111,14 @@ export function createKeysRouter(d: KeysRouteDeps, email: (req: Request) => stri
       if (run.status !== 'completed') return void res.json({ state: run.status === 'queued' ? 'queued' : 'running', url: run.url });
       const ok = run.conclusion === 'success';
       const out: Record<string, unknown> = { state: ok ? 'done' : 'failed', conclusion: run.conclusion, url: run.url };
-      if (ok) {
+      // A finished list that gives no rows is a failure, not a success with nothing in it.
+      if (ok && asked === 'list') {
         try {
           const list = parseKeyList(await d.client.jobLog(run.id));
           if (list) out.list = list;
+          else Object.assign(out, { state: 'failed', logError: 'the run finished but its log had no key list' });
         } catch (err) {
-          out.logError = (err as Error).message.slice(0, 120);
+          Object.assign(out, { state: 'failed', logError: (err as Error).message.slice(0, 120) });
         }
       }
       res.json(out);

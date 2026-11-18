@@ -71,7 +71,7 @@ export function createKeysClient(cfg: KeysConfig, fetchImpl: typeof fetch = fetc
 
     async findRun(requestId: string): Promise<RunRef | undefined> {
       if (!REQUEST_ID_RE.test(requestId)) return undefined;
-      const res = await gh(`${wf}/runs?event=workflow_dispatch&per_page=30`);
+      const res = await gh(`${wf}/runs?event=workflow_dispatch&per_page=100`);
       if (!res.ok) await fail('Listing runs', res);
       const data = (await res.json()) as { workflow_runs?: Array<{ id: number; html_url: string; status: string; conclusion: string | null; display_title?: string }> };
       const r = data.workflow_runs?.find((x) => (x.display_title ?? '').includes(`[${requestId}]`));

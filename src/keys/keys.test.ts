@@ -154,16 +154,28 @@ describe('routes', () => {
       }
       t += 10_000;
       expect((await post(b, { action: 'renew', name: 'muse' })).status).toBe(429);
-      expect((await post(b, { action: 'list' })).status).toBe(202); // a read is never limited
+      expect((await post(b, { action: 'list' })).status).toBe(202); // a list has its own limit
+      expect((await post(b, { action: 'list' })).status).toBe(429);
     } finally {
       server.close();
     }
+  });
+  it('reports a finished list with no rows as failed, and a finished sync as done', async () => {
+    const run = vi.fn(async () => ({ id: 7, url: 'u', status: 'completed', conclusion: 'success' }));
+    await call(fake({ findRun: run, jobLog: vi.fn(async () => 'nothing useful') }), {}, async (b) => {
+      const l = (await (await fetch(`${b}/api/keys/runs/pb-abc-123456?action=list`)).json()) as { state: string; logError?: string };
+      expect(l.state).toBe('failed');
+      expect(l.logError).toContain('no key list');
+      const s = (await (await fetch(`${b}/api/keys/runs/pb-abc-123456?action=sync`)).json()) as { state: string };
+      expect(s.state).toBe('done');
+      expect((await fetch(`${b}/api/keys/runs/pb-abc-123456?action=nuke`)).status).toBe(400);
+    });
   });
   it('maps the run state, and returns the parsed list only for a finished run', async () => {
     const states: Array<[string, string, string | null, string]> = [['queued', 'queued', null, 'queued'], ['in_progress', 'x', null, 'running'], ['waiting', 'x', null, 'waiting_tap'], ['completed', 'x', 'failure', 'failed'], ['completed', 'x', 'success', 'done']];
     for (const [status, , conclusion, want] of states) {
       await call(fake({ findRun: vi.fn(async () => ({ id: 7, url: 'u', status, conclusion })) }), {}, async (b) => {
-        const j = (await (await fetch(`${b}/api/keys/runs/pb-abc-123456`)).json()) as { state: string; list?: { rows: unknown[] } };
+        const j = (await (await fetch(`${b}/api/keys/runs/pb-abc-123456?action=list`)).json()) as { state: string; list?: { rows: unknown[] } };
         expect(j.state).toBe(want);
         expect(!!j.list).toBe(want === 'done');
       });
