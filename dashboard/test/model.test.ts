@@ -248,6 +248,14 @@ describe('charts with no data to draw', () => {
   });
 });
 
+/** A feed where every source the page reads is present and fresh at `at`. */
+const fullFeed = (at: string) => ({
+  generatedAt: at, needs: [], alerts: [],
+  services: [{ name: 'a', hostname: 'h', active: 'lab', dataClass: 'stateless', lab: { ok: true, checkedAt: at, detail: '' }, cloud: { ok: true, checkedAt: at, detail: '' } }],
+  plane: { checkedAt: at, open: 2, needsPedro: 0, inReview: 0 },
+  cve: { checkedAt: at, hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings: [] as unknown[] },
+});
+
 describe('Now answers from what needs attention', () => {
   const at = '2026-11-18T12:00:00Z';
   const now = Date.parse('2026-11-18T12:00:30Z');
@@ -255,7 +263,7 @@ describe('Now answers from what needs attention', () => {
   const kev = { id: 'CVE-2026-0001', pkg: 'openssl', host: 'vault', severity: 'high', kev: true, fixed: '3.0.99' };
   test('reports all good only when every source was read and none asks for a step', async () => {
     const { attention, nowView } = await import('../src/views.ts');
-    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [], cve: cve([]) });
+    const { data } = parseDashboard(fullFeed(at));
     expect(attention(data, now)).toEqual([]);
     expect(nowView(data, now)).toContain('Nothing needs you');
     expect(nowView(data, now)).toContain('All clear');
@@ -264,7 +272,8 @@ describe('Now answers from what needs attention', () => {
     const { attention, nowView } = await import('../src/views.ts');
     const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [] });
     const all = attention(data, now);
-    expect(all.map((a) => a.state)).toEqual(['unknown']);
+    expect(all.map((a) => a.state)).toEqual(['unknown', 'unknown', 'unknown']);
+    expect(all.map((a) => a.title)).toEqual(['The CVE report was not read', 'The Plane board was not read', 'No service was read']);
     const html = nowView(data, now);
     expect(html).toContain('not an all clear');
     expect(html).not.toContain('All clear');
@@ -287,7 +296,7 @@ describe('Now answers from what needs attention', () => {
   test('an action card comes before a down alert with no card', async () => {
     const { attention } = await import('../src/views.ts');
     const { data } = parseDashboard({ generatedAt: at, services: [], needs: [{ id: 'n1', title: 'Renew the cert', why: 'It ends in 3 days', step: 'Run the playbook', since: at }], alerts: [{ monitor: 'plex', state: 'down', since: at, triage: 'off' }], cve: cve([]) });
-    expect(attention(data, now).map((a) => a.kind)).toEqual(['CARD', 'ALERT']);
+    expect(attention(data, now).filter((a) => a.state !== 'unknown').map((a) => a.kind)).toEqual(['CARD', 'ALERT']);
   });
 });
 
@@ -319,15 +328,16 @@ describe('the Plane cycle detail', () => {
 
 describe('the demo clock', () => {
   const now = Date.parse('2026-12-01T00:00:00Z');
-  test('a live feed is read at the real time', () => expect(clockFor({ source: 'pete-bot', generatedAt: '2026-11-16T22:00:00Z' }, now)).toBe(now));
-  test('the fixture is read one minute after it was written', () => expect(clockFor({ source: DEMO_SOURCE, generatedAt: '2026-11-16T22:00:00Z' }, now)).toBe(Date.parse('2026-11-16T22:01:00Z')));
-  test('a fixture with a bad time falls back to the real time', () => expect(clockFor({ source: DEMO_SOURCE, generatedAt: 'nope' }, now)).toBe(now));
+  test('a live feed is read at the real time', () => expect(clockFor({ source: 'pete-bot', generatedAt: '2026-11-16T22:00:00Z' }, now, true)).toBe(now));
+  test('the fixture is read one minute after it was written', () => expect(clockFor({ source: DEMO_SOURCE, generatedAt: '2026-11-16T22:00:00Z' }, now, true)).toBe(Date.parse('2026-11-16T22:01:00Z')));
+  test('a feed from another address never gets the demo clock, whatever it calls itself', () => expect(clockFor({ source: DEMO_SOURCE, generatedAt: '2026-11-16T22:00:00Z' }, now, false)).toBe(now));
+  test('a fixture with a bad time falls back to the real time', () => expect(clockFor({ source: DEMO_SOURCE, generatedAt: 'nope' }, now, true)).toBe(now));
 });
 
 describe('backups', () => {
   const at = '2026-11-18T12:00:00Z';
   const now = Date.parse('2026-11-18T12:00:30Z');
-  const base = { generatedAt: at, services: [], needs: [], alerts: [], cve: { checkedAt: at, hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings: [] } };
+  const base = fullFeed(at);
   const report = (guests: unknown[], checkedAt = at) => ({ checkedAt, guests });
   test('a guest is in time, late after 36 hours, and missing after 72 hours or with no good run', async () => {
     const { backupState } = await import('../src/model.ts');
@@ -408,5 +418,71 @@ describe('httpFeed sign-in hint', () => {
     const f = httpFeed('https://reports.example.test/api/dashboard', null, (async (_u: string, i?: RequestInit) => { init = i; throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch);
     await expect(f.load()).rejects.toThrow('open https://reports.example.test once to sign in');
     expect(init?.credentials).toBe('include');
+  });
+});
+
+describe('sources nobody read never give an all clear', () => {
+  const at = '2026-11-18T12:00:00Z';
+  const now = Date.parse('2026-11-18T12:00:30Z');
+  const clear = async (feed: unknown): Promise<string> => {
+    const { nowView } = await import('../src/views.ts');
+    return nowView(parseDashboard(feed).data, now);
+  };
+  test('the full feed is the control: it is all clear', async () => expect(await clear(fullFeed(at))).toContain('All clear'));
+  test('no Plane board', async () => {
+    const html = await clear({ ...fullFeed(at), plane: undefined });
+    expect(html).not.toContain('All clear');
+    expect(html).toContain('The Plane board was not read');
+  });
+  test('a Plane board with lost items', async () => expect(await clear({ ...fullFeed(at), plane: { ...fullFeed(at).plane, lost: 4 } })).toContain('counts are incomplete'));
+  test('a Plane board read 30 days ago', async () => {
+    const { workView } = await import('../src/views.ts');
+    const feed = { ...fullFeed(at), plane: { ...fullFeed(at).plane, checkedAt: '2026-10-18T12:00:00Z' } };
+    expect(await clear(feed)).not.toContain('All clear');
+    expect(workView(parseDashboard(feed).data, now)).not.toContain('Nothing waits on you');
+  });
+  test('no service', async () => expect(await clear({ ...fullFeed(at), services: [] })).not.toContain('All clear'));
+  test('a malformed backup report', async () => {
+    const html = await clear({ ...fullFeed(at), backups: { checkedAt: at, guests: 'none' } });
+    expect(html).not.toContain('All clear');
+    expect(html).toContain('The backup report was unreadable');
+  });
+  test('a CVE run that read no host or package is not a clean result on Now, Act or Health', async () => {
+    const { actView, healthView } = await import('../src/views.ts');
+    const feed = { ...fullFeed(at), cve: { ...fullFeed(at).cve, hosts: 0, packages: 0, advisories: 0 } };
+    const { data } = parseDashboard(feed);
+    expect(await clear(feed)).not.toContain('All clear');
+    expect(healthView(data, now)).not.toContain('Backups and patches are in order');
+    expect(actView(data, now)).not.toContain('No item has a step for you');
+  });
+  test('an unread exploited list is not a clean result on Act', async () => {
+    const { actView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ ...fullFeed(at), cve: { ...fullFeed(at).cve, kevChecked: false } });
+    expect(actView(data, now)).toContain('Partly read');
+  });
+  test('a time in the future is not fresh', async () => {
+    const future = '2026-11-19T12:00:00Z';
+    expect(await clear({ ...fullFeed(at), generatedAt: future })).not.toContain('All clear');
+    expect(healthOf({ ok: true, checkedAt: future, detail: '', lagS: null }, now)).toBe('unknown');
+  });
+  test('an exploited count of zero does not hide a finding marked exploited', async () => {
+    const { tiles } = await import('../src/views.ts');
+    const { data } = parseDashboard({ ...fullFeed(at), cve: { ...fullFeed(at).cve, exploited: 0, findings: [{ id: 'CVE-1', pkg: 'p', host: 'h', severity: 'low', fixed: null, kev: true }] } });
+    expect(tiles(data, now)).toContain('1 exploited');
+  });
+  test('a card for plex-gpu does not stand in for the plex backup', async () => {
+    const { actItems } = await import('../src/views.ts');
+    const { data } = parseDashboard({ ...fullFeed(at), needs: [{ id: 'n', title: 'plex-gpu backup late', why: 'w', step: 's', since: at }], backups: { checkedAt: at, guests: [{ guest: 'plex', lastGood: null }] } });
+    expect(actItems(data, now).map((i) => i.kind)).toEqual(['CARD', 'BACKUP']);
+  });
+  test('a blank title or a negative route count is refused by the parser, so no helper throws', async () => {
+    const { nowView, workView } = await import('../src/views.ts');
+    const a = parseDashboard({ ...fullFeed(at), needs: [{ id: 'n', title: '   ', why: 'w', step: 's', since: at }] });
+    expect(a.data.needs).toEqual([]);
+    expect(a.data.unread).toContain('needs');
+    expect(() => nowView(a.data, now)).not.toThrow();
+    const b = parseDashboard({ ...fullFeed(at), plane: { ...fullFeed(at).plane, total: 5, done: 1, byRoute: { pedro: { total: 3, done: -1 } } } });
+    expect(b.data.plane?.detail).toBeNull();
+    expect(() => workView(b.data, now)).not.toThrow();
   });
 });

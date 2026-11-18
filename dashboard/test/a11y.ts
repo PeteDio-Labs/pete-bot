@@ -105,7 +105,7 @@ try {
     {
       const q = await ctx.newPage();
       let n = 0;
-      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot', generatedAt: new Date(Date.now() - n++ * 7000).toISOString() } }));
+      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot', needs: fixture.needs.map((x) => ({ ...x, why: `${x.why} Read ${n}.` })), generatedAt: new Date(Date.now() - n++ * 7000).toISOString() } }));
       await q.goto(`${server.url.origin}/#act`, { waitUntil: 'load' });
       await q.waitForSelector('#act details');
       const last = q.locator('#act details.toon-disclosure-details summary').last();
@@ -116,6 +116,15 @@ try {
       await q.waitForFunction((h) => document.getElementById('act')!.innerHTML !== h, html);
       const after = await q.evaluate(() => ({ open: [...document.querySelectorAll<HTMLDetailsElement>('#act details.toon-disclosure-details')].map((d) => d.open).join(), id: document.activeElement?.id }));
       if (before.open !== after.open || before.id !== after.id || !after.id) fail.push(`act @${w}: a poll changed the open rows or the focus (${JSON.stringify(before)} to ${JSON.stringify(after)})`);
+      // A link in an open row has no id. Each read changes the row's text, so the row is drawn again, and focus has to come back to the link.
+      const link = q.locator('#act details[open] .dash-go a').first();
+      await link.focus();
+      const linkText = await link.textContent();
+      const html2 = await q.locator('#act').innerHTML();
+      await q.evaluate(() => (window as any).__dashPoll?.());
+      await q.waitForFunction((h) => document.getElementById('act')!.innerHTML !== h, html2);
+      const on = await q.evaluate(() => { const a = document.activeElement; return a instanceof HTMLAnchorElement && !!a.closest('#act') ? a.textContent : `not a link: ${a?.tagName}`; });
+      if (!linkText || on !== linkText) fail.push(`act @${w}: a poll moved focus off a link in an open row (was "${linkText}", is "${on}")`);
       polls++;
       await q.close();
     }

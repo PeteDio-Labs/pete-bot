@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useEffect, useRef, useState, useLayoutEffect } from 'preact/hooks';
+import { useEffect, useErrorBoundary, useRef, useState, useLayoutEffect } from 'preact/hooks';
 import { tabbar } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
@@ -14,6 +14,7 @@ export const TABS = [
 ];
 export const TABBAR = tabbar(TABS, { label: 'Dashboard sections', top: true });
 const POLL_MS = 30_000;
+const DRAW_FAILED = 'This tab could not be drawn from the feed, so its state is unknown.';
 
 type Load = { state: 'loading' } | { state: 'error'; message: string; data: DashboardData | null; problems: string[] } | { state: 'ready'; data: DashboardData; problems: string[]; readAt: number };
 
@@ -32,15 +33,32 @@ function Html({ html }: { html: string }) {
     const keyOf = (d: HTMLDetailsElement): string => d.querySelector('summary')?.id || d.querySelector('summary')?.textContent || '';
     const was = new Map([...el.querySelectorAll('details')].map((d) => [keyOf(d), d.open]));
     const active = document.activeElement;
-    const focusId = active instanceof HTMLElement && el.contains(active) ? active.id : '';
+    const had = active instanceof HTMLElement && el.contains(active);
+    const focusId = had ? active.id : '';
+    // A link in a row's panel has no id, so it is found again by its place among the block's controls.
+    const STOPS = 'a[href], button, summary, [tabindex]';
+    const focusAt = had ? [...el.querySelectorAll(STOPS)].indexOf(active) : -1;
     el.innerHTML = html;
     for (const d of el.querySelectorAll('details')) {
       const open = was.get(keyOf(d));
       if (open !== undefined) d.open = open;
     }
-    if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
+    const back = (focusId && document.getElementById(focusId)) || (focusAt >= 0 ? el.querySelectorAll<HTMLElement>(STOPS)[focusAt] : null);
+    back?.focus({ preventScroll: true });
   }, [html]);
   return <div class="dash-block" ref={ref} />;
+}
+
+/**
+ * A tab's blocks, or one block that says the tab could not be drawn. A kit helper throws on input it refuses, and one
+ * odd value in the feed must not blank the page or leave an old answer standing.
+ */
+function safe(draw: () => string[]): string[] {
+  try {
+    return draw();
+  } catch {
+    return [`<p class="toon-callout dash-banner" role="alert">${DRAW_FAILED}</p>`];
+  }
 }
 
 /** A tab's blocks in order: the answer, the evidence, what was read. */
@@ -56,6 +74,12 @@ function Panel({ id, children }: { id: keyof typeof QUESTIONS; children: preact.
       {children}
     </div>
   );
+}
+
+/** The same rule for a tab that is a component: a throw while it draws shows the notice, not a blank page. */
+function Guard({ children }: { children: preact.ComponentChildren }) {
+  const [error] = useErrorBoundary();
+  return error ? <p class="toon-callout dash-banner" role="alert">{DRAW_FAILED}</p> : <>{children}</>;
 }
 
 function Services({ data, now, feed }: { data: DashboardData; now: number; feed: Feed }) {
@@ -141,8 +165,8 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
   }, [feed]);
 
   const data = load.state === 'loading' ? null : load.data;
-  const demo = data?.source === DEMO_SOURCE;
-  const n = data ? clockFor(data, now()) : now();
+  const demo = feed.demo && data?.source === DEMO_SOURCE;
+  const n = data ? clockFor(data, now(), feed.demo) : now();
   const problems = load.state === 'loading' ? [] : load.problems;
   return (
     <>
@@ -150,11 +174,11 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
       {problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
       {demo && <p class="toon-callout toon-callout-yellow dash-banner">{`Demo data. This is the fixture feed, shown as it read one minute after it was written (${data!.generatedAt.slice(0, 10)}). It reads nothing from the lab.`}</p>}
       {load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
-      <Panel id="now">{data && <Blocks blocks={nowBlocks(data, n)} />}</Panel>
-      <Panel id="act">{data && <Blocks blocks={actBlocks(data, n)} />}</Panel>
-      <Panel id="services">{data && <Services data={data} now={n} feed={feed} />}</Panel>
-      <Panel id="health">{data && <Blocks blocks={healthBlocks(data, n)} />}</Panel>
-      <Panel id="work">{data && <Blocks blocks={workBlocks(data, n)} />}</Panel>
+      <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
+      <Panel id="act">{data && <Blocks blocks={safe(() => actBlocks(data, n))} />}</Panel>
+      <Panel id="services">{data && <Guard><Services data={data} now={n} feed={feed} /></Guard>}</Panel>
+      <Panel id="health">{data && <Blocks blocks={safe(() => healthBlocks(data, n))} />}</Panel>
+      <Panel id="work">{data && <Blocks blocks={safe(() => workBlocks(data, n))} />}</Panel>
     </>
   );
 }

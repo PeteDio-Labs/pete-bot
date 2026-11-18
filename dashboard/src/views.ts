@@ -7,7 +7,7 @@
  * only a block whose text changed. The `*View` function of the same name joins them.
  */
 import { bars, barsKey, chartTable, disclosure, kicker, list, meter, meters, readout, row, statusTile, strip, switchCard, uptime, verdict, esc, type TileState } from 'toonish-ui/markup';
-import { ageText, backupState, STALE_MS, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
+import { ageText, backupState, isFresh, STALE_MS, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
 
 /** The question each tab answers. It is the tab panel's heading. */
 export const QUESTIONS = {
@@ -29,16 +29,18 @@ const kv = (pairs: [string, string][]): string => `<dl class="toon-kv">${pairs.m
 
 /** Needs and alerts carry no time of their own, so they are unread when the feed said so or when the feed itself is older than STALE_MS (a cached copy after failed polls). */
 export function liveUnread(d: DashboardData, now: number, key: 'needs' | 'alerts'): boolean {
-  const at = Date.parse(d.generatedAt);
-  return d.unread.includes(key) || !Number.isFinite(at) || now - at > STALE_MS;
+  return d.unread.includes(key) || !isFresh(now - Date.parse(d.generatedAt), STALE_MS);
 }
 
 /** The CVE run is daily, so one older than two days is out of date. */
 const CVE_STALE_MS = 48 * 3_600_000;
 const cveIsFresh = (d: DashboardData, now: number): boolean => {
-  const age = d.cve ? now - Date.parse(d.cve.checkedAt) : Number.NaN;
-  return Number.isFinite(age) && age <= CVE_STALE_MS;
+  return isFresh(d.cve ? now - Date.parse(d.cve.checkedAt) : Number.NaN, CVE_STALE_MS);
 };
+/** A run that read no host or no package examined nothing, so its empty list is not a clean result. */
+const cveComplete = (c: NonNullable<DashboardData['cve']>): boolean => c.kevChecked && c.gaps.length === 0 && c.hosts > 0 && c.packages > 0;
+/** The Plane summary comes from a report, so one older than two days is out of date. */
+const planeFresh = (d: DashboardData, now: number): boolean => isFresh(d.plane ? now - Date.parse(d.plane.checkedAt) : Number.NaN, CVE_STALE_MS);
 
 // ---- What needs fixing, in order ----
 
@@ -54,9 +56,10 @@ const labLink = (): string => go(LAB_ACTIONS, 'Open lab actions');
 
 /** The backup report is nightly, so one older than two days is out of date. */
 const backupsFresh = (d: DashboardData, now: number): boolean => {
-  const age = d.backups ? now - Date.parse(d.backups.checkedAt) : Number.NaN;
-  return Number.isFinite(age) && age <= CVE_STALE_MS;
+  return isFresh(d.backups ? now - Date.parse(d.backups.checkedAt) : Number.NaN, CVE_STALE_MS);
 };
+/** Whether a card's title names this guest's backup. Whole words, so a card for `plex-gpu` does not stand in for `plex`. */
+const cardCovers = (title: string, guest: string): boolean => /backup/i.test(title) && title.toLowerCase().split(/[^a-z0-9-]+/).includes(guest.toLowerCase());
 
 /** One thing to fix. `button` is trusted markup from `go()`. */
 export interface ActItem {
@@ -101,7 +104,7 @@ export function actItems(d: DashboardData, now: number): ActItem[] {
     for (const b of d.backups.guests) {
       const st = backupState(b, now);
       // A card that names the guest's backup already carries this, with its step.
-      if (st === 'ok' || (needsRead && d.needs.some((n) => /backup/i.test(n.title) && n.title.toLowerCase().includes(b.guest.toLowerCase())))) continue;
+      if (st === 'ok' || (needsRead && d.needs.some((n) => cardCovers(n.title, b.guest)))) continue;
       out.push({ state: st, kind: 'BACKUP', title: b.lastGood ? `${b.guest}: the last good backup was ${ageText(b.lastGood, now)}` : `${b.guest} has no good backup on record`, why: b.detail || 'The nightly backup has not finished in time.', step: 'Run the backup job again, then check the free space on the backup store.', since: b.lastGood ?? undefined, button: labLink() });
     }
   }
@@ -141,7 +144,7 @@ export function attention(d: DashboardData, now: number): Attention[] {
     else if (i.exploited && !foldedKev) (foldedKev = true), fold(true);
     else if (!i.exploited && !foldedRest) (foldedRest = true), fold(false);
   }
-  if (d.plane && d.plane.needsPedro > 0) {
+  if (d.plane && planeFresh(d, now) && d.plane.needsPedro > 0) {
     const mine = d.plane.detail?.items.filter((i) => i.needsPedro) ?? [];
     out.push({ state: 'warn', kind: 'PLANE', title: `${plural(d.plane.needsPedro, 'Plane item waits', 'Plane items wait')} on you`, why: mine[0] ? `First: PET-${mine[0].seq}, ${mine[0].name}.` : 'They carry the needs-pedro label.', tab: 'work' });
   }
@@ -149,8 +152,13 @@ export function attention(d: DashboardData, now: number): Attention[] {
   if (liveUnread(d, now, 'alerts')) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The alert list was not read in full', why: 'It was not read in full, or it is out of date, so an open alert may be missing.', tab: 'act' });
   if (!d.cve || !cveIsFresh(d, now)) out.push({ state: 'unknown', kind: 'UNREAD', title: d.cve ? 'The CVE report is out of date' : 'The CVE report was not read', why: d.cve ? `The last run was ${ageText(d.cve.checkedAt, now)}.` : 'The feed carried no CVE report.', tab: 'health' });
   else if (!d.cve.kevChecked) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The exploited-vulnerability list was not read', why: 'So no finding is marked as exploited.', tab: 'health' });
-  else if (d.cve.gaps.length) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The CVE run did not examine everything', why: `${d.cve.gaps.join('; ')}.`, tab: 'health' });
-  if (d.backups && !backupsFresh(d, now)) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The backup report is out of date', why: `It was last read ${ageText(d.backups.checkedAt, now)}.`, tab: 'health' });
+  else if (!cveComplete(d.cve)) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The CVE run did not examine everything', why: d.cve.gaps.length ? `${d.cve.gaps.join('; ')}.` : 'It read no host or no package.', tab: 'health' });
+  if (d.unread.includes('backups')) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The backup report was unreadable', why: 'The feed carried one, and it did not parse.', tab: 'health' });
+  else if (d.backups && !backupsFresh(d, now)) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The backup report is out of date', why: `It was last read ${ageText(d.backups.checkedAt, now)}.`, tab: 'health' });
+  if (!d.plane) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The Plane board was not read', why: 'So it is unknown what waits on you.', tab: 'work' });
+  else if (!planeFresh(d, now)) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The Plane board read is out of date', why: `It was last read ${ageText(d.plane.checkedAt, now)}.`, tab: 'work' });
+  else if (d.plane.lost && d.plane.lost > 0) out.push({ state: 'unknown', kind: 'UNREAD', title: 'The Plane board counts are incomplete', why: `${plural(d.plane.lost, 'cycle item was', 'cycle items were')} not found on the board.`, tab: 'work' });
+  if (d.services.length === 0) out.push({ state: 'unknown', kind: 'UNREAD', title: 'No service was read', why: 'So no probe stands behind this page.', tab: 'services' });
   const unknownProbes = d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]).filter((h) => h === 'unknown').length;
   if (unknownProbes > 0 || d.droppedServices > 0) out.push({ state: 'unknown', kind: 'UNREAD', title: unknownProbes ? `${plural(unknownProbes, 'probe has', 'probes have')} no fresh reading` : 'A service row was unreadable', why: 'A missing or stale watchdog record shows as unknown, never as healthy.', tab: 'services' });
   return out;
@@ -194,8 +202,10 @@ export function actBlocks(d: DashboardData, now: number): string[] {
   const t = d.triage;
   const items = actItems(d, now);
   const partial = liveUnread(d, now, 'alerts') || liveUnread(d, now, 'needs');
-  const cveRead = !!d.cve && cveIsFresh(d, now);
-  const caveat = `${partial ? ' The alert list or the card list is partial or out of date, so an item may be missing.' : ''}${cveRead ? '' : ' The CVE report was not read, so no CVE is listed.'}`;
+  const cveListed = !!d.cve && cveIsFresh(d, now);
+  const cveRead = cveListed && cveComplete(d.cve!);
+  const backupsUsed = !!d.backups && backupsFresh(d, now);
+  const caveat = `${partial ? ' The alert list or the card list is partial or out of date, so an item may be missing.' : ''}${cveListed ? (cveRead ? '' : ' The CVE run did not examine everything, so a CVE may be missing.') : ' The CVE report was not read, so no CVE is listed.'}${d.backups && !backupsUsed ? ' The backup report is out of date, so no backup is listed.' : ''}`;
   const word = { act: 'A card was written', no_action: 'No action needed', unreadable: 'Triage was unreadable, so a plain alert was sent', off: 'No triage result' } as const;
   // A recovery closes the alert it ends, so it is not an item. It stays on record here.
   const quiet = d.alerts.filter((a) => a.state === 'up');
@@ -207,7 +217,7 @@ export function actBlocks(d: DashboardData, now: number): string[] {
     }),
   ];
   const tail = (num: string): string => section(num, 'On record', list(record, { label: 'Recovered alerts and the triage record' }));
-  const read = readout(`Read ${plural(d.alerts.length, 'alert')} and ${plural(d.needs.length, 'action card')}, ${ageText(d.generatedAt, now)}${d.cve ? `, and the CVE report of ${ageText(d.cve.checkedAt, now)}` : ''}${d.backups ? `, and ${plural(d.backups.guests.length, 'backup record')}` : ''}.${caveat}`);
+  const read = readout(`Read ${plural(d.alerts.length, 'alert')} and ${plural(d.needs.length, 'action card')}, ${ageText(d.generatedAt, now)}${d.cve ? `, and the CVE report of ${ageText(d.cve.checkedAt, now)}` : ''}${backupsUsed ? `, and ${plural(d.backups!.guests.length, 'backup record')}` : ''}.${caveat}`);
   if (!items.length) {
     const answer = partial
       ? verdict({ state: 'unknown', title: 'It is unknown whether anything needs a fix', body: caveat.trim() })
@@ -236,7 +246,7 @@ interface Signal { label: string; state: TileState; value?: string; detail?: str
 export function signals(d: DashboardData, now: number): Signal[] {
   const out: Signal[] = [];
   const b = d.backups;
-  if (!b) out.push({ label: 'Backups', state: 'unknown', detail: 'The feed carries no backup report', says: 'The backups were not read' });
+  if (!b) out.push({ label: 'Backups', state: 'unknown', detail: d.unread.includes('backups') ? 'The backup report was unreadable' : 'The feed carries no backup report', says: 'The backups were not read' });
   else if (!backupsFresh(d, now)) out.push({ label: 'Backups', state: 'unknown', detail: `The report is from ${ageText(b.checkedAt, now)}`, says: 'The backup report is out of date' });
   else if (b.guests.length === 0) out.push({ label: 'Backups', state: 'unknown', detail: 'The report lists no guest', says: 'The backup report lists no guest' });
   else {
@@ -248,9 +258,9 @@ export function signals(d: DashboardData, now: number): Signal[] {
   if (!c) out.push({ label: 'Patches', state: 'unknown', detail: 'The CVE report was not read', says: 'The CVE report was not read' });
   else if (!cveIsFresh(d, now)) out.push({ label: 'Patches', state: 'unknown', detail: `The last run was ${ageText(c.checkedAt, now)}`, says: 'The CVE report is out of date' });
   else {
-    const kev = c.kevChecked ? c.exploited ?? c.findings.filter((f) => f.kev).length : 0;
+    const kev = c.kevChecked ? Math.max(c.exploited ?? 0, c.findings.filter((f) => f.kev).length) : 0;
     const fixable = c.findings.filter((f) => f.fixed).length;
-    const incomplete = c.gaps.length > 0 || !c.kevChecked;
+    const incomplete = !cveComplete(c);
     const state: TileState = kev > 0 ? 'down' : incomplete ? 'unknown' : fixable > 0 ? 'warn' : 'ok';
     out.push({ label: 'Patches', state, value: state === 'unknown' ? undefined : `${fixable} to apply`, detail: kev > 0 ? `${kev} exploited` : incomplete ? 'The run did not examine everything' : undefined, readAtText: ageText(c.checkedAt, now), says: kev > 0 ? `${plural(kev, 'finding is', 'findings are')} exploited in the wild` : incomplete ? 'The CVE run did not examine everything, so this is not a clean result' : `${plural(fixable, 'finding has', 'findings have')} a fix to apply` });
   }
@@ -382,7 +392,9 @@ export function workBlocks(d: DashboardData, now: number): string[] {
   const cyc = pl.cycle ? ` Current cycle: ${pl.cycle}.` : '';
   const det = pl.detail;
   const mine = det ? det.items.filter((i) => i.needsPedro) : [];
-  const answer = lost
+  const answer = !planeFresh(d, now)
+    ? verdict({ state: 'unknown', title: 'The Plane board read is out of date', body: `It was last read ${ageText(pl.checkedAt, now)}. It showed ${pl.open} open and ${pl.needsPedro} waiting on you.` })
+    : lost
     ? verdict({ state: 'unknown', title: 'The board counts are incomplete', body: `${lost.trim()} The read shows ${pl.open} open and ${pl.needsPedro} waiting on you.` })
     : pl.needsPedro > 0
     ? verdict({ state: 'warn', stateText: 'Waiting on you', title: `${plural(pl.needsPedro, 'item waits', 'items wait')} on you`, body: mine[0] ? `Start with PET-${mine[0].seq}: ${mine[0].name}.` : 'The feed carried no item list, so open Plane for their names.' })

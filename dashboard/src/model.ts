@@ -84,7 +84,7 @@ export const BACKUP_LATE_MS = 36 * 3_600_000;
 export const BACKUP_DOWN_MS = 72 * 3_600_000;
 export function backupState(b: BackupRow, now: number): 'ok' | 'warn' | 'down' {
   const age = b.lastGood ? now - Date.parse(b.lastGood) : Number.NaN;
-  if (!Number.isFinite(age) || age > BACKUP_DOWN_MS) return 'down';
+  if (!isFresh(age, BACKUP_DOWN_MS)) return 'down';
   return age > BACKUP_LATE_MS ? 'warn' : 'ok';
 }
 
@@ -102,7 +102,7 @@ export interface DashboardData {
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
-  unread: ('needs' | 'alerts')[];
+  unread: ('needs' | 'alerts' | 'backups')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
   droppedServices: number;
 }
@@ -115,19 +115,24 @@ export interface Examined {
 /**
  * The clock a view reads ages against. The fixture is a recording, so it is read one minute after it was written: staging
  * then shows the page as designed, not a page of stale records. The page says so in a banner. A feed with any other
- * source is read against the real clock, so a dead watchdog still ages into `unknown`.
+ * source is read against the real clock, so a dead watchdog still ages into `unknown`. So is a feed from any address
+ * but the fixture file that ships with the page: a live feed cannot claim the demo clock by naming itself `fixture`.
  */
 export const DEMO_SOURCE = 'fixture';
-export function clockFor(d: Pick<DashboardData, 'source' | 'generatedAt'>, now: number): number {
-  if (d.source !== DEMO_SOURCE) return now;
+export function clockFor(d: Pick<DashboardData, 'source' | 'generatedAt'>, now: number, shippedFixture: boolean): number {
+  if (!shippedFixture || d.source !== DEMO_SOURCE) return now;
   const at = Date.parse(d.generatedAt);
   return Number.isFinite(at) ? at + 60_000 : now;
 }
 
+/** A time more than five minutes ahead of the clock is not a reading of now, so it is not fresh either. */
+export const SKEW_MS = 5 * 60_000;
+export const isFresh = (age: number, maxMs: number): boolean => Number.isFinite(age) && age <= maxMs && age >= -SKEW_MS;
+
 export function healthOf(s: SideStatus | null, now: number): Health {
   if (!s) return 'unknown';
   const at = Date.parse(s.checkedAt);
-  if (!Number.isFinite(at) || now - at > STALE_MS) return 'unknown';
+  if (!isFresh(now - at, STALE_MS)) return 'unknown';
   return s.ok ? 'ok' : 'down';
 }
 
@@ -162,7 +167,8 @@ export function sortFindings(f: CveFinding[]): CveFinding[] {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const str = (v: unknown, n = 300): string => (typeof v === 'string' ? v.slice(0, n) : '');
+/** Trimmed, so a string of spaces is no string: the kit refuses an empty title, and a blank name names nothing. */
+const str = (v: unknown, n = 300): string => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 function side(v: unknown): SideStatus | null {
@@ -206,7 +212,7 @@ function planeDetail(pl: Record<string, unknown>, problems: string[]): PlaneDeta
   for (const [key, name] of [['pedro', 'Pedro'], ['ai', 'Claude'], ['other', 'Unlabelled']] as const) {
     const r = by[key];
     if (r === undefined) continue;
-    if (!isObj(r) || num(r.total) === null || num(r.done) === null || num(r.done)! > num(r.total)!) return bad();
+    if (!isObj(r) || num(r.total) === null || num(r.done) === null || num(r.done)! < 0 || num(r.done)! > num(r.total)!) return bad();
     routes.push({ name, total: num(r.total)!, done: num(r.done)! });
   }
   const items: PlaneItemRow[] = [];
@@ -231,7 +237,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     problems.push(`${k} is missing or not a list`);
     return [];
   };
-  const unread = new Set<'needs' | 'alerts'>((['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k])));
+  const unread = new Set<'needs' | 'alerts' | 'backups'>((['needs', 'alerts'] as const).filter((k) => !Array.isArray(o[k])));
   const needs: Needs[] = [];
   for (const n of arr('needs')) if (isObj(n) && str(n.id) && str(n.title) && str(n.step)) needs.push({ id: str(n.id, 80), title: str(n.title, 160), why: str(n.why), step: str(n.step), since: str(n.since, 40) });
   else {
@@ -298,8 +304,10 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
   const bk = o.backups;
   if (bk !== undefined) {
     const rows = isObj(bk) && Array.isArray(bk.guests) ? bk.guests : null;
-    if (!isObj(bk) || !str(bk.checkedAt) || !rows || rows.some((g) => !isObj(g) || !str(g.guest))) problems.push('the backup report was unreadable');
-    else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
+    if (!isObj(bk) || !str(bk.checkedAt) || !rows || rows.some((g) => !isObj(g) || !str(g.guest))) {
+      problems.push('the backup report was unreadable');
+      unread.add('backups');
+    } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
   }
   return { data: { backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
