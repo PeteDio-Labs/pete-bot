@@ -105,7 +105,7 @@ try {
     {
       const q = await ctx.newPage();
       let n = 0;
-      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot', needs: fixture.needs.map((x) => ({ ...x, why: `${x.why} Read ${n}.` })), generatedAt: new Date(Date.now() - n++ * 7000).toISOString() } }));
+      await q.route('**/fixtures/dashboard.json', (r) => r.fulfill({ json: { ...fixture, source: 'pete-bot', needs: fixture.needs.map((x: { why: string }) => ({ ...x, why: `${x.why} Read ${n}.` })), generatedAt: new Date(Date.now() - n++ * 7000).toISOString() } }));
       await q.goto(`${server.url.origin}/#act`, { waitUntil: 'load' });
       await q.waitForSelector('#act details');
       const last = q.locator('#act details.toon-disclosure-details summary').last();
