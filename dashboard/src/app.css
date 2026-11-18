@@ -4,7 +4,9 @@
 
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
 /* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
-.dash-header { max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
+.dash-header { position: relative; max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
+.dash-settings { position: absolute; top: .75rem; right: 1rem; z-index: 20; }
+.dash-header .toon-masthead { padding-right: 4rem; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
@@ -34,3 +36,15 @@
   .dash-q { font-size: var(--text-title1); }
   .dash-services { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* The Secrets screen is the app's own view: it replaces the tabs while the address is #secrets. */
+.dash-secrets[hidden] { display: none; }
+.dash-main[data-view="secrets"] > .toon-tabbar, .dash-main[data-view="secrets"] .toon-tabpanel { display: none; }
+.dash-keys { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.dash-key { display: grid; gap: .5rem; }
+.dash-key-name { font-size: 1.125rem; }
+.dash-key-line, .dash-note { margin: 0; }
+.dash-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 0; }
+.dash-confirm-box { display: grid; gap: .5rem; padding: .75rem; border: 3px solid var(--color-toon-ink, #0a0a1f); border-radius: 12px; background: var(--color-toon-paper, #fff6dc); color: var(--color-toon-ink, #0a0a1f); }
+.dash-confirm-box p { margin: 0; }
+.dash-back { margin: 0 0 .75rem; }

@@ -2,11 +2,18 @@
 // Exits non-zero when a step fails or an output is missing, and says what it wrote.
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { TABBAR } from './src/app.tsx';
-import { masthead, skipLink, esc } from 'toonish-ui/markup';
+import { masthead, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
 const feed = process.env.DASHBOARD_FEED || '/fixtures/dashboard.json';
 const switchUrl = process.env.DASHBOARD_SWITCH ?? '';
+// The key manager's API, a path on this page's own origin. Unset, the Secrets screen shows no keys and no button. Staging and the
+// AWS dashboard leave it unset, so neither has a path to the lab's keys.
+const keysUrl = process.env.DASHBOARD_KEYS ?? '';
+if (keysUrl && !/^\/[A-Za-z0-9._~\/-]*$/.test(keysUrl)) {
+  console.error('build: DASHBOARD_KEYS must be a path on the same origin, such as /api/keys');
+  process.exit(1);
+}
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
@@ -26,12 +33,13 @@ const html = `<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="dashboard-feed" content="${esc(feed)}">
 ${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
+${keysUrl ? `<meta name="dashboard-keys" content="${esc(keysUrl)}">` : ''}
 <title>Lab dashboard</title>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs' })}</div>
+<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs' })}${settingsMenu({ id: 'settings', cls: 'dash-settings', items: [{ label: 'Secrets', href: '#secrets' }] })}</div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>
