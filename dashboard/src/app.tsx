@@ -172,7 +172,7 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
     <>
       {load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
       {problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
-      {demo && <p class="toon-callout toon-callout-yellow dash-banner">{`Demo data. This is the fixture feed, shown as it read one minute after it was written (${data!.generatedAt.slice(0, 10)}). It reads nothing from the lab.`}</p>}
+      {demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
       {load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
       <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
       <Panel id="act">{data && <Blocks blocks={safe(() => actBlocks(data, n))} />}</Panel>

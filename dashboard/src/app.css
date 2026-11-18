@@ -3,7 +3,8 @@
 @source "./views.ts";
 
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
-.dash-header { max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem .25rem; }
+/* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
+.dash-header { max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
@@ -18,7 +19,7 @@
 .dash-stack { display: grid; gap: .875rem; }
 .dash-card { padding: 1rem; }
 .dash-card > * + * { margin-top: .75rem; }
-.dash-banner { margin: 0 0 1rem; font-weight: 600; }
+.dash-banner { margin: 0 0 .75rem; padding-block: .5rem; font-weight: 600; }
 .dash-loading { margin: 0 0 1rem; }
 
 .dash-services { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }
@@ -28,6 +29,8 @@
 .dash-status:empty { min-height: 0; margin: 0; }
 .dash-go { margin: .75rem 0 0; }
 @media (min-width: 48rem) {
+  .dash-header { padding: 1.25rem 1rem .25rem; }
+  .dash-banner { margin-bottom: 1rem; }
   .dash-q { font-size: var(--text-title1); }
   .dash-services { grid-template-columns: repeat(2, 1fr); }
 }

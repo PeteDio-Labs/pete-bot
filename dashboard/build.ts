@@ -31,7 +31,7 @@ ${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs', lede: 'What needs you, the step to take, and where each service runs.' })}</div>
+<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs' })}</div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>
