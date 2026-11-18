@@ -34,6 +34,8 @@ export interface DashboardDeps {
   log?: (msg: string) => void;
 }
 
+export const STAGING_ORIGIN = 'https://staging-dash.pdlab.dev';
+
 export function createDashboardApp(d: DashboardDeps): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -52,6 +54,23 @@ export function createDashboardApp(d: DashboardDeps): Express {
     } catch (err) {
       res.status(503).json({ ok: false, error: (err as Error).message.slice(0, 120) });
     }
+  });
+
+  // CORS for the staging SPA's read of the feed. One exact origin, never a wildcard; any other origin gets no header.
+  // Sent before the login check so a browser can read even a refusal. The data itself still needs the Access JWT.
+  app.use('/api/dashboard', (req, res, next) => {
+    res.vary('Origin');
+    if (req.header('origin') === STAGING_ORIGIN) {
+      res.setHeader('Access-Control-Allow-Origin', STAGING_ORIGIN);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Methods', 'GET');
+        res.setHeader('Access-Control-Allow-Headers', 'accept');
+        res.status(204).end();
+        return;
+      }
+    }
+    next();
   });
 
   app.use(async (req, res, next) => {
