@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useErrorBoundary, useRef, useState, useLayoutEffect } from 'preact/hooks';
 import { Html } from './html.tsx';
-import { tabbar } from 'toonish-ui/markup';
+import { tabbar, button } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
 import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
@@ -176,7 +176,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
       <Panel id="health">{data && <Blocks blocks={safe(() => healthBlocks(data, n))} />}</Panel>
       <Panel id="work">{data && <Blocks blocks={safe(() => workBlocks(data, n))} />}</Panel>
       <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
-        <p class="dash-back"><a class="toon-btn toon-btn-paper dash-btn" href="#now">Back to the dashboard</a></p>
+        <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
         <Guard><Secrets api={keys} active={secrets} /></Guard>
       </section>

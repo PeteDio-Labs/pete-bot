@@ -59,7 +59,7 @@ The dashboard is Pedro's phone remote for the lab. A tab leads with what he can 
 ## Settings and Secrets
 
 A settings button (two gears, a kit component) sits in the header. It opens a short menu with one entry, **Secrets**. The screen
-is the app's own view at `#secrets`: it replaces the tabs, and **Back to the dashboard** returns to them.
+is the app's own view at `#secrets`: it replaces the tabs, and **Back to dashboard** returns to them.
 
 The screen answers one question: *Which keys can reach my lab, and does one expire soon?* It leads with a kit `verdict()`, then
 one row per key with Renew, Rotate, Reissue and a link to Vault. A button asks, a confirm step explains what it does, and the
