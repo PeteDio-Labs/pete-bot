@@ -649,4 +649,3 @@ describe('a held DOWN when Discord is unavailable', () => {
     expect(JSON.stringify(d.send.mock.calls[0])).toContain('down for 10m');
   });
 });
-
