@@ -24,7 +24,7 @@ The dashboard is Pedro's phone remote for the lab. A tab leads with what he can 
 | `bun run dev` | Builds, then serves `dist/` on `http://localhost:8090` |
 | `bun test` | Tests the model and the feed |
 | `bun run typecheck` | Runs `tsc --noEmit` |
-| `bun run test:a11y` | Runs axe on 5 tabs, 4 feed states and 2 widths, and prints what it read |
+| `bun run test:a11y` | Runs axe on 5 tabs, 4 feed states, the switch confirm and the two Secrets states, at 2 widths, and prints what it read |
 | `bun run test/shots.ts <dir> <prefix>` | Writes a screenshot of each tab, fresh and stale, at phone and desktop width |
 
 ## How it works
@@ -55,6 +55,21 @@ The dashboard is Pedro's phone remote for the lab. A tab leads with what he can 
   (`clockFor()` in `src/model.ts`), and a banner says the data is a demonstration. A live feed is read at the real time.
 - **A poll keeps your place.** The page reads the feed every 30 seconds. An open row stays open and focus stays put.
 - **Tabs belong to the kit.** `toonish-ui/toonish.js` switches the panels by hash. Preact leaves `hidden` alone.
+
+## Settings and Secrets
+
+A settings button (two gears, a kit component) sits in the header. It opens a short menu with one entry, **Secrets**. The screen
+is the app's own view at `#secrets`: it replaces the tabs, and **Back to the dashboard** returns to them.
+
+The screen answers one question: *Which keys can reach my lab, and does one expire soon?* It leads with a kit `verdict()`, then
+one row per key with Renew, Rotate, Reissue and a link to Vault. A button asks, a confirm step explains what it does, and the
+change runs only after Pedro taps `lab-write` on GitHub. The screen shows "waiting for your tap" until the run ends.
+
+- **It calls pete-bot's `/api/keys`** (see the pete-bot README, "Secrets API"), which starts `keys.yml` in `petedio-iac`.
+- **No key is read or shown.** The owner copies a key from Vault. The page names owners, dates and run states only.
+- **Add and remove go through git.** The key list is `secrets/callers.yml`, so those buttons open the file on GitHub. Apply changes then runs `sync`.
+- **Off by default.** `DASHBOARD_KEYS` names the API as a path on the page's own origin, such as `/api/keys`, and the build refuses any other value. Unset, the screen says keys cannot be managed from here and draws no button. Staging and the AWS dashboard leave it unset, so neither has a path to the lab's keys, and the server refuses a cross-origin write as well.
+- **Unknown is not fine.** A list that was not read, finished with no rows, or had unreadable lines is never "All clear".
 
 ## Data
 

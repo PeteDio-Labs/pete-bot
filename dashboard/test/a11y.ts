@@ -136,6 +136,66 @@ try {
       polls++;
       await q.close();
     }
+    // Secrets: the menu opens the screen. Without a key API the screen shows no key and no button; with one it lists keys,
+    // a change asks, waits for the tap and ends done, and axe passes in the list, the confirm step and the "off" state.
+    {
+      const KEYS = { rows: [{ name: 'muse', owner: 'pedro', hasToken: true, version: '3', expires: '2027-02-10T00:00:00Z', daysLeft: 84, expired: false, renewSoon: false, inCallers: true }, { name: 'batsy', owner: 'sonia', hasToken: true, version: '1', expires: '2026-12-01T00:00:00Z', daysLeft: 13, expired: false, renewSoon: true, inCallers: true }], read: 'keys list: read 2 agents in callers.yml and 2 Vault entries; 0 expired', unparsed: 0 };
+      const off = await ctx.newPage();
+      await off.goto(`${server.url.origin}/`, { waitUntil: 'load' });
+      await off.locator('summary[aria-label="Settings"]').click();
+      await off.getByRole('link', { name: 'Secrets' }).click();
+      await off.waitForSelector('#secrets:not([hidden])');
+      const o = await off.evaluate(() => ({ view: document.getElementById('main')!.dataset.view, tabs: getComputedStyle(document.querySelector('.toon-tabbar')!).display, buttons: document.querySelectorAll('#secrets .dash-keys, #secrets button').length, text: document.getElementById('secrets')!.textContent ?? '', focus: document.activeElement?.id, menuOpen: (document.getElementById('settings') as HTMLDetailsElement).open }));
+      if (o.view !== 'secrets' || o.tabs !== 'none') fail.push(`secrets @${w}: the screen did not replace the tabs (${JSON.stringify(o)})`);
+      if (o.buttons !== 0 || !o.text.includes('cannot be managed')) fail.push(`secrets @${w}: a build with no key API shows keys or buttons, or does not say so`);
+      if (o.focus !== 'secrets-h') fail.push(`secrets @${w}: focus is on "${o.focus}", not the screen's heading`);
+      if (o.menuOpen) fail.push(`secrets @${w}: the menu stayed open after choosing Secrets`);
+      await off.addScriptTag({ url: '/__axe.js' });
+      const ar = await off.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
+      runs++;
+      for (const v of ar.violations) fail.push(`secrets off @${w}: ${v.id} (${v.nodes.length}): ${v.help}; first ${v.nodes[0].target.join(' ')}`.slice(0, 300));
+      await off.getByRole('link', { name: 'Back to the dashboard' }).click();
+      await off.waitForFunction(() => document.getElementById('main')!.dataset.view === 'tabs');
+      if (!(await off.locator('#now').isVisible())) fail.push(`secrets @${w}: Back did not return to the Now tab`);
+      await off.close();
+
+      const on = await ctx.newPage();
+      let taps = 0;
+      const posts: string[] = [];
+      await on.route(server.url.origin + '/', async (r) => r.fulfill({ contentType: 'text/html', body: (await Bun.file(`${root}/index.html`).text()).replace('<title>', '<meta name="dashboard-keys" content="/api/keys"><title>') }));
+      await on.route('**/api/keys/runs', (r) => { posts.push(r.request().postData() ?? ''); return r.fulfill({ status: 202, json: { requestId: 'pb-abc-123456', run: { url: 'https://github.com/x/y/actions/runs/1' } } }); });
+      await on.route('**/api/keys/runs/pb-abc-123456?action=*', (r) => {
+        const a = new URL(r.request().url()).searchParams.get('action');
+        if (a === 'list') return r.fulfill({ json: { state: 'done', url: 'https://github.com/x/y/actions/runs/1', list: KEYS } });
+        return r.fulfill({ json: { state: ++taps < 2 ? 'waiting_tap' : 'done', url: 'https://github.com/x/y/actions/runs/1' } });
+      });
+      await on.goto(`${server.url.origin}/#secrets`, { waitUntil: 'load' });
+      await on.waitForSelector('.dash-key');
+      const k = await on.evaluate(() => ({ n: document.querySelectorAll('.dash-key').length, short: [...document.querySelectorAll<HTMLElement>('#secrets .toon-btn')].filter((b) => b.getBoundingClientRect().height < 43.5).length, text: document.getElementById('secrets')!.textContent ?? '' }));
+      if (k.n !== 2 || k.short) fail.push(`secrets @${w}: ${k.n} key rows, ${k.short} buttons under 44 px`);
+      if (!k.text.includes('expire within 21 days') && !k.text.includes('expires within 21 days')) fail.push(`secrets @${w}: a key with 13 days left does not lead the verdict`);
+      if (/ca14c1dd|d620c3dd|\.access\b|cf-access|"header"/i.test(k.text)) fail.push(`secrets @${w}: the screen text names a client id or a header value`);
+      await on.getByRole('button', { name: 'Renew batsy' }).click();
+      await on.waitForFunction(() => document.activeElement?.textContent?.startsWith('Confirm'), null, { timeout: 3000 }).catch(() => {});
+      const f = await on.evaluate(() => document.activeElement?.textContent ?? '');
+      if (!f.startsWith('Confirm')) fail.push(`secrets @${w}: focus is on "${f}" after Renew, not Confirm`);
+      await on.addScriptTag({ url: '/__axe.js' });
+      const cr2 = await on.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
+      runs++;
+      for (const v of cr2.violations) fail.push(`secrets confirm @${w}: ${v.id} (${v.nodes.length}): ${v.help}; first ${v.nodes[0].target.join(' ')}`.slice(0, 300));
+      if (posts.length !== 1) fail.push(`secrets @${w}: ${posts.length} requests before confirming; the list run only`);
+      await on.getByRole('button', { name: 'Cancel' }).click();
+      await on.waitForFunction(() => document.activeElement?.id === 'key-batsy-renew', null, { timeout: 3000 }).catch(() => {});
+      if ((await on.evaluate(() => document.activeElement?.id)) !== 'key-batsy-renew') fail.push(`secrets @${w}: Cancel did not return focus to the Renew button that opened the step`);
+      await on.getByRole('button', { name: 'Renew batsy' }).click();
+      await on.waitForFunction(() => document.activeElement?.textContent?.startsWith('Confirm'), null, { timeout: 3000 }).catch(() => {});
+      await on.getByRole('button', { name: /^Confirm/ }).click();
+      if (!(await on.evaluate(() => document.activeElement?.classList.contains('dash-status')))) await on.waitForFunction(() => document.activeElement?.classList.contains('dash-status'), null, { timeout: 3000 }).catch(() => fail.push(`secrets @${w}: focus did not move to the status line after Confirm`));
+      await on.waitForFunction(() => document.querySelector('#secrets .dash-status')?.textContent?.includes('waiting for your tap'));
+      await on.waitForFunction(() => document.querySelector('#secrets .dash-status')?.textContent?.includes('done'), null, { timeout: 15000 });
+      if (!posts.some((x) => x === '{"action":"renew","name":"batsy"}')) fail.push(`secrets @${w}: the renew request was ${JSON.stringify(posts)}`);
+      await on.close();
+    }
     // The skip link is the first stop on a fresh load with no hash; a hash makes the kit move focus to its tab.
     await p.goto(server.url.origin + '/', { waitUntil: 'load' });
     await p.keyboard.press('Tab');
@@ -188,6 +248,6 @@ try {
   await browser.close();
   server.stop(true);
 }
-console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the confirm state at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
-if (runs !== TABS.length * Object.keys(states).length * 2 + 2 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
+console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the switch confirm and the two Secrets states at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
+if (runs !== TABS.length * Object.keys(states).length * 2 + 6 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
 if (fail.length) { console.error('a11y check FAILED:\n- ' + fail.join('\n- ')); process.exit(1); }
