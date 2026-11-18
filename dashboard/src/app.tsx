@@ -113,7 +113,7 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
     // Back to the button that opened the confirm step.
     queueMicrotask(() => document.getElementById(`${id}-${to}`)?.focus());
   };
-  const side = (to: Side): string => (to === 'cloud' ? 'cloud' : 'on-prem');
+  const side = (to: Side): string => (to === 'cloud' ? 'cloud' : 'Lab');
   return (
     <>
       <Html html={servicesVerdict(data, now)} />

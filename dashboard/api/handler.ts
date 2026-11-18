@@ -155,8 +155,8 @@ async function requestSwitch(req: Req, db: Db, now: () => number): Promise<Res> 
   const registry = await section(db, 'services');
   const svc = Array.isArray(registry) ? registry.find((r) => isObj(r) && r.name === b.service) : undefined;
   if (!isObj(svc)) return reply(404, { error: 'unknown service', message: 'That service is not in the registry.' });
-  if (svc.pinned === true) return reply(409, { error: 'pinned', message: 'That service is pinned on-prem and does not move.' });
-  if (svc.active === b.to) return reply(409, { error: 'already active', message: `Already active on ${b.to === 'cloud' ? 'cloud' : 'on-prem'}.` });
+  if (svc.pinned === true) return reply(409, { error: 'pinned', message: 'That service is pinned in the Lab and does not move.' });
+  if (svc.active === b.to) return reply(409, { error: 'already active', message: `Already active ${b.to === 'cloud' ? 'on cloud' : 'in the Lab'}.` });
   const at = new Date(now()).toISOString();
   await db.put({ pk: `switch#${b.service}`, sk: at, to: b.to, status: 'requested', expires: Math.floor(now() / 1000) + SWITCH_TTL_S });
   return reply(202, { ok: true, message: 'Request recorded. Nothing has moved: the switch waits for the lab-write tap.' });
