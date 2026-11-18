@@ -68,7 +68,7 @@ export function buildDashboardFeed({ hub, batches, now }: FeedInput): Record<str
     }
     const p = newest(hub, CYCLE_KIND);
     // A cycle record with no cycle, or from before the in-review count existed, has nothing to show.
-    if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: p.needsPedro ?? 0, inReview: p.inReview };
+    if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: typeof p.needsPedro === 'number' ? p.needsPedro : undefined, inReview: p.inReview, cycle: rec(p.cycle).name, lost: typeof p.lost === 'number' ? p.lost : undefined };
   }
 
   return {

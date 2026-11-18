@@ -25,6 +25,7 @@ export function nowView(d: DashboardData, now: number): string {
   if (d.needs.length === 0) {
     const down = d.alerts.filter((a) => a.state === 'down').length;
     if (down > 0) return examined(read) + p(`No action card was written, but ${down} alert${down === 1 ? ' is' : 's are'} down. Open the Alerts tab: a missing card does not mean nothing is wrong.`);
+    if (liveUnread(d, now, 'alerts')) return examined(read) + p('No action card was written, but the alert list was not read in full, so it is unknown whether anything is wrong. Open the Alerts tab.');
     return examined(read) + p('Nothing needs you. Every item above was read and none asks for a step.', 'dash-calm');
   }
   const rows = d.needs.map((n, i) =>
@@ -92,7 +93,9 @@ export function watchdogMeters(d: DashboardData, now: number): string {
 export function planeView(d: DashboardData, now: number): string {
   const pl = d.plane;
   if (!pl) return examined('The Plane summary was not read, so the counts are unknown.');
-  return examined(`Read the PET board from the mirror, ${ageText(pl.checkedAt, now)}.`) + list([
+  const lost = pl.lost && pl.lost > 0 ? ` ${pl.lost} item${pl.lost === 1 ? '' : 's'} in the cycle could not be found on the board, so these counts are incomplete.` : '';
+  const cyc = pl.cycle ? ` Current cycle: ${esc(pl.cycle)}.` : '';
+  return examined(`Read the PET board from the mirror, ${ageText(pl.checkedAt, now)}.${cyc}${lost}`) + list([
     disclosure({ id: 'pl-open', lead: '01', title: 'Open items', value: String(pl.open), native: true, panel: p('Items not in a done or cancelled state.') }),
     disclosure({ id: 'pl-np', lead: '02', title: 'Need Pedro', value: String(pl.needsPedro), native: true, panel: p('Items labelled needs-pedro.') }),
     disclosure({ id: 'pl-ir', lead: '03', title: 'In review', value: String(pl.inReview), native: true, panel: p('Items waiting on a review.') }),

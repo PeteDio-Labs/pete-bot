@@ -400,6 +400,7 @@ describe('ReportRunner', () => {
     expect(kept.length).toBeGreaterThan(0);
     expect(kept[0]!.text.length).toBeGreaterThan(0);
     expect(r.status().last.morning?.detail).toContain('kept for the dashboard');
+    expect(r.status().last.morning?.where).toBe('dashboard');
   });
   it('sends the DM when a report cannot be kept, so quiet never loses one', async () => {
     const sent: string[] = [];

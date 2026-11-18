@@ -72,7 +72,8 @@ export interface DashboardData {
   alerts: AlertRow[];
   cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** The run's full exploited count. `findings` may be capped, so the tile uses this when present. */ exploited: number | null; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
-  plane: { checkedAt: string; open: number; needsPedro: number; inReview: number } | null;
+  /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
+  plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
   unread: ('needs' | 'alerts')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
@@ -204,16 +205,21 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     services.push({ name: str(s.name, 60), hostname: str(s.hostname, 120), active: s.active, dataClass: dc, pinned: s.pinned === true, auto: s.auto === true, lab: side(s.lab), cloud: side(s.cloud) });
   }
   const tr = o.triage;
-  const triage = isObj(tr) ? { read: num(tr.read) ?? 0, cards: num(tr.cards) ?? 0, plain: num(tr.plain) ?? 0, failures: num(tr.failures) ?? 0, since: str(tr.since, 40) } : null;
-  if (!triage) problems.push('the triage ledger is missing');
+  const trNums = isObj(tr) ? [num(tr.read), num(tr.cards), num(tr.plain), num(tr.failures)] : [];
+  const triage = isObj(tr) && trNums.every((v) => v !== null) ? { read: trNums[0]!, cards: trNums[1]!, plain: trNums[2]!, failures: trNums[3]!, since: str(tr.since, 40) } : null;
+  if (!triage) problems.push(isObj(tr) ? 'the triage ledger had an unreadable counter' : 'the triage ledger is missing');
   const pl = o.plane;
-  const plane = isObj(pl) && str(pl.checkedAt) ? { checkedAt: str(pl.checkedAt, 40), open: num(pl.open) ?? 0, needsPedro: num(pl.needsPedro) ?? 0, inReview: num(pl.inReview) ?? 0 } : null;
-  if (!plane) problems.push('the Plane summary is missing');
+  const plNums = isObj(pl) ? [num(pl.open), num(pl.needsPedro), num(pl.inReview)] : [];
+  const plane = isObj(pl) && str(pl.checkedAt) && plNums.every((v) => v !== null) ? { checkedAt: str(pl.checkedAt, 40), open: plNums[0]!, needsPedro: plNums[1]!, inReview: plNums[2]!, cycle: str(pl.cycle, 60), lost: num(pl.lost) } : null;
+  if (!plane) problems.push(isObj(pl) ? 'the Plane summary had an unreadable counter' : 'the Plane summary is missing');
   let history: DashboardData['history'] = null;
   const h = o.history;
   if (isObj(h) && Array.isArray(h.alerts) && Array.isArray(h.cve) && Array.isArray(h.drills)) {
     const n = (v: unknown): number => Math.max(0, num(v) ?? 0);
-    history = {
+    const rowOk = (x: unknown, keys: string[]): boolean => isObj(x) && !!str(x.day) && keys.every((k) => num((x as Record<string, unknown>)[k]) !== null);
+    const bad = h.alerts.some((x) => !rowOk(x, ['act', 'noAction', 'unreadable'])) || h.cve.some((x) => !rowOk(x, ['critical', 'high', 'medium', 'low']));
+    if (bad) problems.push('the history had a row with an unreadable counter, so it is not shown');
+    history = bad ? null : {
       alerts: h.alerts.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), act: n(r.act), noAction: n(r.noAction), unreadable: n(r.unreadable) }; }),
       cve: h.cve.filter((x) => isObj(x) && str(x.day)).map((x) => { const r = x as Record<string, unknown>; return { day: str(r.day, 10), critical: n(r.critical), high: n(r.high), medium: n(r.medium), low: n(r.low) }; }),
       uptime: parseUptime(h.uptime),

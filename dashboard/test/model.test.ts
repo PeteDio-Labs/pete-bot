@@ -192,3 +192,33 @@ describe('no card is not the same as nothing wrong', () => {
     expect(tiles(data, Date.parse('2026-11-20T00:00:30Z'))).not.toMatch(/Exploited CVEs[^]*?>0</);
   });
 });
+
+describe('summary counters that cannot be read stay unknown', () => {
+  const base = { generatedAt: '2026-11-18T00:00:00Z', services: [], needs: [], alerts: [] };
+  test('a Plane summary with an unreadable counter is dropped, not shown as zeros', async () => {
+    const { planeView } = await import('../src/views.ts');
+    const { data, problems } = parseDashboard({ ...base, plane: { checkedAt: '2026-11-18T00:00:00Z', open: 'unreadable' } });
+    expect(data.plane).toBeNull();
+    expect(problems.join(' ')).toContain('Plane summary had an unreadable counter');
+    expect(planeView(data, Date.parse('2026-11-18T00:01:00Z'))).toContain('unknown');
+  });
+  test('an empty triage ledger is dropped', () => {
+    expect(parseDashboard({ ...base, triage: {} }).data.triage).toBeNull();
+  });
+  test('a history row with only a day hides the history', () => {
+    const { data } = parseDashboard({ ...base, history: { alerts: [], cve: [{ day: '2026-11-17' }], drills: [], uptime: {} } });
+    expect(data.history).toBeNull();
+  });
+  test('lost cycle items are named in the Plane view', async () => {
+    const { planeView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ ...base, plane: { checkedAt: '2026-11-18T00:00:00Z', open: 0, needsPedro: 0, inReview: 0, cycle: 'Cycle 9', lost: 2 } });
+    const html = planeView(data, Date.parse('2026-11-18T00:01:00Z'));
+    expect(html).toContain('2 items in the cycle could not be found');
+    expect(html).toContain('Cycle 9');
+  });
+  test('Now does not say nothing needs you when the alert list was unread', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: '2026-11-18T00:00:00Z', services: [], needs: [] });
+    expect(nowView(data, Date.parse('2026-11-18T00:00:30Z'))).not.toContain('Nothing needs you');
+  });
+});

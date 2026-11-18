@@ -253,7 +253,9 @@ async function handleReport(interaction: ChatInputCommandInteraction): Promise<v
     return;
   }
   const sent = await reports.run(which, { markRun: false });
-  await interaction.editReply({ content: sent ? `Sent the ${which} report to your DMs.` : `The ${which} report was built but the DM did not send. Check the logs.` });
+  const where = reports.status().last[which]?.where;
+  const done = where === 'dashboard' ? `Saved the ${which} report to the dashboard. No DM was sent.` : where === 'both' ? `Saved the ${which} report to the dashboard and sent it to your DMs, because it is incomplete.` : `Sent the ${which} report to your DMs.`;
+  await interaction.editReply({ content: sent ? done : `The ${which} report was built but it did not reach you. Check the logs.` });
 }
 
 /**

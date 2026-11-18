@@ -49,6 +49,8 @@ export interface LastRun {
   ok: boolean;
   incomplete: boolean;
   detail: string;
+  /** Where the text went: the dashboard hub, the DMs, or both (an incomplete report). Absent on a failed send. */
+  where?: 'dashboard' | 'dm' | 'both';
 }
 
 export interface ReportsStatus {
@@ -217,7 +219,7 @@ export class ReportRunner {
       this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok: false, incomplete, detail: `DM failed: ${String(err).slice(0, 150)}` };
       return false;
     }
-    this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok, incomplete, detail };
+    this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok, incomplete, detail, where: kept ? (sendToo ? 'both' : 'dashboard') : 'dm' };
     // A transient feed failure must not spend the day (PET-770). The cve report retries every
     // CVE_RETRY_MINUTES, up to CVE_ATTEMPTS tries, and each failed try still sends its failure DM.
     if (name === 'cve' && !ok && opts.markRun) {
