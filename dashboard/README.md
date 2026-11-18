@@ -21,7 +21,7 @@ the service switch panel with a watchdog per side, and the Plane summary. Mobile
 - **Unknown is not healthy.** `src/model.ts` turns a missing, malformed or older-than-5-minutes record into `unknown`. A
   section that does not parse is dropped and listed in a banner.
 - **Every view says what it read,** with counts and the age of the read.
-- **The switch button only asks.** `DASHBOARD_SWITCH` names a URL that queues a request. Without it, the button is
+- **The switch toggle only asks (a labelled `role="switch"`, checked when the service runs in the cloud; a tap opens a confirm step).** `DASHBOARD_SWITCH` names a URL that queues a request. Without it, the button is
   disabled and says why. A switch is allowed only when the target side is fresh and healthy, and a service with a
   database needs a known replication lag.
 - **Tabs belong to the kit.** `toonish-ui/toonish.js` switches the panels by hash. Preact leaves `hidden` alone.

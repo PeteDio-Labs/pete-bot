@@ -54,6 +54,8 @@ try {
     const enabled = p.locator('.dash-btn:not([disabled])');
     if ((await enabled.count()) !== 0) fail.push(`services @${w}: a switch is enabled on a read-only feed`);
     for (const reason of await p.locator('.dash-reason').allTextContents()) if (!reason.trim()) fail.push(`services @${w}: a service shows no reason for its switch state`);
+    const sw = await p.evaluate(() => [...document.querySelectorAll('.dash-service')].filter((li) => { const b = li.querySelector('button[role="switch"]'); return !b || !b.getAttribute('aria-label') || !['true', 'false'].includes(b.getAttribute('aria-checked') ?? ''); }).length);
+    if (sw) fail.push(`services @${w}: ${sw} services lack a labelled switch with a checked state`);
     const tall = await p.evaluate(() => [...document.querySelectorAll<HTMLElement>('.dash-btn')].filter((b) => b.getBoundingClientRect().height < 44).length);
     if (tall) fail.push(`services @${w}: ${tall} buttons are under 44 px tall`);
     // The confirm flow, with a feed that can request a switch: the HTML gets the switch meta and /sw answers.

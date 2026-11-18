@@ -13,6 +13,14 @@
 .dash-meta, .dash-reason { font-size: .875rem; }
 .dash-btn { min-height: 44px; min-width: 44px; }
 .dash-btn[disabled] { opacity: .6; cursor: not-allowed; }
+.dash-toggle-row { display: flex; align-items: center; gap: .75rem; margin: .5rem 0; }
+.dash-toggle-side { font-weight: 500; opacity: .7; }
+.dash-toggle-on { font-weight: 800; opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+.dash-toggle { position: relative; width: 4.5rem; min-height: 44px; padding: 0; border: 3px solid currentColor; border-radius: 999px; background: transparent; cursor: pointer; }
+.dash-thumb { position: absolute; top: 50%; left: 4px; width: 28px; height: 28px; margin-top: -14px; border: 3px solid currentColor; border-radius: 50%; background: currentColor; transition: transform .15s; }
+.dash-toggle[aria-checked="true"] .dash-thumb { transform: translateX(2rem); }
+@media (prefers-reduced-motion: reduce) { .dash-thumb { transition: none; } }
+.dash-toggle:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
 .dash-status { min-height: 1.5rem; }
 .dash-main { padding-bottom: var(--toon-tabbar-h, 0px); }
 @media (min-width: 48rem) { .dash-services { grid-template-columns: repeat(2, 1fr); } }

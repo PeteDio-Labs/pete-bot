@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState, useLayoutEffect } from 'preact/hooks';
 import { tabbar } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { type DashboardData, type Side } from './model.ts';
@@ -36,7 +36,7 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
   const [asked, setAsked] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const confirmRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (asked) confirmRef.current?.focus();
   }, [asked]);
   const send = async (service: string, to: Side) => {
@@ -70,9 +70,13 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
                   <button type="button" class="toon-btn toon-btn-ghost dash-btn" onClick={() => setAsked(null)}>Cancel</button>
                 </p>
               ) : (
-                <p>
-                  <button type="button" class="toon-btn dash-btn" disabled={!can} aria-describedby={`why-${s.name}`} onClick={() => setAsked(s.name)}>{`Switch to ${c.sw.to === 'cloud' ? 'cloud' : 'on-prem'}`}</button>
-                </p>
+                <div class="dash-toggle-row">
+                  <span class={`dash-toggle-side${s.active === 'lab' ? ' dash-toggle-on' : ''}`} aria-hidden="true">On-prem</span>
+                  <button type="button" role="switch" aria-checked={s.active === 'cloud'} aria-label={`${s.name}: run on cloud`} class="dash-btn dash-toggle" disabled={!can} aria-describedby={`why-${s.name}`} onClick={() => setAsked(s.name)}>
+                    <span class="dash-thumb" aria-hidden="true" />
+                  </button>
+                  <span class={`dash-toggle-side${s.active === 'cloud' ? ' dash-toggle-on' : ''}`} aria-hidden="true">Cloud</span>
+                </div>
               )}
               <p class="dash-reason" id={`why-${s.name}`}>{reason}</p>
             </li>
