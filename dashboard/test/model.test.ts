@@ -486,3 +486,32 @@ describe('sources nobody read never give an all clear', () => {
     expect(() => workView(b.data, now)).not.toThrow();
   });
 });
+
+describe('The top of Now: app bar, brief and status rows', () => {
+  const at = '2026-11-18T12:00:00Z';
+  const now = Date.parse('2026-11-18T12:00:30Z');
+  const cve = (findings: unknown[]) => ({ checkedAt: at, hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings });
+  const kev = { id: 'CVE-2026-0001', pkg: 'openssl', host: 'vault', severity: 'high', kev: true, fixed: '3.0.99' };
+  test('the pill counts what needs Pedro and the strip is an ink brief with the count', async () => {
+    const { barState, nowView, topBar } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [], cve: cve([kev]) });
+    expect(barState(data, now)).toEqual({ text: '1 needs you', tone: 'down' });
+    const html = nowView(data, now);
+    expect(html).toContain('toon-brief toon-brief-ink');
+    expect(html).toContain('toon-srow-down');
+    expect(html).toContain('Open lab actions');
+    expect(topBar(data, now)).toContain('toon-appbar-state-down');
+  });
+  test('rows are worst first: a down row sits above a warn row', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [], cve: cve([{ id: 'CVE-2026-0002', pkg: 'curl', host: 'h', severity: 'high', kev: false, fixed: '9.9' }, kev]) });
+    const html = nowView(data, now);
+    expect(html.indexOf('toon-srow-down')).toBeLessThan(html.indexOf('toon-srow-warn'));
+  });
+  test('the header makes no claim of state before a feed is read, and a source not read is never an all clear pill', async () => {
+    const { barState, topBar } = await import('../src/views.ts');
+    expect(topBar(null, now)).not.toContain('toon-appbar-state');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [] });
+    expect(barState(data, now)).toEqual({ text: 'Partly read', tone: 'unknown' });
+  });
+});

@@ -6,7 +6,7 @@
  * sections, then what was read (`readout()`). A `*Blocks` function returns those blocks one by one, so the page can replace
  * only a block whose text changed. The `*View` function of the same name joins them.
  */
-import { bars, barsKey, chartTable, disclosure, kicker, list, meter, meters, readout, row, statusTile, strip, switchCard, uptime, verdict, esc, type TileState } from 'toonish-ui/markup';
+import { appbar, bars, barsKey, brief, button, cells, chartTable, cycle, disclosure, kicker, list, meter, meters, readout, row, statusRow, statusTile, strip, switchCard, uptime, verdict, esc, type TileState } from 'toonish-ui/markup';
 import { ageText, backupState, isFresh, STALE_MS, healthOf, sortFindings, switchState, type DashboardData, type Health, type ServiceRow } from './model.ts';
 
 /** The question each tab answers. It is the tab panel's heading. */
@@ -72,6 +72,8 @@ export interface ActItem {
   step: string;
   since?: string;
   note?: string;
+  /** The service or guest the item is about, so Now can draw its small picture. */
+  subject?: string;
   button: string;
 }
 
@@ -87,7 +89,7 @@ export function actItems(d: DashboardData, now: number): ActItem[] {
     const side = s.active === 'lab' ? s.lab : s.cloud;
     if (healthOf(side, now) !== 'down') continue;
     const can = switchState(s, now).allowed;
-    out.push({ state: 'down', kind: 'SERVICE', title: `${s.name} is down ${s.active === 'lab' ? 'in the Lab' : 'on cloud'}, the side that serves`, why: side?.detail ? `The watchdog read: ${side.detail}.` : 'The watchdog reported it down.', step: can ? 'It can switch sides now.' : 'It cannot switch sides now. Services says why.', since: side?.checkedAt, button: tabLink('services') });
+    out.push({ state: 'down', kind: 'SERVICE', title: `${s.name} is down ${s.active === 'lab' ? 'in the Lab' : 'on cloud'}, the side that serves`, why: side?.detail ? `The watchdog read: ${side.detail}.` : 'The watchdog reported it down.', step: can ? 'It can switch sides now.' : 'It cannot switch sides now. Services says why.', since: side?.checkedAt, subject: s.name, button: tabLink('services') });
   }
   if (needsRead) for (const n of d.needs) out.push({ state: 'warn', kind: 'CARD', title: n.title, why: n.why || 'No reason was given.', step: n.step, since: n.since, button: labLink() });
   // A down alert that triage turned into a card is already above as that card, when the cards were read.
@@ -105,7 +107,7 @@ export function actItems(d: DashboardData, now: number): ActItem[] {
       const st = backupState(b, now);
       // A card that names the guest's backup already carries this, with its step.
       if (st === 'ok' || (needsRead && d.needs.some((n) => cardCovers(n.title, b.guest)))) continue;
-      out.push({ state: st, kind: 'BACKUP', title: b.lastGood ? `${b.guest}: the last good backup was ${ageText(b.lastGood, now)}` : `${b.guest} has no good backup on record`, why: b.detail || 'The nightly backup has not finished in time.', step: 'Run the backup job again, then check the free space on the backup store.', since: b.lastGood ?? undefined, button: labLink() });
+      out.push({ state: st, kind: 'BACKUP', title: b.lastGood ? `${b.guest}: the last good backup was ${ageText(b.lastGood, now)}` : `${b.guest} has no good backup on record`, why: b.detail || 'The nightly backup has not finished in time.', step: 'Run the backup job again, then check the free space on the backup store.', since: b.lastGood ?? undefined, subject: b.guest, button: labLink() });
     }
   }
   for (const f of cves) if (!(kevRead && f.kev) && f.fixed && (f.severity === 'critical' || f.severity === 'high')) out.push(cveItem(f, false));
@@ -123,6 +125,8 @@ export interface Attention {
   since?: string;
   /** A short fact for the row's end slot, such as `1 exploited`. */
   fact?: string;
+  /** The service or guest, for the row's small picture. */
+  subject?: string;
   tab: Tab;
 }
 
@@ -142,7 +146,7 @@ export function attention(d: DashboardData, now: number): Attention[] {
   };
   let foldedKev = false, foldedRest = false;
   for (const i of items) {
-    if (i.kind !== 'CVE') out.push({ state: i.state, kind: i.kind, title: i.title, why: i.why, step: i.step, since: i.since, tab: i.kind === 'SERVICE' ? 'services' : 'act' });
+    if (i.kind !== 'CVE') out.push({ state: i.state, kind: i.kind, title: i.title, why: i.why, step: i.step, since: i.since, subject: i.subject, tab: i.kind === 'SERVICE' ? 'services' : 'act' });
     else if (i.exploited && !foldedKev) (foldedKev = true), fold(true);
     else if (!i.exploited && !foldedRest) (foldedRest = true), fold(false);
   }
@@ -171,30 +175,76 @@ const checksRead = (d: DashboardData): number => d.alerts.length + d.services.le
 
 // ---- Now: do I need to do anything? ----
 
-export function nowBlocks(d: DashboardData, now: number): string[] {
+const LEAD: Record<Attention['kind'], string> = { SERVICE: 'Service', CARD: 'Action', ALERT: 'Alert', CVE: 'CVE', BACKUP: 'Backups', PLANE: 'Plane', UNREAD: 'Not read' };
+const STATE_WORD = { down: 'Wrong now', warn: 'Needs you', unknown: 'Not read' } as const;
+const DAY_MS = 86_400_000;
+const shortDate = (iso: string): string => new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+/** The cycle bar for the Plane row, or '' when the feed carried no usable cycle detail. */
+function cycleVisual(d: DashboardData, now: number): string {
+  const det = d.plane?.detail;
+  if (!det || !(det.total > 0) || det.done > det.total) return '';
+  const from = Date.parse(`${det.start.slice(0, 10)}T00:00:00Z`);
+  const to = Date.parse(`${det.end.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return '';
+  const days = Math.round((to - from) / DAY_MS) + 1;
+  const day = Math.min(days, Math.max(1, Math.floor((now - from) / DAY_MS) + 1));
+  return cycle({ label: d.plane?.cycle || 'Cycle', done: det.done, total: det.total, day, days, from: shortDate(det.start), to: shortDate(det.end) });
+}
+
+/** The small picture at the end of a row: backup cells, a service's recent probes, or the cycle bar. */
+function visualFor(a: Attention, d: DashboardData, now: number): string {
+  if (a.kind === 'BACKUP' && d.backups?.guests.length) return cells({ label: 'Backups', cells: d.backups.guests.slice(0, 60).map((g) => (backupState(g, now) === 'ok' ? 'ok' : 'down')) });
+  if (a.kind === 'SERVICE' && a.subject) {
+    const u = d.history?.uptime[a.subject];
+    if (u?.length) return cells({ label: `${a.subject} probes`, cells: u.slice(-24).map((c) => c.state) });
+  }
+  if (a.kind === 'PLANE') return cycleVisual(d, now);
+  return '';
+}
+
+/** One row of Now. A row that needs Pedro carries one blue button; a source that was not read links to the tab that says why. */
+function nowRow(a: Attention, d: DashboardData, now: number): string {
+  const sub = [a.why, a.step].filter(Boolean).join(' ');
+  const base = { state: a.state, lead: LEAD[a.kind], stateText: STATE_WORD[a.state], title: a.title, sub, visual: visualFor(a, d, now) || undefined, fact: a.since ? ageText(a.since, now) : a.fact };
+  if (a.state === 'unknown') return statusRow({ ...base, href: `#${a.tab}` });
+  const lab = a.kind === 'CARD' || a.kind === 'ALERT' || a.kind === 'CVE' || a.kind === 'BACKUP';
+  return statusRow({ ...base, action: button({ label: lab ? 'Open lab actions' : `Open ${TAB_LABEL[a.tab]}`, href: lab ? LAB_ACTIONS : `#${a.tab}`, cls: 'dash-btn' }) });
+}
+
+/** What the app bar's pill says: how many things need Pedro, or that the answer is not an all clear. */
+export function barState(d: DashboardData, now: number): { text: string; tone: TileState } {
   const all = attention(d, now);
   const act = all.filter((a) => a.state !== 'unknown');
+  if (act.length) return { text: `${act.length} ${act.length === 1 ? 'needs' : 'need'} you`, tone: act.some((a) => a.state === 'down') ? 'down' : 'warn' };
+  if (all.length) return { text: 'Partly read', tone: 'unknown' };
+  return { text: 'All clear', tone: 'ok' };
+}
+
+/** The page's header: logo tile, title, when the feed was read, and the pill. */
+export const topBar = (d: DashboardData | null, now: number): string =>
+  appbar({ title: 'Lab dashboard', sub: d ? `Read ${ageText(d.generatedAt, now)}` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
+
+export function nowBlocks(d: DashboardData, now: number): string[] {
+  const all = attention(d, now);
+  // Worst first: a thing that is wrong now sits above a thing that needs a step. Array.sort is stable, so each group keeps its order.
+  const act = all.filter((a) => a.state !== 'unknown').sort((x, y) => Number(y.state === 'down') - Number(x.state === 'down'));
   const unread = all.filter((a) => a.state === 'unknown');
   const read = readout(`Read ${plural(checksRead(d), 'check')}, ${ageText(d.generatedAt, now)}: ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length * 2, 'probe')}${d.backups ? `, ${plural(d.backups.guests.length, 'backup record')}` : ''}${d.cve ? ', the CVE report' : ''}${d.plane ? ', the Plane board' : ''}. Source: ${d.source}.`);
-  const row = (a: Attention, i: number, open: boolean): string =>
-    disclosure({
-      id: `now-${i}`, tone: ({ down: 'red', warn: 'yellow', unknown: 'mist' } as const)[a.state], lead: a.state === 'unknown' ? a.kind : `${i + 1} ${a.kind}`, title: a.title, sub: a.why, note: a.since ? ageText(a.since, now) : a.fact ?? TAB_LABEL[a.tab], native: true, open,
-      panel: (a.step ? kv([['Do this', a.step]]) : '') + tabLink(a.tab),
-    });
-  const unreadSection = (num: string): string[] => (unread.length ? [section(num, 'Not read', list(unread.map((a, i) => row(a, act.length + i, false)), { label: 'Sources that were not read' }))] : []);
+  const unreadSection = (num: string): string[] => (unread.length ? [section(num, 'Not read', list(unread.map((a) => nowRow(a, d, now)), { label: 'Sources that were not read' }))] : []);
   if (act.length) {
     const worst = act.find((a) => a.state === 'down') ?? act[0]!;
-    const answer = verdict({
-      state: worst.state, stateText: worst.state === 'down' ? 'Wrong now' : 'Needs you',
+    const answer = brief({
+      state: worst.state, stateText: STATE_WORD[worst.state], palette: 'ink', count: `${act.length}!`,
       title: act.length === 1 ? worst.title : `${act.length} things need you`,
       body: act.length === 1 ? worst.step ?? worst.why : `Start with: ${act[0]!.title}.`,
     });
-    return [answer, section('01', 'In this order', list(act.map((a, i) => row(a, i, i === 0)), { label: 'What needs you, in order' })), ...unreadSection('02'), read];
+    return [answer, section('01', 'Worst first', list(act.map((a) => nowRow(a, d, now)), { label: 'What needs you, worst first' })), ...unreadSection('02'), read];
   }
-  if (liveUnread(d, now, 'needs')) return [verdict({ state: 'unknown', title: 'It is unknown whether anything needs you', body: 'The list of items that need you was not read in full, or it is out of date.' }), ...unreadSection('01'), read];
-  if (liveUnread(d, now, 'alerts')) return [verdict({ state: 'unknown', title: 'No action card, but the alert list was not read in full', body: 'So it is unknown whether anything is wrong.' }), ...unreadSection('01'), read];
-  if (unread.length) return [verdict({ state: 'unknown', stateText: 'Partly read', title: 'Nothing needs you in what was read', body: `${plural(unread.length, 'source was', 'sources were')} not read, so this is not an all clear.` }), ...unreadSection('01'), read];
-  return [verdict({ state: 'ok', stateText: 'All clear', title: 'Nothing needs you', body: `Read ${plural(checksRead(d), 'check')}, ${ageText(d.generatedAt, now)}.` }), read];
+  if (liveUnread(d, now, 'needs')) return [brief({ state: 'unknown', title: 'It is unknown whether anything needs you', body: 'The list of items that need you was not read in full, or it is out of date.' }), ...unreadSection('01'), read];
+  if (liveUnread(d, now, 'alerts')) return [brief({ state: 'unknown', title: 'No action card, but the alert list was not read in full', body: 'So it is unknown whether anything is wrong.' }), ...unreadSection('01'), read];
+  if (unread.length) return [brief({ state: 'unknown', stateText: 'Partly read', title: 'Nothing needs you in what was read', body: `${plural(unread.length, 'source was', 'sources were')} not read, so this is not an all clear.` }), ...unreadSection('01'), read];
+  return [brief({ state: 'ok', stateText: 'All clear', title: 'Nothing needs you', body: `Read ${plural(checksRead(d), 'check')}, ${ageText(d.generatedAt, now)}.` }), read];
 }
 export const nowView = (d: DashboardData, now: number): string => nowBlocks(d, now).join('');
 

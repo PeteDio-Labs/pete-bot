@@ -6,7 +6,7 @@ import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
 import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
 import { keysApi, sameOriginPath, type KeysApi } from './keys.ts';
-import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, serviceCard, servicesReadout, servicesRecord, servicesVerdict, workBlocks } from './views.ts';
+import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, topBar, serviceCard, servicesReadout, servicesRecord, servicesVerdict, workBlocks } from './views.ts';
 
 export const TABS = [
   { id: 'now', label: 'Now' },
@@ -164,6 +164,16 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
   const demo = feed.demo && data?.source === DEMO_SOURCE;
   const n = data ? clockFor(data, now(), feed.demo) : now();
   const problems = load.state === 'loading' ? [] : load.problems;
+  // The header is the static bar from the build until a feed is read; then it says how many things need Pedro.
+  useEffect(() => {
+    const top = document.getElementById('top');
+    if (!top) return;
+    try {
+      top.innerHTML = topBar(data, n);
+    } catch {
+      /* The static bar stays, and it makes no claim about state. */
+    }
+  }, [data, n]);
   return (
     <>
       {!secrets && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
