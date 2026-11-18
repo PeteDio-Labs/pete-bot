@@ -1,0 +1,26 @@
+{
+  "name": "lab-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "dev": "bun run build.ts && bun run serve.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:a11y": "bun run test/a11y.ts",
+    "build:api": "bun build api/handler.ts --target=node --format=esm --outfile=api/dist/handler.mjs --external '@aws-sdk/*'"
+  },
+  "dependencies": {
+    "preact": "11.2.0",
+    "toonish-ui": "github:PeteDio-Labs/toonish-ui#v0.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.5",
+    "@types/bun": "1.4.4",
+    "axe-core": "4.14.0",
+    "playwright-core": "1.65.1",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2"
+  }
+}

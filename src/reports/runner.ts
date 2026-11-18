@@ -49,6 +49,8 @@ export interface LastRun {
   ok: boolean;
   incomplete: boolean;
   detail: string;
+  /** Where the text went: the dashboard hub, the DMs, or both (an incomplete report). Absent on a failed send. */
+  where?: 'dashboard' | 'dm' | 'both';
 }
 
 export interface ReportsStatus {
@@ -71,6 +73,16 @@ export interface RunnerDeps {
   onCve?: (run: CveRun, date: string, at: Date) => void;
   /** Called with the morning queue's snapshot, so the dashboard keeps the cycle. A throw is logged, never fatal. */
   onMorning?: (snap: Snapshot, date: string) => void;
+  /**
+   * When false, a report that ran is kept for the dashboard and not sent as a DM. Left unset it means true, but
+   * `startReports` always passes it, and with REPORTS_DM unset that is false: reports go to the dashboard. A failed run (`ok` false) is always sent: that is an alert, not a report.
+   */
+  dm?: boolean;
+  /**
+   * Keeps a finished report for the dashboard. Returns true only when it was stored. When it returns
+   * false or throws, the report is sent as a DM instead, so turning the DMs off can never lose one.
+   */
+  keep?: (rec: { name: ReportName; date: string; at: Date; text: string; ok: boolean; incomplete: boolean }) => boolean;
 }
 
 /** Splits at line breaks so no DM passes Discord's 2000-character limit. */
@@ -187,14 +199,27 @@ export class ReportRunner {
       text = `⚠ **The ${name} report failed.** Nothing below was checked.\n${reason.slice(0, 500)}`;
       this.d.log.error(`[Reports] ${name} failed: ${reason}`);
     }
+    // ⚠ A report that cannot be kept is sent. Quiet is only allowed when the dashboard has the text.
+    let kept = false;
+    if (ok && this.d.dm === false && this.d.keep) {
+      try {
+        kept = this.d.keep({ name, date: localTime(at).date, at, text, ok, incomplete });
+      } catch (err) {
+        this.d.log.error(`[Reports] ${name} could not be kept for the dashboard, sending the DM: ${String(err)}`);
+      }
+      if (!kept) this.d.log.warn(`[Reports] ${name} was not kept for the dashboard, so it goes out as a DM`);
+    }
+    // ⚠ An INCOMPLETE report is loud: it is kept and also sent, because a partial read must not hide in a page.
+    const sendToo = kept && incomplete;
+    if (kept) detail = `kept for the dashboard${incomplete ? `, incomplete (DM sent): ${incompleteReason(text)}` : ''}`;
     try {
-      for (const part of chunk(text)) await this.d.sender.send(part);
+      if (!kept || sendToo) for (const part of chunk(text)) await this.d.sender.send(part);
     } catch (err) {
       this.d.log.error(`[Reports] ${name} could not be sent: ${String(err)}`);
       this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok: false, incomplete, detail: `DM failed: ${String(err).slice(0, 150)}` };
       return false;
     }
-    this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok, incomplete, detail };
+    this.lastRuns[name] = { date: localTime(at).date, at: at.toISOString(), ok, incomplete, detail, where: kept ? (sendToo ? 'both' : 'dashboard') : 'dm' };
     // A transient feed failure must not spend the day (PET-770). The cve report retries every
     // CVE_RETRY_MINUTES, up to CVE_ATTEMPTS tries, and each failed try still sends its failure DM.
     if (name === 'cve' && !ok && opts.markRun) {
@@ -210,7 +235,7 @@ export class ReportRunner {
       this.dates[name] = localTime(at).date;
       this.save();
     }
-    this.d.log.info(`[Reports] ${name} sent (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
+    this.d.log.info(`[Reports] ${name} ${kept && !sendToo ? 'kept, no DM' : 'sent'} (${ok ? (incomplete ? detail.replace(/^sent, /, '') : 'complete') : 'failed'})`);
     return true;
   }
 

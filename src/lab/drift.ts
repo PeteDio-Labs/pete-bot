@@ -189,15 +189,16 @@ export async function readLab(readers: LabReaders): Promise<DriftReads> {
   return { guests: g.value, inventory: v.value.inventory, notes: v.value.notes, unparsed: v.value.unparsed, vaultSource: v.value.source };
 }
 
-export type Notify = (message: string) => Promise<void>;
+/** `report` marks a routine finding list that pete-bot may keep for the dashboard instead of DMing. A failure never sets it. */
+export type Notify = (message: string, opts?: { report?: boolean }) => Promise<void>;
 
 /** POST one message to pete-bot's /v1/notify, as "lab-agent drift". Throws on anything but 2xx. */
 export function notifier(url: string, token: string, fetchImpl: typeof fetch = fetch): Notify {
-  return async (message) => {
+  return async (message, opts) => {
     const res = await fetchImpl(url, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: 'lab-agent drift check', message }),
+      body: JSON.stringify({ from: 'lab-agent drift check', message, ...(opts?.report ? { kind: 'report' } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new NotifyRefused(res.status);
@@ -257,6 +258,7 @@ export interface DriftDeps {
 export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
   let outcome: DriftKind;
   let message: string | null = null;
+  let report = false;
   try {
     const result = compareLab(await deps.read());
     if (result.findings.length === 0) {
@@ -264,6 +266,7 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
     } else {
       outcome = { kind: 'drift', read: result.read, findings: result.findings.length, lines: plainLines(result.findings).split('\n') };
       message = driftMessage(result);
+      report = true;
     }
   } catch (err) {
     const error = (err as Error).message;
@@ -279,7 +282,7 @@ export async function runDriftCheck(deps: DriftDeps): Promise<DriftOutcome> {
     for (let attempt = 0; attempt <= delays.length && delivered !== true; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, delays[attempt - 1]));
       try {
-        await deps.notify(message);
+        await deps.notify(message, report ? { report: true } : undefined);
         delivered = true;
       } catch (err) {
         delivered = false;

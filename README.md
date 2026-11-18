@@ -93,6 +93,14 @@ ssh key that codex-248 forces to `codex-review-gate`, a pinned `known_hosts` for
 `python3` with PyYAML for the classifier. The App needs **Contents** and **Pull requests**
 write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
+## Triage on Kuma alerts
+
+`src/server/triage.ts` holds the local-model triage: it asks an Ollama server (`TRIAGE_OLLAMA_URL`, `TRIAGE_MODEL`
+default `qwen3:8b`, `TRIAGE_TIMEOUT_MS` default 4000, clamped to 500 to 15000) whether you must act, strips links,
+markdown and mentions from the reply, and caps each field. **It is not wired into `/v1/alert` yet.** A hint added after
+the DM has to be serialised with every heartbeat edit of the same batch and kept inside Discord's embed limit on every
+later render, and that design ships in its own PR. Until then a Kuma DOWN is the plain DM.
+
 ## The scheduled reports (PET-701)
 
 Three reports replace the Morning queue, Hanging audit and Stale PR sweep Claude routines.
@@ -112,6 +120,15 @@ hosts, package versions and advisories it examined. A host the collector could n
 "Not checked", and an unreachable OSV feed sends a failure DM. Set `CVE_FILE_ITEMS=on` to file one PET
 item per exploited or high-severity finding, at most five a day; the finding's key is the item's
 `external_id`, so a finding is filed once. Container images are listed, not matched.
+
+**Reports go to the dashboard, not to Discord.** A finished report is saved to the dashboard's hub as the kind
+`report-<name>` and sends no DM. A run that failed (`ok` false) is still a DM, because that is an alert. If the hub is
+off or the save fails, the report goes out as a DM, so turning the DMs off cannot lose one. Set `REPORTS_DM=on` to
+get the DMs back. `/health` shows `kept for the dashboard` in each report's last result.
+
+The drift check posts its findings to `/v1/notify` with `kind: "report"`. When the dashboard is listening, pete-bot
+keeps them as `report-drift` and sends no DM. A failed drift read never sets `kind`, so it still DMs. If the hub is
+off or the save fails, the findings DM. `REPORTS_DM=on` keeps them in the DMs too.
 
 The first line of each report says what it read, for example "Read: 7 open and 200 recently
 closed PRs in 5 of 5 repos; 403 PET items (111 open)". A repository, Plane or a single check

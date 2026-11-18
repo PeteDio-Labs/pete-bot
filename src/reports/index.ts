@@ -60,6 +60,14 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
     plane: s.plane ? new PlaneClient(s.plane) : null,
     sender: discordSender(client, ownerUserId),
     log: logger,
+    // REPORTS_DM=on keeps the DMs. Without it a finished report goes to the dashboard hub, and a failure still DMs.
+    dm: reportsDm((env as { REPORTS_DM?: string }).REPORTS_DM),
+    keep: ({ name, date, at, text, ok, incomplete }) => {
+      // Kept only where the dashboard that shows it is listening, so quiet never means unread.
+      if (!hub || !dashboardListening) return false;
+      hub.save(`report-${name}`, { id: date, generatedAt: at.toISOString(), name, text, ok, incomplete });
+      return true;
+    },
     onMorning: (snap, date) => {
       const rec = cycleRecord(snap, date);
       if (rec && hub) hub.save(CYCLE_KIND, rec);
@@ -78,6 +86,14 @@ export function startReports(client: Client, ownerUserId: string, env: ReportsEn
   logger.info(`[Reports] Scheduled ${[...s.enabled].join(', ')} for ${s.repos.join(', ')}${s.plane ? '' : ' (Plane key absent: Plane will be reported as not read)'}`);
 }
 
+/** REPORTS_DM: on, true, 1 or yes keeps the DMs; off, false, 0, no or empty turns them off. Anything else keeps them and is logged. */
+export function reportsDm(raw: string | undefined): boolean {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (['off', 'false', '0', 'no', ''].includes(v)) return false;
+  if (!['on', 'true', '1', 'yes'].includes(v)) logger.error(`[Reports] REPORTS_DM is "${v.slice(0, 20)}", which is not on or off, so the DMs stay on`);
+  return true;
+}
+
 export function getReports(): ReportRunner | null {
   return runner;
 }
@@ -92,6 +108,7 @@ export function reportsHealth(): { state: string; reason?: string } & Partial<Re
 let weekly: WeeklyState = { state: 'off' };
 let weeklyRunner: WeeklyRunner | null = null;
 let hub: ReportHub | null = null;
+let dashboardListening = false;
 let hubJobs: HubJobs | null = null;
 let backup: ReportBackup | null = null;
 let backupConfig: ReturnType<typeof loadBackupConfig> = { state: 'off' };
@@ -99,6 +116,25 @@ let backupConfig: ReturnType<typeof loadBackupConfig> = { state: 'off' };
 /** Where the other report kinds save a record for the dashboard. Null until the dashboard is on. */
 export function getHub(): ReportHub | null {
   return hub;
+}
+
+/**
+ * A routine report that arrived over /v1/notify (the drift check). Kept as hub kind `report-drift`
+ * only where the dashboard is listening, so quiet never means unread. One record per run. Returns false when it kept nothing, and the caller DMs.
+ */
+/** `YYYY-MM-DD-hhmmxxxx`: the UTC minute plus four random characters, so two runs in one minute keep both records. */
+export function driftRecordId(at: Date, rand: () => number = Math.random): string {
+  const suffix = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, '0');
+  return `${at.toISOString().slice(0, 10)}-${at.toISOString().slice(11, 16).replace(':', '')}${suffix}`;
+}
+
+export function keepNotifyReport(from: string, text: string, at: Date): boolean {
+  if (!hub || !dashboardListening) return false;
+  const name = /drift/i.test(from) ? 'drift' : null;
+  if (!name) return false;
+  // One record per run (date, UTC minute and a random suffix), so a retry or manual run never replaces the first night's findings.
+  hub.save(`report-${name}`, { id: driftRecordId(at), generatedAt: at.toISOString(), name, text, ok: true, incomplete: false });
+  return true;
 }
 
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
@@ -123,6 +159,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
       w.host,
       w.port,
     );
+    dashboardListening = true;
     weeklyRunner.start();
     const petClient = s.plane ? new PlaneClient(s.plane) : null;
     const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();

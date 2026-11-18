@@ -326,3 +326,18 @@ describe('DM retries', () => {
     expect((await run({ kind: 'drift', read: 'r', findings: 1, lines: [], at: 't', delivered: true })).status).toBe(200);
   });
 });
+
+describe('report flag on notify', () => {
+  const reads = async () => { throw new Error('Proxmox refused'); };
+  it('marks findings as a report and never marks a failure', async () => {
+    const flags: Array<boolean | undefined> = [];
+    const mk = (read: () => Promise<DriftReads>) => ({
+      read,
+      notify: async (_m: string, o?: { report?: boolean }) => { flags.push(o?.report); },
+      log: () => {},
+      retryDelaysMs: [0],
+    });
+    await runDriftCheck(mk(reads));
+    expect(flags).toEqual([undefined]);
+  });
+});

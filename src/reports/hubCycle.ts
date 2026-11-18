@@ -39,6 +39,7 @@ export function cycleRecord(s: Snapshot, date: string): HubRecord | null {
     open: open.length,
     inProgress: open.filter((i) => i.stateGroup === 'started').length,
     needsPedro: open.filter((i) => i.labels.includes('needs-pedro')).length,
+    inReview: open.filter((i) => /review/i.test(i.stateName)).length,
     lost: ids.length - items.length,
     byRoute: { pedro: tally(pedro), ai: tally(ai), other: tally(other) },
     openItems: open.slice(0, LIST_CAP).map((i) => ({ seq: i.seq, name: clip(i.name, 80), state: i.stateName, labels: i.labels.filter((l) => [...PEDRO_LABELS, 'cloud'].includes(l)) })),

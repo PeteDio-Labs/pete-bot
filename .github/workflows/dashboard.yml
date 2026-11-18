@@ -1,0 +1,41 @@
+# Dashboard CI: typecheck, unit tests, build and the accessibility check for dashboard/.
+#
+# ⚠ THE A11Y STEP READS PAGES AND SAYS HOW MANY. test/a11y.ts exits non-zero when it examined too
+# little (fewer axe runs than expected), so a browser that never started cannot report a pass.
+# No Vault, no LAN and no deploy: this job reads only the repository, on a GitHub-hosted runner.
+name: dashboard
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['dashboard/**', '.github/workflows/dashboard.yml']
+  push:
+    branches: [main]
+    paths: ['dashboard/**', '.github/workflows/dashboard.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      - name: Bundle the API Lambda
+        run: |
+          bun run build:api
+          test -s api/dist/handler.mjs
+      - name: Accessibility (axe, WCAG 2.2 AA)
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: bun run test:a11y

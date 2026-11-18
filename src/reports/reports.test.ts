@@ -384,6 +384,55 @@ describe('ReportRunner', () => {
     await r.tick();
     expect(sent.length).toBeGreaterThan(0);
   });
+  it('keeps a finished report for the dashboard and sends no DM when the DMs are off', async () => {
+    const sent: string[] = [];
+    const kept: { name: string; text: string }[] = [];
+    // A Plane that reads cleanly, so no report is INCOMPLETE and none has a reason to DM.
+    const plane = {
+      read: async () => ({ ok: true as const, items: [], states: 0, labels: 0 }),
+      lastComment: async () => null,
+      cycles: async () => ({ ok: true as const, current: null, previous: null, next: null, upcoming: [], dated: 0, undated: 0 }),
+      createItem: async () => ({ status: 'exists' as const }),
+    };
+    const r = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec), true) });
+    await r.tick();
+    expect(sent.filter((t) => !t.includes('INCOMPLETE'))).toEqual([]);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept[0]!.text.length).toBeGreaterThan(0);
+    expect(r.status().last.morning?.detail).toContain('kept for the dashboard');
+    expect(r.status().last.morning?.where).toBe('dashboard');
+  });
+  it('sends the DM when a report cannot be kept, so quiet never loses one', async () => {
+    const sent: string[] = [];
+    const notKept = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: () => false });
+    await notKept.tick();
+    expect(sent.length).toBeGreaterThan(0);
+    const throwing: string[] = [];
+    const r2 = new ReportRunner({ settings: settings(dir()), github: fakeGh(), plane: null, sender: { send: async (t) => void throwing.push(t) }, log, now: () => AT, dm: false, keep: () => { throw new Error('disk full'); } });
+    await r2.tick();
+    expect(throwing.length).toBeGreaterThan(0);
+  });
+  it('sends an INCOMPLETE report as a DM even when it is kept', async () => {
+    const sent: string[] = [];
+    const kept: string[] = [];
+    const gh = fakeGh();
+    // A read that fails leaves the report marked INCOMPLETE; GitHub failing for one repo is enough.
+    const base = gh.get.bind(gh);
+    gh.get = async (...a: Parameters<typeof base>) => { if (String(a[0]).includes('pulls')) throw new Error('HTTP 502'); return base(...a); };
+    const r = new ReportRunner({ settings: settings(dir()), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: (rec) => (kept.push(rec.name), true) });
+    await r.tick();
+    expect(r.status().last.morning?.incomplete).toBe(true);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(sent.some((t) => t.includes('INCOMPLETE'))).toBe(true);
+  });
+  it('still sends a failed report as a DM when the DMs are off', async () => {
+    const sent: string[] = [];
+    const gh = fakeGh();
+    gh.get = async () => { throw new Error('HTTP 401'); };
+    const r = new ReportRunner({ settings: settings(dir()), github: gh, plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT, dm: false, keep: () => true });
+    await r.tick();
+    expect(sent[0]).toContain('report failed');
+  });
   it('reads Plane as not read when no key is set, and says so in the report', async () => {
     const sent: string[] = [];
     const r = new ReportRunner({ settings: settings(dir()), github: fakeGh({ open: [rawPr(1)] }), plane: null, sender: { send: async (t) => void sent.push(t) }, log, now: () => AT });
@@ -423,5 +472,17 @@ describe('incompleteReason, redaction and caps', () => {
     const { incompleteReason } = await import('./runner.js');
     const text = ['**Not checked**', '- a', '- b', '- c', '- … 2 more'].join('\n');
     expect(incompleteReason(text)).toBe('a; b (+1 more)');
+  });
+});
+
+describe('driftRecordId', () => {
+  it('two runs in the same minute get different ids that fit the hub id format', async () => {
+    const { driftRecordId } = await import('./index.js');
+    const at = new Date('2026-11-17T11:15:30Z');
+    const a = driftRecordId(at, () => 0.1);
+    const b = driftRecordId(at, () => 0.7);
+    expect(a).not.toBe(b);
+    for (const id of [a, b]) expect(id).toMatch(/^\d{4}-\d{2}-\d{2}-[a-z0-9]{1,16}$/);
+    expect(a.startsWith('2026-11-17-1115')).toBe(true);
   });
 });

@@ -25,12 +25,18 @@ import { config } from '../config.js';
 import { logger } from '../utils/index.js';
 import { createAlertHandler } from './routes/alert.js';
 import { createNotifyHandler } from './routes/notify.js';
+import { keepNotifyReport, reportsDm } from '../reports/index.js';
 import { codexReviewHandler } from './routes/codexReview.js';
 import { size as openIncidents, heldCount } from './alertStore.js';
 import { deskHealth } from '../desk/index.js';
 import { reportsHealth, weeklyHealth } from '../reports/index.js';
 
 let server: Server | null = null;
+
+/** REPORTS_DM=on keeps every report in the DMs, drift included. */
+function reportsDmOn(): boolean {
+  return reportsDm(process.env.REPORTS_DM);
+}
 
 export function createApp(client: Client): Express {
   const app = express();
@@ -72,7 +78,7 @@ export function createApp(client: Client): Express {
   app.post('/v1/alert', createAlertHandler(client));
 
   // ── Free-text notify, same bearer as /v1/alert (PET-579) ─────────
-  app.post('/v1/notify', createNotifyHandler(client));
+  app.post('/v1/notify', createNotifyHandler(client, reportsDmOn() ? undefined : keepNotifyReport));
 
   // ── Second-opinion Codex review for a thread, via lab-agent ──────
   app.post('/v1/codex-review', codexReviewHandler());

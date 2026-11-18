@@ -144,7 +144,12 @@ export function createAlertHandler(
   /** Monitors whose deadline DM is in flight, with a promise that settles when the attempt ends. */
   const announcing = new Map<string, Promise<void>>();
 
-  /** The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed. */
+  /**
+   * The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed.
+   *
+   * Triage is not wired into this path yet. A hint edited in after the DM has to be serialised with every heartbeat
+   * edit of the same batch and kept inside the embed budget on every later render; that design ships with its own PR.
+   */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
     const { batch, action } = recordDown(monitor, { since });
     if (note) setNote(batch.id, monitor, note);
