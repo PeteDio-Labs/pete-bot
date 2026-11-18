@@ -10,7 +10,7 @@ describe('CORS on /api/dashboard', () => {
   afterEach(() => dir && rmSync(dir, { recursive: true, force: true }));
   async function call(method: string, origin: string | null, ok = true) {
     dir = mkdtempSync(join(tmpdir(), 'cors-'));
-    const app = createDashboardApp({ store: new WeekStore(dir), verify: async () => (ok ? { ok: true, email: 'p@x.dev' } : { ok: false, reason: 'x' }) });
+    const app = createDashboardApp({ store: new WeekStore(dir), services: async () => [], verify: async () => (ok ? { ok: true, email: 'p@x.dev' } : { ok: false, reason: 'x' }) });
     const server = app.listen(0);
     try {
       const port = (server.address() as { port: number }).port;
