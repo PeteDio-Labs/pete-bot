@@ -243,3 +243,12 @@ describe('charts with no data to draw', () => {
     }
   });
 });
+
+describe('httpFeed sign-in hint', () => {
+  test('sends credentials and names the origin to sign in to when a cross-origin read fails', async () => {
+    let init: RequestInit | undefined;
+    const f = httpFeed('https://reports.example.test/api/dashboard', null, (async (_u: string, i?: RequestInit) => { init = i; throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch);
+    await expect(f.load()).rejects.toThrow('open https://reports.example.test once to sign in');
+    expect(init?.credentials).toBe('include');
+  });
+});
