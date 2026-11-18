@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'bun:test';
 import request from 'supertest';
 import { createApp } from '../index.js';
-import { reset, heldCount, activeBatches, size } from '../alertStore.js';
+import { reset, heldCount, activeBatches } from '../alertStore.js';
 import { config } from '../../config.js';
 import { parseWindows } from '../decider.js';
 import { resetBaseline } from '../baseline.js';
@@ -650,7 +650,7 @@ describe('a held DOWN when Discord is unavailable', () => {
   });
 });
 
-// ── Qwen triage adds a hint and never gates the DM ───────────────────────────
+// ── Qwen triage adds a hint after the DM and never gates it ──────────────────
 describe('triage on a new DOWN', () => {
   beforeEach(() => {
     config.alerts.maintenanceWindows = [];
@@ -660,100 +660,98 @@ describe('triage on a new DOWN', () => {
   });
   afterEach(() => reset());
 
-  async function post(triage: unknown) {
+  const wait = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+  async function app(triage: unknown) {
     const express = (await import('express')).default;
     const { createAlertHandler } = await import('./alert.js');
     const d = fakeDiscord();
-    const app = express();
-    app.use(express.json());
-    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
-    const res = await request(app)
-      .post('/v1/alert')
-      .set('authorization', `Bearer ${TOKEN}`)
-      .send({ heartbeat: { status: 0, msg: 'vzdump failed' }, monitor: { name: 'plex-backup' } });
-    return { res, d };
+    const a = express();
+    a.use(express.json());
+    a.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
+    const send = (status: number, name = 'plex-backup') =>
+      request(a).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send({ heartbeat: { status, msg: 'vzdump failed' }, monitor: { name } }).then((r) => r);
+    return { d, send };
   }
 
-  it('adds the step when Qwen says the owner must act', async () => {
-    const { res, d } = await post(async () => ({ act: true, why: 'the backup job failed', step: 'The vzdump job needs another run' }));
-    expect(res.status).toBe(200);
-    expect(JSON.stringify(d.send.mock.calls[0])).toContain('The vzdump job needs another run');
-    expect(JSON.stringify(d.send.mock.calls[0])).toContain('unverified');
-  });
-
-  it('sends the plain DM when Qwen says no action', async () => {
-    const { res, d } = await post(async () => ({ act: false, why: 'blip', step: '' }));
+  it('sends the plain DM at once, then edits the step in when Qwen says the owner must act', async () => {
+    const { d, send } = await app(async () => ({ act: true, why: 'the backup job failed', step: 'The vzdump job needs another run' }));
+    const res = await send(0);
     expect(res.status).toBe(200);
     expect(JSON.stringify(d.send.mock.calls[0])).not.toContain('unverified');
+    await wait();
+    expect(JSON.stringify(d.edit.mock.calls.at(-1))).toContain('The vzdump job needs another run');
+    expect(JSON.stringify(d.edit.mock.calls.at(-1))).toContain('unverified');
   });
 
-  it('sends the plain DM when Qwen throws', async () => {
-    const { res, d } = await post(async () => {
-      throw new Error('ollama down');
+  it('does not wait for a slow model before answering Kuma', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { d, send } = await app(async () => {
+      await gate;
+      return { act: true, why: 'w', step: 'a step' };
     });
-    expect(res.status).toBe(200);
+    const res = await send(0);
+    expect(res.body.action).toBe('sent');
     expect(d.send).toHaveBeenCalledTimes(1);
+    release();
+    await wait();
   });
 
-  it('holds an UP that arrives during triage, so the recovery is not sent as an orphan', async () => {
-    const express = (await import('express')).default;
-    const { createAlertHandler } = await import('./alert.js');
-    const d = fakeDiscord();
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    const triage = async () => {
-      await gate;
-      return { act: true, why: 'w', step: 'a step' };
-    };
-    const app = express();
-    app.use(express.json());
-    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
-    const send = (status: number) =>
-      request(app).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send({ heartbeat: { status, msg: 'm' }, monitor: { name: 'plex-backup' } });
-    const down = send(0).then((r) => r);
-    await new Promise((r) => setTimeout(r, 50));
-    const up = send(1).then((r) => r);
-    await new Promise((r) => setTimeout(r, 50));
-    // The UP is still waiting: nothing has been sent for it.
-    expect(d.send).not.toHaveBeenCalled();
-    release();
-    const [dr, ur] = await Promise.all([down, up]);
-    expect(dr.body.action).toBe('sent');
-    // The recovery edits the DOWN's message, not a new orphan DM.
-    expect(ur.body.action).toBe('edited');
-    expect(d.send).toHaveBeenCalledTimes(1);
+  it('leaves the plain DM alone when Qwen says no action, throws, or answers off-format', async () => {
+    for (const t of [async () => ({ act: false, why: 'blip', step: '' }), async () => { throw new Error('ollama down'); }, async () => null]) {
+      reset();
+      const { d, send } = await app(t);
+      expect((await send(0)).status).toBe(200);
+      await wait();
+      expect(d.send).toHaveBeenCalledTimes(1);
+      expect(d.edit).not.toHaveBeenCalled();
+    }
   });
 
-  it('serialises a repeated DOWN with the first triage, so a recovery leaves no red incident behind', async () => {
-    const express = (await import('express')).default;
-    const { createAlertHandler } = await import('./alert.js');
-    const d = fakeDiscord();
+  it('adds no hint when the monitor recovered while the model thought', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    let calls = 0;
-    const triage = async () => {
-      calls++;
+    const { d, send } = await app(async () => {
       await gate;
       return { act: true, why: 'w', step: 'a step' };
-    };
-    const app = express();
-    app.use(express.json());
-    app.post('/v1/alert', createAlertHandler(d.client as never, undefined, 20, triage as never));
-    const send = (status: number) =>
-      request(app).post('/v1/alert').set('authorization', `Bearer ${TOKEN}`).send({ heartbeat: { status, msg: 'm' }, monitor: { name: 'plex-backup' } }).then((r) => r);
-    const first = send(0);
-    await new Promise((r) => setTimeout(r, 40));
-    const second = send(0);
-    await new Promise((r) => setTimeout(r, 40));
-    const up = send(1);
-    await new Promise((r) => setTimeout(r, 40));
+    });
+    await send(0);
+    const editsAfterDown = d.edit.mock.calls.length;
+    await send(1);
+    const editsAfterUp = d.edit.mock.calls.length;
     release();
-    const [a, b, c] = await Promise.all([first, second, up]);
-    expect(calls).toBe(1);
+    await wait();
+    expect(editsAfterUp).toBeGreaterThan(editsAfterDown);
+    expect(d.edit.mock.calls.length).toBe(editsAfterUp);
+  });
+
+  it('keeps event order: a DOWN, an UP and a second DOWN behave as if triage were not there', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { d, send } = await app(async () => {
+      await gate;
+      return { act: true, why: 'w', step: 'a step' };
+    });
+    const a = await send(0);
+    const u = await send(1);
+    const b = await send(0);
+    release();
+    await wait();
     expect(a.body.action).toBe('sent');
-    expect(b.body.action).toBe('edited');
-    expect(c.body.action).toBe('edited');
-    expect(d.send).toHaveBeenCalledTimes(1);
-    expect(size()).toBe(0);
+    expect(u.body.action).toBe('edited');
+    expect(b.body.ok).toBe(true);
+    expect(d.send.mock.calls.length + d.edit.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('skips a hint that would push the batch embed past the budget', async () => {
+    const big = async () => ({ act: true, why: 'w'.repeat(200), step: 's'.repeat(200) });
+    const { d, send } = await app(big);
+    for (let i = 0; i < 20; i++) await send(0, `monitor-${i}`);
+    await wait(200);
+    for (const call of d.edit.mock.calls) {
+      const desc = (call[0] as { embeds: { data: { description?: string } }[] }).embeds[0]!.data.description ?? '';
+      expect(desc.length).toBeLessThan(4096);
+    }
   });
 });
