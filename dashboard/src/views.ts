@@ -287,7 +287,7 @@ export function healthBlocks(d: DashboardData, now: number): string[] {
   if (b && b.guests.length) {
     const word = { ok: 'IN TIME', warn: 'LATE', down: 'MISSING' } as const;
     const rank = { down: 0, warn: 1, ok: 2 } as const;
-    const rows = [...b.guests].sort((x, y) => rank[backupState(x, now)] - rank[backupState(y, now)]).map((g) => row({ leadTone: backupsFresh(d, now) ? ({ ok: 'blue', warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist', lead: backupsFresh(d, now) ? word[backupState(g, now)] : 'UNKNOWN', title: g.guest, sub: g.detail || (g.lastGood ? 'The nightly backup finished.' : 'No good run is on record.'), aside: g.lastGood ? ageText(g.lastGood, now) : 'no good run', dot: backupsFresh(d, now) ? ({ ok: undefined, warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist' }));
+    const rows = [...b.guests].sort((x, y) => rank[backupState(x, now)] - rank[backupState(y, now)]).map((g) => row({ leadTone: backupsFresh(d, now) ? ({ ok: 'blue', warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist', lead: backupsFresh(d, now) ? word[backupState(g, now)] : 'UNKNOWN', title: g.guest, sub: g.detail || (!backupsFresh(d, now) ? 'The backup report is out of date, so this record may have changed.' : g.lastGood ? `Last good run ${ageText(g.lastGood, now)}.` : 'No good run is on record.'), aside: g.lastGood ? ageText(g.lastGood, now) : 'no good run', dot: backupsFresh(d, now) ? ({ ok: undefined, warn: 'yellow', down: 'red' } as const)[backupState(g, now)] : 'mist' }));
     blocks.push(section(num(), 'Last good backup per guest', list(rows, { label: 'Last good backup per guest' })));
   }
   const c = d.cve;
@@ -382,7 +382,7 @@ export function servicesRecord(d: DashboardData, now: number): string {
   const ran = drills.filter((x) => x.result !== 'not injected').length;
   return list([
     disclosure({ id: 'svc-drills', lead: 'DRILL', title: 'Drill history', sub: 'Practice failovers: how long detection, the flip and recovery took.', note: d.history ? `${ran} run` : 'not read', native: true, panel: drillChart(d) }),
-    disclosure({ id: 'svc-uptime', lead: 'UPTIME', title: 'Uptime per service', sub: 'A strip of recent probe readings for each service.', note: `${d.services.length} read`, native: true, panel: uptimeStrips(d) }),
+    disclosure({ id: 'svc-uptime', lead: 'UPTIME', title: 'Uptime per service', sub: 'A strip of recent probe readings for each service.', note: `${d.services.length} ${d.services.length === 1 ? 'service' : 'services'}`, native: true, panel: uptimeStrips(d) }),
     disclosure({ id: 'svc-watchdog', lead: 'PROBE', title: 'Watchdog readings', sub: 'How many probes read healthy, down and unknown.', note: `${d.services.length * 2} probes`, native: true, panel: card(watchdogMeters(d, now)) }),
   ], { label: 'Drills, uptime and watchdog readings' });
 }
@@ -422,7 +422,7 @@ export function workBlocks(d: DashboardData, now: number): string[] {
       { label: 'Cycle progress, done of total' },
     ) + readout(when, { onPaper: true, label: 'Time' }),
   );
-  const itemRow = (i: (typeof det.items)[number]): string => row({ lead: `PET-${i.seq}`, title: i.name, sub: i.needsPedro ? 'Needs you to decide.' : 'In the cycle.', aside: i.state, dot: i.needsPedro ? 'red' : undefined });
+  const itemRow = (i: (typeof det.items)[number]): string => row({ lead: `PET-${i.seq}`, title: i.name, sub: i.needsPedro ? 'Carries the needs-pedro label.' : 'No needs-pedro label.', aside: i.state, dot: i.needsPedro ? 'red' : undefined });
   const others = det.items.filter((i) => !i.needsPedro);
   const shown = det.items.length < pl.open ? ` The lists show ${det.items.length} of ${pl.open} open items.` : '';
   const record = [
