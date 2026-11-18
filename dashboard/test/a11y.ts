@@ -154,7 +154,7 @@ try {
       const ar = await off.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
       runs++;
       for (const v of ar.violations) fail.push(`secrets off @${w}: ${v.id} (${v.nodes.length}): ${v.help}; first ${v.nodes[0].target.join(' ')}`.slice(0, 300));
-      await off.getByRole('link', { name: 'Back to the dashboard' }).click();
+      await off.getByRole('link', { name: 'Back to dashboard' }).click();
       await off.waitForFunction(() => document.getElementById('main')!.dataset.view === 'tabs');
       if (!(await off.locator('#now').isVisible())) fail.push(`secrets @${w}: Back did not return to the Now tab`);
       await off.close();

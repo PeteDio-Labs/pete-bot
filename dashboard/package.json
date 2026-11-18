@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "preact": "11.2.0",
-    "toonish-ui": "github:PeteDio-Labs/toonish-ui#v0.6.0"
+    "toonish-ui": "github:PeteDio-Labs/toonish-ui#8715aa610ec68122fad479e9cc8def561997aaee"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.5",
