@@ -36,7 +36,11 @@ describe('keysVerdict', () => {
     expect(text(keysVerdict(list([row(), row({ name: 'b', daysLeft: 30 })])))).toContain('expires in 30 days');
   });
   it('escapes a name', () => {
-    expect(keysVerdict(list([row({ name: '<b>x', expired: true })]))).not.toContain('<b>x');
+    const h = keysVerdict(list([row({ name: '<b>x', expired: true })]));
+    expect(h).not.toContain('<b>x');
+    expect(h).toContain('&lt;b&gt;x');
+    expect(h).not.toContain('&amp;lt;');
+    expect(keysVerdict(null, 'it\'s down')).toContain('it&#39;s down');
   });
 });
 

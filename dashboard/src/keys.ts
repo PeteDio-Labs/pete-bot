@@ -4,7 +4,7 @@
  * The client talks to pete-bot's /api/keys (src/keys/routes.ts), which starts the keys.yml workflow in petedio-iac. Every
  * change waits on the lab-write tap on GitHub, so a call here only asks.
  */
-import { esc, verdict } from 'toonish-ui/markup';
+import { verdict } from 'toonish-ui/markup';
 
 export const KEY_ACTIONS = ['list', 'sync', 'rotate', 'renew', 'reissue'] as const;
 export type KeyAction = (typeof KEY_ACTIONS)[number];
@@ -119,17 +119,17 @@ export function keyLine(r: KeyRow): string {
   return `Owner ${r.owner || 'unknown'}. Expires ${exp} (${left}).${r.inCallers ? '' : ' Not in git: Apply changes revokes it.'}`;
 }
 
-/** The answer the screen leads with. A list that was not read is unknown, never all clear. */
+/** The answer the screen leads with. A list that was not read is unknown, never all clear. `verdict()` escapes its text, so nothing is escaped here. */
 export function keysVerdict(list: KeyList | null, readError: string | null = null): string {
-  if (!list) return verdict({ state: 'unknown', title: 'The key list was not read', body: readError ? esc(readError) : 'So it is unknown which keys are valid.' });
+  if (!list) return verdict({ state: 'unknown', title: 'The key list was not read', body: readError ?? 'So it is unknown which keys are valid.' });
   const rows = list.rows;
   const expired = rows.filter((r) => r.expired);
   const soon = rows.filter((r) => !r.expired && r.renewSoon);
   const pending = rows.filter((r) => !r.hasToken || !r.inCallers);
   const names = (xs: KeyRow[]): string => xs.map((r) => r.name).join(', ');
-  if (expired.length) return verdict({ state: 'down', stateText: 'Needs you', title: `${plural(expired.length, 'key')} expired`, body: `${esc(names(expired))}. Reissue ${expired.length === 1 ? 'it' : 'them'} so the agent works again.` });
-  if (soon.length) return verdict({ state: 'warn', stateText: 'Needs you soon', title: `${plural(soon.length, 'key')} expire${soon.length === 1 ? 's' : ''} within 21 days`, body: `${esc(names(soon))}. Renew ${soon.length === 1 ? 'it' : 'them'} before then.` });
-  if (pending.length) return verdict({ state: 'warn', stateText: 'Changes waiting', title: `${plural(pending.length, 'key')} differ${pending.length === 1 ? 's' : ''} from the list in git`, body: `${esc(names(pending))}. Apply changes to make Cloudflare and Vault match.` });
+  if (expired.length) return verdict({ state: 'down', stateText: 'Needs you', title: `${plural(expired.length, 'key')} expired`, body: `${names(expired)}. Reissue ${expired.length === 1 ? 'it' : 'them'} so the agent works again.` });
+  if (soon.length) return verdict({ state: 'warn', stateText: 'Needs you soon', title: `${plural(soon.length, 'key')} expire${soon.length === 1 ? 's' : ''} within 21 days`, body: `${names(soon)}. Renew ${soon.length === 1 ? 'it' : 'them'} before then.` });
+  if (pending.length) return verdict({ state: 'warn', stateText: 'Changes waiting', title: `${plural(pending.length, 'key')} differ${pending.length === 1 ? 's' : ''} from the list in git`, body: `${names(pending)}. Apply changes to make Cloudflare and Vault match.` });
   if (list.unparsed > 0) return verdict({ state: 'unknown', title: `${plural(list.unparsed, 'line')} of the key list could not be read`, body: 'So it is unknown whether every key is valid.' });
   if (rows.length === 0) return verdict({ state: 'unknown', title: 'No keys were listed', body: 'The run finished but listed no key, so it is unknown whether any key exists.' });
   const next = rows.reduce((m, r) => (r.daysLeft !== null && (m === null || r.daysLeft < m) ? r.daysLeft : m), null as number | null);
