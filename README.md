@@ -502,6 +502,8 @@ To turn it on, set `REPORTS_MODE=on` and these variables:
 | `WEEKLY_DASH_HOST`, `WEEKLY_DASH_PORT` | Listener address. Default `127.0.0.1:3018`. |
 | `WEEKLY_OLLAMA_URL` | Default `http://192.168.50.246:11434`. |
 
+Each record also carries the week's stack changes: the rows dated inside the week in the vault's `Systems/stack-changelog.md`, read through the desk's GitHub App (`src/reports/changelog.ts`). The dashboard lists them under **Stack changes**. A failed read stores the reason and shows "could not be read", never "no change recorded", and the hourly rebuild retries it.
+
 If Qwen cannot answer, the week keeps its count and shows "Summary not generated" with the reason. `/health` on the bot reports `weekly`, and `/health` on port 3018 reports the stored weeks and the last attempt.
 
 ## Secrets API (dashboard)
