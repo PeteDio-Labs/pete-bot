@@ -33,6 +33,9 @@ jobs:
         env:
           # Unset, the build reads the fixture. Set it to the real feed once its CORS rule is applied (petedio-iac#752).
           DASHBOARD_FEED: ${{ vars.STAGING_DASHBOARD_FEED }}
+          # The page names its build: the environment and the short commit hash.
+          BUILD_ENV: staging
+          BUILD_SHA: ${{ github.sha }}
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build
