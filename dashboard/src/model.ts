@@ -196,12 +196,12 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
   const services: ServiceRow[] = [];
   let droppedServices = 0;
   for (const s of arr('services')) {
-    if (!isObj(s) || !str(s.name) || (s.active !== 'lab' && s.active !== 'cloud')) {
+    if (!isObj(s) || !str(s.name) || (s.active !== 'lab' && s.active !== 'cloud') || !['stateless', 'replicated', 'snapshot'].includes(String(s.dataClass))) {
       problems.push('a service row was unreadable');
       droppedServices++;
       continue;
     }
-    const dc = s.dataClass === 'replicated' || s.dataClass === 'snapshot' ? s.dataClass : 'stateless';
+    const dc = s.dataClass as ServiceRow['dataClass'];
     services.push({ name: str(s.name, 60), hostname: str(s.hostname, 120), active: s.active, dataClass: dc, pinned: s.pinned === true, auto: s.auto === true, lab: side(s.lab), cloud: side(s.cloud) });
   }
   const tr = o.triage;

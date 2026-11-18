@@ -162,7 +162,7 @@ describe('dropped services and capped CVE detail', () => {
     const { tiles, watchdogMeters } = await import('../src/views.ts');
     const now = Date.parse('2026-11-16T22:00:00Z');
     const fresh = { ok: true, checkedAt: '2026-11-16T21:59:30Z', detail: '', lagS: null };
-    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', needs: [], alerts: [], services: [{ name: 'a', hostname: 'h', active: 'lab', lab: fresh, cloud: fresh }, { name: 'b', active: 'sideways' }] });
+    const { data } = parseDashboard({ generatedAt: '2026-11-16T22:00:00Z', needs: [], alerts: [], services: [{ name: 'a', hostname: 'h', active: 'lab', dataClass: 'stateless', lab: fresh, cloud: fresh }, { name: 'b', active: 'sideways' }] });
     expect(data.droppedServices).toBe(1);
     expect(tiles(data, now)).not.toContain('2 of 2 healthy');
     expect(watchdogMeters(data, now)).toContain('1 service row unreadable');
@@ -220,5 +220,14 @@ describe('summary counters that cannot be read stay unknown', () => {
     const { nowView } = await import('../src/views.ts');
     const { data } = parseDashboard({ generatedAt: '2026-11-18T00:00:00Z', services: [], needs: [] });
     expect(nowView(data, Date.parse('2026-11-18T00:00:30Z'))).not.toContain('Nothing needs you');
+  });
+});
+
+describe('a service whose data class cannot be read', () => {
+  test('is dropped and counted, never treated as stateless', () => {
+    const { data, problems } = parseDashboard({ generatedAt: 'x', needs: [], alerts: [], services: [{ name: 'a', hostname: 'h', active: 'lab' }, { name: 'b', hostname: 'h', active: 'lab', dataClass: 'sideways' }] });
+    expect(data.services).toEqual([]);
+    expect(data.droppedServices).toBe(2);
+    expect(problems.filter((x) => x === 'a service row was unreadable').length).toBe(2);
   });
 });

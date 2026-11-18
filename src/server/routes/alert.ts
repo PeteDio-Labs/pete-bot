@@ -37,13 +37,11 @@ import {
   markHoldUp,
   activeHolds,
   setNote,
-  activeBatches,
   type AlertBatch,
 } from '../alertStore.js';
 import { alertDms, alertBatchesOpen, alertDecisions } from '../../metrics/index.js';
 import { scheduleDecider, type MaintenanceDecider } from '../decider.js';
 import { addSample, deadlineMs, stats } from '../baseline.js';
-import { triagerFromEnv, triageNote, type Triager } from '../triage.js';
 
 // Kuma sends more than this; only these are depended on, and unknown keys are
 // ignored rather than rejected so a Kuma upgrade cannot break alerting.
@@ -76,9 +74,6 @@ function humanise(seconds: number): string {
  * several are listed, so a node reboot reads as one event with eight lines rather than
  * eight events.
  */
-/** Under Discord's 4096-character embed description, with room for the probe text and footer. */
-const EMBED_BUDGET = 3600;
-
 function renderBatch(batch: AlertBatch, detail: string, now = Date.now()): Embed {
   const entries = Object.entries(batch.monitors).sort(([a], [b]) => a.localeCompare(b));
   const stillDown = entries.filter(([, state]) => state.recoveredAt === undefined);
@@ -144,8 +139,6 @@ export function createAlertHandler(
   decider: MaintenanceDecider = scheduleDecider(config.alerts.maintenanceWindows),
   /** How long to wait before trying a held DOWN's DM again. */
   retryMs = 30_000,
-  /** Adds a "Needs you" line to a new DOWN. Null is off. It never decides whether the DM goes. */
-  triage: Triager | null = triagerFromEnv(),
 ) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Monitors whose deadline DM is in flight, with a promise that settles when the attempt ends. */
@@ -153,54 +146,23 @@ export function createAlertHandler(
   /**
    * The DM path for a DOWN, shared by a normal DOWN and a held one whose deadline passed.
    *
-   * ⚠ THE DM GOES FIRST, AND TRIAGE EDITS IT AFTER. Triage never sits between a Kuma event and its alert, so it cannot
-   * reorder a DOWN, an UP and a repeated DOWN, and a slow or dead model delays nothing. The hint arrives as an edit of
-   * the message just sent, and only if the outage is still open and the embed still fits Discord's limit.
+   * Triage is not wired into this path yet. A hint edited in after the DM has to be serialised with every heartbeat
+   * edit of the same batch and kept inside the embed budget on every later render; that design ships with its own PR.
    */
   async function sendDown(dm: DMChannel, monitor: string, detail: string, note?: string, since?: number) {
-    const fresh = !isInBatch(monitor);
     const { batch, action } = recordDown(monitor, { since });
     if (note) setNote(batch.id, monitor, note);
     const embed = renderBatch(batch, detail);
     if (action === 'edit' && batch.messageId && (await editInPlace(dm, batch.messageId, embed))) {
       alertDms.inc({ action: 'edited', status: 'success' });
       alertBatchesOpen.set(size());
-      if (fresh) void addHint(dm, batch.id, monitor, detail);
       return { action: 'edited' as const, messageId: batch.messageId };
     }
     const sent = await dm.send({ embeds: [embed] });
     attachMessage(batch.id, dm.id, sent.id);
     alertDms.inc({ action: 'sent', status: 'success' });
     alertBatchesOpen.set(size());
-    if (fresh) void addHint(dm, batch.id, monitor, detail);
     return { action: 'sent' as const, messageId: sent.id };
-  }
-
-  /** Ask the model after the DM is out, then edit the hint in. Every failure leaves the plain DM as it is. */
-  async function addHint(dm: DMChannel, batchId: string, monitor: string, detail: string): Promise<void> {
-    if (!triage) return;
-    try {
-      const result = await triage({ monitor, detail });
-      const hint = triageNote(result);
-      logger.info(`[alert] triage monitor=${monitor} result=${result === null ? 'unreadable_or_skipped' : result.act ? 'act' : 'no_action'}`);
-      if (!hint) return;
-      const batch = activeBatches().find((b) => b.id === batchId);
-      const st = batch?.monitors[monitor];
-      // The outage ended, or the message is gone, while the model thought: there is nothing left to annotate.
-      if (!batch || !batch.messageId || !st || st.recoveredAt !== undefined) return;
-      const before = st.note;
-      setNote(batchId, monitor, [before, hint].filter(Boolean).join('\n'));
-      const embed = renderBatch(batch, detail);
-      // ⚠ A hint must never push the embed past Discord's 4096-character description, which would fail every later edit.
-      if ((embed.data.description?.length ?? 0) > EMBED_BUDGET) {
-        setNote(batchId, monitor, before ?? '');
-        logger.warn(`[alert] triage hint for ${monitor} skipped: the batch embed would pass ${EMBED_BUDGET} characters`);
-        return;
-      }
-      if (!(await editInPlace(dm, batch.messageId, embed))) setNote(batchId, monitor, before ?? '');
-    } catch (err) {
-      logger.warn(`[alert] triage hint for ${monitor} failed, the plain DM stands: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 
   /**

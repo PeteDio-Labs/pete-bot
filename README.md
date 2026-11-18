@@ -95,12 +95,11 @@ write, **Checks** and **Commit statuses** read, and **Metadata** read.
 
 ## Triage on Kuma alerts
 
-When `TRIAGE_OLLAMA_URL` names an Ollama server, a new DOWN is sent as the plain DM at once, then asks Qwen
-(`TRIAGE_MODEL`, default `qwen3:8b`, `TRIAGE_TIMEOUT_MS` default 4000, clamped to 500 to 15000) whether you must act. If it
-says yes, pete-bot edits the DM to add a `Suggested by the local model (unverified):` line with the one step and a `Why:` line. If it says no,
-fails, times out or answers off-format, the DM is the plain Kuma DM. Triage never decides whether a
-DOWN is sent and never delays it. The hint is skipped when the monitor has recovered by then, or when it would push the batch past Discord's embed limit. An edit of an open incident does not ask again. The log line `triage monitor=… result=`
-says `act`, `no_action` or `unreadable_or_skipped`; a failure logs a warning.
+`src/server/triage.ts` holds the local-model triage: it asks an Ollama server (`TRIAGE_OLLAMA_URL`, `TRIAGE_MODEL`
+default `qwen3:8b`, `TRIAGE_TIMEOUT_MS` default 4000, clamped to 500 to 15000) whether you must act, strips links,
+markdown and mentions from the reply, and caps each field. **It is not wired into `/v1/alert` yet.** A hint added after
+the DM has to be serialised with every heartbeat edit of the same batch and kept inside Discord's embed limit on every
+later render, and that design ships in its own PR. Until then a Kuma DOWN is the plain DM.
 
 ## The scheduled reports (PET-701)
 
