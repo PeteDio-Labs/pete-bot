@@ -87,7 +87,7 @@ export function actItems(d: DashboardData, now: number): ActItem[] {
     const side = s.active === 'lab' ? s.lab : s.cloud;
     if (healthOf(side, now) !== 'down') continue;
     const can = switchState(s, now).allowed;
-    out.push({ state: 'down', kind: 'SERVICE', title: `${s.name} is down on ${s.active === 'lab' ? 'on-prem' : 'cloud'}, the side that serves`, why: side?.detail ? `The watchdog read: ${side.detail}.` : 'The watchdog reported it down.', step: can ? 'It can switch sides now.' : 'It cannot switch sides now. Services says why.', since: side?.checkedAt, button: tabLink('services') });
+    out.push({ state: 'down', kind: 'SERVICE', title: `${s.name} is down ${s.active === 'lab' ? 'in the Lab' : 'on cloud'}, the side that serves`, why: side?.detail ? `The watchdog read: ${side.detail}.` : 'The watchdog reported it down.', step: can ? 'It can switch sides now.' : 'It cannot switch sides now. Services says why.', since: side?.checkedAt, button: tabLink('services') });
   }
   if (needsRead) for (const n of d.needs) out.push({ state: 'warn', kind: 'CARD', title: n.title, why: n.why || 'No reason was given.', step: n.step, since: n.since, button: labLink() });
   // A down alert that triage turned into a card is already above as that card, when the cards were read.
@@ -321,7 +321,7 @@ export function serviceCard(s: ServiceRow, now: number, canRequest: boolean, id:
   const sw = switchState(s, now);
   const can = sw.allowed && canRequest;
   const reason = !canRequest && sw.allowed ? 'Read-only feed: no switch from here.' : sw.reason;
-  const html = switchCard({ id, name: s.name, active: s.active, dataClass: s.dataClass, pinned: s.pinned, labState: healthOf(s.lab, now), cloudState: healthOf(s.cloud, now), canSwitch: can, reason, labels: { lab: 'On-prem', cloud: 'Cloud' } });
+  const html = switchCard({ id, name: s.name, active: s.active, dataClass: s.dataClass, pinned: s.pinned, labState: healthOf(s.lab, now), cloudState: healthOf(s.cloud, now), canSwitch: can, reason, labels: { lab: 'Lab', cloud: 'Cloud' } });
   return { html, to: sw.to, can };
 }
 
@@ -335,13 +335,13 @@ export function servicesVerdict(d: DashboardData, now: number): string {
   const ready = states.filter((x) => x.sw.allowed);
   const blocked = states.filter((x) => !x.sw.allowed);
   const servingDown = states.filter((x) => x.serving === 'down');
-  const pin = pinned ? ` ${plural(pinned, 'service is', 'services are')} pinned on-prem and ${pinned === 1 ? 'does' : 'do'} not move.` : '';
+  const pin = pinned ? ` ${plural(pinned, 'service is', 'services are')} pinned in the Lab and ${pinned === 1 ? 'does' : 'do'} not move.` : '';
   const why = blocked.length ? ` Blocked: ${blocked.map((x) => `${x.s.name} (${x.sw.reason.replace(/\.$/, '').replace(/\. .*$/, '')})`).join('; ')}.` : '';
   if (servingDown.length) {
     const canMove = servingDown.filter((x) => x.sw.allowed).map((x) => x.s.name);
     return verdict({ state: 'down', title: `${plural(servingDown.length, 'service is', 'services are')} down on the side that serves`, body: `${servingDown.map((x) => x.s.name).join(', ')}. ${canMove.length ? `Can move now: ${canMove.join(', ')}.` : 'None of them can move now.'}${why}${dropped}` });
   }
-  if (movable.length === 0) return verdict({ state: 'ok', stateText: 'Nothing to move', title: 'Every service is pinned on-prem', body: `No service is set up to fail over.${dropped}` });
+  if (movable.length === 0) return verdict({ state: 'ok', stateText: 'Nothing to move', title: 'Every service is pinned in the Lab', body: `No service is set up to fail over.${dropped}` });
   if (blocked.length === 0 && !dropped) return verdict({ state: 'ok', stateText: 'Ready', title: `Yes: ${movable.length === 1 ? 'the one movable service' : `all ${movable.length} movable services`} can switch`, body: `Each target side is fresh and healthy.${pin}` });
   const anyUnknown = blocked.some((x) => healthOf(x.sw.to === 'cloud' ? x.s.cloud : x.s.lab, now) === 'unknown') || !!dropped;
   if (ready.length === 0) return verdict({ state: anyUnknown ? 'unknown' : 'down', stateText: anyUnknown ? undefined : 'Not ready', title: 'No service can switch now', body: `${why.trim()}${pin}${dropped}` });

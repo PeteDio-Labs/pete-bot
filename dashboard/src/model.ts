@@ -50,7 +50,7 @@ export interface ServiceRow {
   hostname: string;
   active: Side;
   dataClass: 'stateless' | 'replicated' | 'snapshot';
-  /** True for services that must stay on-prem (Plex, the arr stack, qBittorrent). */
+  /** True for services that must stay in the Lab (Plex, the arr stack, qBittorrent). */
   pinned: boolean;
   auto: boolean;
   lab: SideStatus | null;
@@ -150,9 +150,9 @@ export function ageText(iso: string, now: number): string {
 /** Whether the switch for a service may be requested, and the reason it may not. */
 export function switchState(s: ServiceRow, now: number): { to: Side; allowed: boolean; reason: string } {
   const to: Side = s.active === 'lab' ? 'cloud' : 'lab';
-  if (s.pinned) return { to, allowed: false, reason: 'Pinned on-prem. This service does not move.' };
+  if (s.pinned) return { to, allowed: false, reason: 'Pinned in the Lab. This service does not move.' };
   const target = healthOf(to === 'cloud' ? s.cloud : s.lab, now);
-  if (target !== 'ok') return { to, allowed: false, reason: `The ${to === 'cloud' ? 'cloud' : 'on-prem'} side is ${target}. A switch needs it healthy first.` };
+  if (target !== 'ok') return { to, allowed: false, reason: `The ${to === 'cloud' ? 'cloud' : 'Lab'} side is ${target}. A switch needs it healthy first.` };
   if (s.dataClass === 'replicated') {
     const lag = (to === 'cloud' ? s.cloud : s.lab)?.lagS;
     if (lag === null || lag === undefined) return { to, allowed: false, reason: 'Replication lag is unknown, so the switch could lose data.' };
