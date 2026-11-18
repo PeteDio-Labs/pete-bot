@@ -2,7 +2,7 @@
 // Exits non-zero when a step fails or an output is missing, and says what it wrote.
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { TABBAR } from './src/app.tsx';
-import { masthead, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
+import { buildBadge, masthead, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
 const feed = process.env.DASHBOARD_FEED || '/fixtures/dashboard.json';
@@ -14,6 +14,10 @@ if (keysUrl && !/^\/[A-Za-z0-9._~\/-]*$/.test(keysUrl)) {
   console.error('build: DASHBOARD_KEYS must be a path on the same origin, such as /api/keys');
   process.exit(1);
 }
+// A staging build sets BUILD_ENV=staging and BUILD_SHA to the commit, and the page then names its build. A build with no BUILD_ENV, or
+// with `production`, draws nothing. The badge is decided here, at build time, so the page never guesses its environment from its URL.
+const buildEnv = process.env.BUILD_ENV ?? '';
+const buildSha = process.env.BUILD_SHA ?? '';
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
@@ -45,6 +49,7 @@ ${TABBAR}
 <div id="app"></div>
 <noscript><p>This dashboard needs JavaScript to read its feed.</p></noscript>
 </main>
+${buildBadge({ env: buildEnv, sha: buildSha })}
 <script type="module" src="/app.js"></script>
 </body>
 </html>
