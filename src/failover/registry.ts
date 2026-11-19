@@ -20,7 +20,7 @@ export interface RegistryEntry {
 
 export const REGISTRY: readonly RegistryEntry[] = [
   { name: 'dashboard-api', hostname: 'reports.pdlab.dev', dataClass: 'stateless', pinned: false, labUrl: 'http://127.0.0.1:3018/health' },
-  { name: 'authentik', hostname: 'auth.pdlab.dev', dataClass: 'snapshot', pinned: false, labUrl: 'https://auth.pdlab.dev/-/health/live/' },
+  { name: 'authentik', hostname: 'auth.pdlab.dev', dataClass: 'replicated', pinned: false, labUrl: 'https://auth.pdlab.dev/-/health/live/' },
   { name: 'tracerr', hostname: 'tracerr (237)', dataClass: 'snapshot', pinned: false },
   { name: 'plex', hostname: 'plex (CT 236, CT 244)', dataClass: 'snapshot', pinned: true },
   { name: 'arr stack', hostname: 'sonarr, radarr, prowlarr, bazarr', dataClass: 'snapshot', pinned: true },
