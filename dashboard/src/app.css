@@ -47,8 +47,8 @@
 }
 
 /* The Secrets screen is the app's own view: it replaces the tabs while the address is #secrets. */
-.dash-secrets[hidden] { display: none; }
-.dash-main[data-view="secrets"] > .toon-tabbar, .dash-main[data-view="secrets"] .toon-tabpanel { display: none; }
+.dash-flow[hidden] { display: none; }
+.dash-main[data-view]:not([data-view="tabs"]) > .toon-tabbar, .dash-main[data-view]:not([data-view="tabs"]) .toon-tabpanel { display: none; }
 .dash-keys { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
 .dash-key { display: grid; gap: .5rem; }
 .dash-key-name { font-size: 1.125rem; }
