@@ -127,6 +127,8 @@ export interface Attention {
   fact?: string;
   /** The service or guest, for the row's small picture. */
   subject?: string;
+  /** A line for the row, used in place of the first sentence of `why`. */
+  sub?: string;
   tab: Tab;
 }
 
@@ -175,7 +177,7 @@ const checksRead = (d: DashboardData): number => d.alerts.length + d.services.le
 
 // ---- Now: do I need to do anything? ----
 
-const LEAD: Record<Attention['kind'], string> = { SERVICE: 'Service', CARD: 'Action', ALERT: 'Alert', CVE: 'CVE', BACKUP: 'Backups', PLANE: 'Plane', UNREAD: 'Not read' };
+const LEAD: Record<Attention['kind'], string> = { SERVICE: 'Service', CARD: 'Action', ALERT: 'Alert', CVE: 'CVE', BACKUP: 'Backups', PLANE: 'Plane', UNREAD: 'Sources' };
 const STATE_WORD = { down: 'Wrong now', warn: 'Needs you', unknown: 'Not read' } as const;
 const DAY_MS = 86_400_000;
 const shortDate = (iso: string): string => new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -192,13 +194,11 @@ function cycleVisual(d: DashboardData, now: number): string {
   return cycle({ label: d.plane?.cycle || 'Cycle', done: det.done, total: det.total, day, days, from: shortDate(det.start), to: shortDate(det.end) });
 }
 
-/** The small picture at the end of a row: backup cells, a service's recent probes, or the cycle bar. */
+/** The small picture at the end of a row: backup cells, every probe, every alert, or the cycle bar. */
 function visualFor(a: Attention, d: DashboardData, now: number): string {
   if (a.kind === 'BACKUP' && d.backups?.guests.length) return cells({ label: 'Backups', cells: d.backups.guests.slice(0, 60).map((g) => (backupState(g, now) === 'ok' ? 'ok' : 'down')) });
-  if (a.kind === 'SERVICE' && a.subject) {
-    const u = d.history?.uptime[a.subject];
-    if (u?.length) return cells({ label: `${a.subject} probes`, cells: u.slice(-24).map((c) => c.state) });
-  }
+  if (a.kind === 'SERVICE' && d.services.length) return cells({ label: 'Probes', cells: d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]).slice(0, 60) });
+  if (a.kind === 'ALERT' && d.alerts.length) return cells({ label: 'Alerts', cells: d.alerts.slice(0, 60).map((x) => (x.state === 'down' ? 'down' : 'ok')) });
   if (a.kind === 'PLANE') return cycleVisual(d, now);
   return '';
 }
@@ -221,13 +221,46 @@ const short = (text: string, max = 80): string => {
   return first.length <= max ? first : `${first.slice(0, max - 1).trimEnd()}…`;
 };
 
-/** One row of Now. A row that needs Pedro carries one blue button; a source that was not read links to the tab that says why. */
+/** A short age for a row's state line and the header: `60 s`, `5 min`, `3 h`, `2 d`. */
+function shortAge(iso: string, now: number): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return 'at an unknown time';
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 90) return `${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h} h` : `${Math.round(h / 24)} d`;
+}
+
+/**
+ * One row of Now. The state line carries the age, so a row has no fourth line. A row that needs Pedro carries one blue
+ * button. A source that was not read has no button: the whole row links to the tab that says why.
+ */
 function nowRow(a: Attention, d: DashboardData, now: number): string {
   const unread = a.state === 'unknown';
-  const base = { state: a.state, lead: LEAD[a.kind], stateText: STATE_WORD[a.state], title: a.title, sub: unread ? undefined : short(a.why), icon: ICON[a.kind].svg, iconTone: ICON[a.kind].tone, visual: visualFor(a, d, now) || undefined, fact: a.since ? ageText(a.since, now) : a.fact };
+  const tail = a.since ? `${shortAge(a.since, now)} ago` : a.fact;
+  const base = { state: a.state, lead: LEAD[a.kind], stateText: [STATE_WORD[a.state], tail].filter(Boolean).join(' · '), title: a.title, sub: a.sub ?? (unread ? undefined : short(a.why)), icon: ICON[a.kind].svg, iconTone: ICON[a.kind].tone, visual: visualFor(a, d, now) || undefined };
   if (unread) return statusRow({ ...base, href: `#${a.tab}` });
   const lab = a.kind === 'CARD' || a.kind === 'ALERT' || a.kind === 'CVE' || a.kind === 'BACKUP';
   return statusRow({ ...base, action: button({ label: lab ? 'Open lab actions' : `Open ${TAB_LABEL[a.tab]}`, href: lab ? LAB_ACTIONS : `#${a.tab}`, direction: 'next', cls: 'dash-btn' }) });
+}
+
+/** Rows that say the same thing fold into one: three down alerts are one row, and every source not read is one row. */
+function rowsFor(act: Attention[], unread: Attention[]): { act: Attention[]; unread: Attention[] } {
+  const alerts = act.filter((a) => a.kind === 'ALERT');
+  const folded: Attention[] = [];
+  let done = false;
+  for (const a of act) {
+    if (a.kind !== 'ALERT' || alerts.length < 2) folded.push(a);
+    else if (!done) {
+      done = true;
+      const oldest = alerts.map((x) => x.since).filter((x): x is string => !!x).sort()[0];
+      folded.push({ state: alerts.some((x) => x.state === 'down') ? 'down' : 'warn', kind: 'ALERT', title: `${alerts.length} alerts are down`, why: alerts.map((x) => x.title.replace(/ is down$/, '')).join(', '), since: oldest, tab: 'act' });
+    }
+  }
+  const gathered: Attention[] = unread.length < 2 ? unread : [{ state: 'unknown', kind: 'UNREAD', title: `${unread.length} sources were not read`, why: '', sub: unread.map((x) => x.title.replace(/^The /, '').replace(/ (was|were) not read$| has no fresh reading$| is out of date$/, '')).join('; ') + '.', tab: unread.every((x) => x.tab === unread[0]!.tab) ? unread[0]!.tab : 'health' }];
+  return { act: folded, unread: gathered };
 }
 
 /** What the app bar's pill says: how many things need Pedro, or that the answer is not an all clear. */
@@ -239,21 +272,9 @@ export function barState(d: DashboardData, now: number): { text: string; tone: T
   return { text: 'All clear', tone: 'ok' };
 }
 
-/** A short age for the header's one quiet line: `60 s ago`, `5 min ago`, `3 h ago`. */
-function shortAge(iso: string, now: number): string {
-  const at = Date.parse(iso);
-  if (!Number.isFinite(at)) return 'at an unknown time';
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 90) return `${s} s ago`;
-  const m = Math.round(s / 60);
-  if (m < 90) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
-}
-
 /** The page's header: logo tile, title, when the feed was read, and the pill. */
 export const topBar = (d: DashboardData | null, now: number): string =>
-  appbar({ title: 'Lab dashboard', sub: d ? `Read ${shortAge(d.generatedAt, now)}` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
+  appbar({ title: 'Lab dashboard', sub: d ? `Read ${shortAge(d.generatedAt, now)} ago` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
 
 export function nowBlocks(d: DashboardData, now: number): string[] {
   const all = attention(d, now);
@@ -261,7 +282,8 @@ export function nowBlocks(d: DashboardData, now: number): string[] {
   const act = all.filter((a) => a.state !== 'unknown').sort((x, y) => Number(y.state === 'down') - Number(x.state === 'down'));
   const unread = all.filter((a) => a.state === 'unknown');
   const read = readout(`Read ${plural(checksRead(d), 'check')}, ${ageText(d.generatedAt, now)}: ${plural(d.alerts.length, 'alert')}, ${plural(d.services.length * 2, 'probe')}${d.backups ? `, ${plural(d.backups.guests.length, 'backup record')}` : ''}${d.cve ? ', the CVE report' : ''}${d.plane ? ', the Plane board' : ''}. Source: ${d.source}.`);
-  const unreadSection = (num: string): string[] => (unread.length ? [section(num, 'Not read', list(unread.map((a) => nowRow(a, d, now)), { label: 'Sources that were not read' }))] : []);
+  const rows = rowsFor(act, unread);
+  const unreadSection = (num: string): string[] => (unread.length ? [section(num, 'Not read', list(rows.unread.map((a) => nowRow(a, d, now)), { label: 'Sources that were not read' }))] : []);
   if (act.length) {
     const worst = act.find((a) => a.state === 'down') ?? act[0]!;
     const answer = brief({
@@ -269,7 +291,7 @@ export function nowBlocks(d: DashboardData, now: number): string[] {
       title: act.length === 1 ? worst.title : `${act.length} things need you`,
       body: act.length === 1 ? worst.step ?? worst.why : undefined,
     });
-    return [answer, section('01', 'Worst first', list(act.map((a) => nowRow(a, d, now)), { label: 'What needs you, worst first' })), ...unreadSection('02'), read];
+    return [answer, section('01', 'Worst first', list(rows.act.map((a) => nowRow(a, d, now)), { label: 'What needs you, worst first' })), ...unreadSection('02'), read];
   }
   if (liveUnread(d, now, 'needs')) return [brief({ state: 'unknown', title: 'It is unknown whether anything needs you', body: 'The list of items that need you was not read in full, or it is out of date.' }), ...unreadSection('01'), read];
   if (liveUnread(d, now, 'alerts')) return [brief({ state: 'unknown', title: 'No action card, but the alert list was not read in full', body: 'So it is unknown whether anything is wrong.' }), ...unreadSection('01'), read];
