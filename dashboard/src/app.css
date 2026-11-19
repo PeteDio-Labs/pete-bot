@@ -59,3 +59,6 @@
 .dash-back { margin: 0 0 .75rem; }
 .dash-banner summary { cursor: pointer; min-height: 24px; }
 .dash-banner > p { margin: .5rem 0 0; font-weight: 400; }
+
+/* A greyed button and the line that says why, stacked so the reason wraps under the button. */
+.dash-off { display: grid; gap: .375rem; justify-items: start; }
