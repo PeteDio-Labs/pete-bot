@@ -11,6 +11,7 @@
  *   POST /v1/media/act  {"kind": "series"|"movie", "id": 12} with the ask bearer (PET-869).
  *                  Runs the one write lab-agent holds, a Bazarr subtitle search, after the
  *                  owner tapped Confirm in Discord. 404 without a Bazarr key.
+ *   GET  /v1/staging  the staging box's 24-hour clock state, with the ask bearer.
  *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
  *                  answers with the run's outcome and DMs exactly as the nightly run does.
  *
@@ -24,6 +25,7 @@ import { ModelError } from './ollama.js';
 import type { DriftOutcome } from './drift.js';
 import { LabToolError, type LabTool } from './tools/index.js';
 import type { LabMetrics } from './metrics.js';
+import type { StagingState } from './stagingClock.js';
 
 export type Check = () => Promise<string>;
 
@@ -45,6 +47,8 @@ export interface LabServerDeps {
   actDownload?: (title: string, season?: number, kind?: 'series' | 'movie') => Promise<string>;
   /** One drift run, single-flight (PET-671). Absent, POST /v1/drift/run answers 404. */
   runDrift?: () => Promise<DriftOutcome>;
+  /** The staging clock's last state. Absent, GET /v1/staging answers 404. */
+  stagingState?: () => StagingState | null;
   /** Media routing metrics. Absent, GET /metrics answers 404. */
   metrics?: LabMetrics;
 }
@@ -108,6 +112,13 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       // reads only the status never mistakes either for a clean run.
       const outcome = await deps.runDrift();
       return json(outcome, outcome.kind === 'read-failed' || outcome.delivered === false ? 502 : 200);
+    }
+
+    if (url.pathname === '/v1/staging' && deps.stagingState) {
+      if (req.method !== 'GET') return json({ error: 'use GET' }, 405);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
+      // Null before the first poll: say so instead of answering with a state nobody read.
+      return json(deps.stagingState() ?? { state: 'unknown', detail: 'the staging clock has not read Proxmox yet' });
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {
