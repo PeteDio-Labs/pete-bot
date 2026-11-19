@@ -256,7 +256,7 @@ describe('lab-agent HTTP surface', () => {
     expect((await h(get())).status).toBe(401);
     const res = await h(get(ASK));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ state: 'unknown' });
+    expect(await res.json()).toMatchObject({ state: 'unknown', checkedAt: expect.any(String) });
     expect(await (await handler({ stagingState: () => ({ state: 'up', uptimeSec: 60, shutsDownInSec: 86_340, checkedAt: 'x' }) })(get(ASK))).json()).toMatchObject({ state: 'up' });
   });
 

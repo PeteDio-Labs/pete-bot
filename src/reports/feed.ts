@@ -49,11 +49,13 @@ export interface FeedInput {
   now: Date;
   /** Registry rows with their lab readings. Absent, the section is empty and the SPA reads every service as unknown. */
   services?: unknown[];
+  /** The staging box's 24-hour clock from lab-agent. Absent, the feed carries no staging section. */
+  staging?: Record<string, unknown> | null;
   /** The newest stored weekly PR record, or null when none is stored. */
   week?: WeekRecord | null;
 }
 
-export function buildDashboardFeed({ hub, batches, now, services, week }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, staging, week }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -114,6 +116,7 @@ export function buildDashboardFeed({ hub, batches, now, services, week }: FeedIn
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
     ...(shipped ? { shipped } : {}),
+    ...(staging ? { staging } : {}),
   };
 }
 

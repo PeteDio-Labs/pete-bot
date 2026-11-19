@@ -523,3 +523,31 @@ describe('Work shipped: capped reads and numbering', () => {
     expect(new Set(kick).size).toBe(kick.length);
   });
 });
+
+describe('staging clock', () => {
+  const at = '2026-11-19T12:00:00Z';
+  const now = Date.parse(at) + 60_000;
+  const view = async (staging: unknown) => {
+    const { nowView } = await import('../src/views.ts');
+    const r = parseDashboard({ ...fixture, staging });
+    return { html: nowView(r.data, now), problems: r.problems };
+  };
+  test('an up box says how long it has run and when it shuts down', async () => {
+    const { html } = await view({ state: 'up', uptimeSec: 4 * 3600 + 120, shutsDownInSec: 20 * 3600 - 120, checkedAt: at });
+    expect(html).toContain('Staging up 4h 2m, shuts down at 24h');
+  });
+  test('a stop by the limit is not called down', async () => {
+    const { html } = await view({ state: 'limit', checkedAt: at, detail: 'stopped by the 24-hour limit' });
+    expect(html).toContain('stopped by the 24-hour limit');
+    expect(html).not.toContain('Staging is down');
+  });
+  test('unknown names the reason; an unreadable section is a problem, not a clean line', async () => {
+    expect((await view({ state: 'unknown', checkedAt: at, detail: 'lab-agent answered HTTP 401' })).html).toContain('was not read: lab-agent answered HTTP 401');
+    const bad = await view({ state: 'up', uptimeSec: 'x' });
+    expect(bad.problems).toContain('the staging clock was unreadable');
+    expect(bad.html).not.toContain('Staging up');
+  });
+  test('no staging section draws no line', async () => {
+    expect((await view(undefined)).html).not.toContain('Staging');
+  });
+});

@@ -34,6 +34,8 @@ export interface DashboardDeps {
   runner?: Pick<WeeklyRunner, 'last' | 'lastFailure'>;
   /** Reads the registry's service rows. Absent, it probes the lab sides. Tests inject a fake so they stay offline. */
   services?: (now: Date) => Promise<unknown[]>;
+  /** The staging clock (lab-agent). Absent, the feed carries no staging section. */
+  staging?: (now: Date) => Promise<Record<string, unknown>>;
   /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
   keys?: KeysRouteDeps;
   log?: (msg: string) => void;
@@ -193,7 +195,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/api/dashboard', async (_req, res) => {
     try {
       const now = new Date();
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), week: newestWeek(d.store) }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), staging: d.staging ? await d.staging(now) : null, week: newestWeek(d.store) }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }

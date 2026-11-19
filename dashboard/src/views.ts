@@ -171,7 +171,27 @@ const checksRead = (d: DashboardData): number => d.alerts.length + d.services.le
 
 // ---- Now: do I need to do anything? ----
 
+/** One plain line about the staging box, before what was read. Drawn only when the feed carries the clock. A stop by the limit is not "down". */
+function stagingLine(d: DashboardData, now: number): string[] {
+  const c = d.staging;
+  if (!c) return [];
+  const hours = (sec: number): string => `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  const age = ageText(c.checkedAt, now);
+  const text =
+    c.state === 'up' ? `Staging up ${hours(c.uptimeSec)}, shuts down at 24h (in ${hours(c.shutsDownInSec)}). Read ${age}.`
+    : c.state === 'limit' ? `Staging stopped by the 24-hour limit. A new push starts a fresh 24 hours. Read ${age}.`
+    : c.state === 'stopped' ? `Staging is stopped. Read ${age}.`
+    : `The staging clock was not read: ${c.detail || 'no reason given'}.`;
+  return [readout(text)];
+}
+
 export function nowBlocks(d: DashboardData, now: number): string[] {
+  const blocks = nowCore(d, now);
+  const last = blocks.length - 1;
+  return [...blocks.slice(0, last), ...stagingLine(d, now), blocks[last]!];
+}
+
+function nowCore(d: DashboardData, now: number): string[] {
   const all = attention(d, now);
   const act = all.filter((a) => a.state !== 'unknown');
   const unread = all.filter((a) => a.state === 'unknown');
