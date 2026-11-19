@@ -518,3 +518,19 @@ If Qwen cannot answer, the week keeps its count and shows "Summary not generated
 - **Every write waits on the tap.** A request here only asks. Six writes an hour at most, five seconds apart.
 - **Same origin only.** The CORS rule covers `GET /api/dashboard` alone, a request with another `Origin` is refused, and the body must be `application/json`. A dashboard on staging or on AWS cannot call it.
 - **Off until configured.** Without `GITHUB_KEYS_TOKEN` and `KEYS_ADMIN_EMAILS`, every `/api/keys` route answers 404. A signed-in email outside `KEYS_ADMIN_EMAILS` gets 403.
+
+## Model gateway and call tracker (`src/llm/`)
+
+Every model request goes through `Gateway.ask`. It queues the call per provider (lower `priority` runs first), refuses a Haiku call once recorded spend reaches `LLM_HAIKU_MONTHLY_CAP_USD` (default 100), applies a deadline, and writes one record whatever the result, including refusals.
+
+A record holds the id, caller, provider, model, prompt and response hashes, token counts, cost, queue and run time, and result. It never holds text. The id hashes the caller and `requestId`, so a replay carries the same id. Records go to a ring buffer, to stdout as an `llm_call` JSON line, and to Loki when `LLM_LOKI_URL` is set.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LLM_OLLAMA_URL`, `LLM_OLLAMA_MODEL` | `http://192.168.50.246:11434`, `qwen3:8b` | The local lane. |
+| `ANTHROPIC_API_KEY` | unset | Turns on Haiku. Set from Vault at deploy time. |
+| `LLM_HAIKU_MODEL`, `LLM_HAIKU_USD_PER_MTOK_IN/OUT` | `claude-haiku-5-5`, 1 and 5 | Verify prices before you trust the budget. |
+| `LLM_HAIKU_MONTHLY_CAP_USD` | 100 | The guard. |
+| `LLM_READ_BEARER_TOKEN` | unset (refuses all) | Opens `GET /v1/llm/calls` and `GET /v1/llm/usage`. |
+
+The ring buffer resets on restart, so the budget guard counts spend since the last start until the Loki-backed total lands.
