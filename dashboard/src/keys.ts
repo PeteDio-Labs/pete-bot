@@ -133,6 +133,24 @@ export function keyLine(r: KeyRow): string {
 
 /** A list read longer ago than this no longer says which keys are valid now. The lab reads every 6 hours. */
 export const KEYS_STALE_MS = 36 * 3_600_000;
+/** A read time further ahead than this is a clock fault, so the list is not trusted. */
+export const KEYS_SKEW_MS = 5 * 60_000;
+
+/**
+ * A list read some time ago, with each key's days left, expired and renew-soon flags worked out again from its expiry date
+ * against `now`. A row with no readable expiry keeps the flags it came with.
+ */
+export function agedList(list: KeyList, now: number): KeyList {
+  return {
+    ...list,
+    rows: list.rows.map((r) => {
+      const t = r.expires ? Date.parse(r.expires) : NaN;
+      if (!r.hasToken || !Number.isFinite(t)) return r;
+      const left = Math.floor((t - now) / 86_400_000);
+      return { ...r, daysLeft: Math.max(left, 0), expired: left < 0, renewSoon: left >= 0 && left <= 21 };
+    }),
+  };
+}
 
 /** Three synthetic keys for a read-only build with no list yet, so its buttons can be tried. They never stand for a real key. */
 export const EXAMPLE_LIST: KeyList = {
@@ -151,6 +169,7 @@ export const EXAMPLE_LIST: KeyList = {
  */
 export function keysVerdict(list: KeyList | null, readError: string | null = null, ageMs: number | null = null): string {
   if (!list) return verdict({ state: 'unknown', title: 'The key list was not read', body: readError ?? 'So it is unknown which keys are valid.' });
+  if (ageMs !== null && ageMs < -KEYS_SKEW_MS) return verdict({ state: 'unknown', title: 'The key list has a read time in the future', body: 'The clocks disagree, so it is unknown which keys are valid now.' });
   if (ageMs !== null && ageMs > KEYS_STALE_MS) return verdict({ state: 'unknown', title: 'The key list is out of date', body: `The lab last read it ${Math.floor(ageMs / 3_600_000)} hours ago, so it is unknown which keys are valid now.` });
   const rows = list.rows;
   const expired = rows.filter((r) => r.expired);

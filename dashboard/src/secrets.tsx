@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { readout, verdict } from 'toonish-ui/markup';
 import { Html } from './html.tsx';
-import { ACTION_WORD, CALLERS_EDIT, EXAMPLE_LIST, VAULT_KEYS, follow, keyLine, keysVerdict, type ChangeAction, type KeyList, type KeysApi, type RunRead } from './keys.ts';
+import { ACTION_WORD, CALLERS_EDIT, EXAMPLE_LIST, VAULT_KEYS, agedList, follow, keyLine, keysVerdict, type ChangeAction, type KeyList, type KeysApi, type RunRead } from './keys.ts';
 import { section } from './views.ts';
 
 export const SECRETS_QUESTION = 'Which keys can reach my lab, and does one expire soon?';
@@ -21,8 +21,8 @@ const later = (f: () => void): void => void queueMicrotask(f);
  * The Secrets screen. It lists the keys, and a button asks for a change. Nothing here reads a key: the owner copies it from
  * Vault. With no API this build cannot change keys, and the screen says so instead of showing buttons that do nothing.
  */
-export function Secrets({ api, active, readonly = false, fed = null, now = Date.now }: { api: KeysApi | null; active: boolean; readonly?: boolean; fed?: Fed | null; now?: () => number }) {
-  if (!api && readonly) return <SecretsPreview fed={fed} now={now} />;
+export function Secrets({ api, active, readonly = false, fed = null, whyNot = 'The lab has not sent its key list to this dashboard yet.', now = Date.now }: { api: KeysApi | null; active: boolean; readonly?: boolean; fed?: Fed | null; whyNot?: string; now?: () => number }) {
+  if (!api && readonly) return <SecretsPreview fed={fed} whyNot={whyNot} now={now} />;
   return <SecretsLive api={api} active={active} />;
 }
 
@@ -175,15 +175,17 @@ function keysVerdictOff(): string {
  * as the live screen so the flow can be tried, and the last step cannot be taken: nothing is sent from here. With no list
  * yet it shows three labelled example rows, never a real key's name.
  */
-function SecretsPreview({ fed, now }: { fed: Fed | null; now: () => number }) {
+function SecretsPreview({ fed, whyNot, now }: { fed: Fed | null; whyNot: string; now: () => number }) {
   const [asked, setAsked] = useState<Asked | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (asked) cancelRef.current?.focus();
   }, [asked]);
-  const real = fed?.list ?? null;
+  const at = now();
+  // The flags are worked out again from each expiry date, so a list read hours ago does not show a key as healthy that has since crossed a line.
+  const real = fed ? agedList(fed.list, at) : null;
   const list = real ?? EXAMPLE_LIST;
-  const age = fed ? now() - fed.at : null;
+  const age = fed ? at - fed.at : null;
   const ask = (action: ChangeAction, name: string | null, from: string) => setAsked({ action, name, from });
   const cancel = () => {
     const from = asked?.from;
@@ -192,7 +194,7 @@ function SecretsPreview({ fed, now }: { fed: Fed | null; now: () => number }) {
   };
   return (
     <>
-      <Html html={keysVerdict(real, real ? null : 'The lab has not sent its key list to this dashboard yet.', age)} />
+      <Html html={keysVerdict(real, real ? null : whyNot, age)} />
       <p class="toon-callout toon-callout-yellow dash-banner" id="preview-note">Staging is read-only. The buttons open the steps and send nothing.</p>
       <div class="dash-section">
         <Html html={section('01', real ? 'Keys' : 'Example keys', '')} />
@@ -220,7 +222,7 @@ function SecretsPreview({ fed, now }: { fed: Fed | null; now: () => number }) {
             </p>
           </div>
         )}
-        <p class="dash-note">{real ? 'The lab reads this list every 6 hours. Refresh it on the lab dashboard.' : 'The lab reads its keys every 6 hours and sends the list here.'}</p>
+        <p class="dash-note">{real ? 'The lab reads this list every 6 hours. Refresh it on the lab dashboard.' : 'When the lab has a list, it reads it every 6 hours and sends it here.'}</p>
       </div>
       <div class="dash-section">
         <Html html={section('02', 'Add or remove a key', '')} />
@@ -230,7 +232,7 @@ function SecretsPreview({ fed, now }: { fed: Fed | null; now: () => number }) {
           <button type="button" class="toon-btn toon-btn-paper dash-btn dash-btn-preview" id="key-apply" aria-describedby="preview-note" onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
         </p>
       </div>
-      <Html html={readout(real && fed ? `Read ${real.rows.length} keys at ${when(fed.at)} by the lab. ${real.read} No key value is read or shown here.` : 'The key list has not been sent to this dashboard. The rows above are examples.', { label: 'What was read' })} />
+      <Html html={readout(real && fed ? `Read ${real.rows.length} keys by the lab on ${new Date(fed.at).toISOString().slice(0, 10)} at ${when(fed.at)}, ${Math.max(0, Math.floor(age! / 3_600_000))} hours ago. ${real.read} No key value is read or shown here.` : `${whyNot} The rows above are examples.`, { label: 'What was read' })} />
     </>
   );
 }

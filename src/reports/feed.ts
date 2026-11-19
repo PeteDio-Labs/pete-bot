@@ -107,6 +107,6 @@ export function buildDashboardFeed({ hub, batches, now, services, sites, keys }:
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
     // Names, owners and dates. No key value is read here or anywhere in this process.
-    ...(keys ? { keys: { at: keys.at, read: keys.list.read, unparsed: keys.list.unparsed, rows: keys.list.rows } } : {}),
+    ...(keys ? { keys: { at: keys.at, read: keys.list.read, unparsed: keys.list.unparsed, rows: keys.list.rows.map((r) => ({ name: r.name, owner: r.owner, hasToken: r.hasToken, version: r.version, expires: r.expires, daysLeft: r.daysLeft, expired: r.expired, renewSoon: r.renewSoon, inCallers: r.inCallers })) } } : {}),
   };
 }

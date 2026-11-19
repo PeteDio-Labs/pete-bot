@@ -146,6 +146,14 @@ function useFlowRoute(): FlowRoute | null {
   return on;
 }
 
+/** Why no key list shows, from what the feed read. Each state gets its own reason, because the feed banners are hidden on this screen. */
+function keysWhy(load: Load): string {
+  if (load.state === 'loading') return 'The feed is still loading.';
+  if (load.state === 'error' && !load.data) return 'The feed could not be read.';
+  if (load.problems.includes('the key list was unreadable')) return 'The lab sent a key list this page could not read.';
+  return 'The lab has not sent its key list to this dashboard yet.';
+}
+
 export function App({ feed, keys = null, keysReadonly = false, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; keysReadonly?: boolean; now?: () => number }) {
   const route = useFlowRoute();
   const secrets = route === 'secrets';
@@ -210,7 +218,7 @@ export function App({ feed, keys = null, keysReadonly = false, now = () => Date.
       <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
         <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
-        <Guard><Secrets api={keys} active={secrets} readonly={keysReadonly} fed={data?.keys ?? null} now={now} /></Guard>
+        <Guard><Secrets api={keys} active={secrets} readonly={keysReadonly} fed={data?.keys ?? null} whyNot={keysWhy(load)} now={now} /></Guard>
       </section>
     </>
   );

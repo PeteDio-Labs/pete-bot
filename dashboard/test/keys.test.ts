@@ -124,3 +124,18 @@ describe('the example rows', () => {
     expect(EXAMPLE_LIST.read).toContain('not read from the lab');
   });
 });
+
+describe('agedList and a read time in the future', () => {
+  const now = Date.parse('2026-11-19T00:00:00Z');
+  it('works the flags out again from the expiry date', async () => {
+    const { agedList } = await import('../src/keys.ts');
+    const l = agedList(list([row({ expires: '2026-12-01T00:00:00Z', daysLeft: 40, renewSoon: false }), row({ name: 'old', expires: '2026-11-01T00:00:00Z', daysLeft: 5, expired: false }), row({ name: 'nodate', expires: null, daysLeft: 9 })]), now);
+    expect(l.rows[0]).toMatchObject({ daysLeft: 12, renewSoon: true, expired: false });
+    expect(l.rows[1]).toMatchObject({ expired: true, daysLeft: 0 });
+    expect(l.rows[2]).toMatchObject({ daysLeft: 9 });
+  });
+  it('reads a time ahead of the clock as unknown', () => {
+    expect(text(keysVerdict(list([row()]), null, -3_600_000))).toContain('read time in the future');
+    expect(text(keysVerdict(list([row()]), null, -60_000))).toContain('All 1 key are valid');
+  });
+});

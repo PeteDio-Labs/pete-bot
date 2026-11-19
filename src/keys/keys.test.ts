@@ -193,6 +193,13 @@ describe('routes', () => {
     try {
       expect(((await (await fetch(`${base}/api/dashboard`)).json()) as { keys?: unknown }).keys).toBeUndefined();
       await fetch(`${base}/api/keys/runs/pb-abc-123456?action=list`);
+      // A signed-in person who is not a keys admin gets the feed without the list.
+      const other = createDashboardApp({ store: new WeekStore(dir), services: async () => [], keysCache: cache, verify: async () => ({ ok: true, email: 'sonia@x.dev' }), keys: { client, admins: ['pedro@x.dev'], cache } }).listen(0);
+      try {
+        expect('keys' in ((await (await fetch(`http://127.0.0.1:${(other.address() as { port: number }).port}/api/dashboard`)).json()) as object)).toBe(false);
+      } finally {
+        other.close();
+      }
       const feed = (await (await fetch(`${base}/api/dashboard`)).json()) as { keys?: { rows: { name: string }[] } };
       expect(feed.keys?.rows.map((r) => r.name)).toEqual(['muse', 'batsy', 'old', 'staging']);
       expect(JSON.stringify(feed)).not.toContain('ca14c1dd');

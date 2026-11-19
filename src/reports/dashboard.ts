@@ -181,7 +181,10 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/api/dashboard', async (_req, res) => {
     try {
       const now = new Date();
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), keys: d.keysCache?.get() ?? null }));
+      // The key list goes only to a person /api/keys would also serve: the feed passes the general Access check, the keys API the admin list.
+      const who = (res.locals.email as string | undefined)?.toLowerCase();
+      const keys = who && d.keys?.admins.includes(who) ? (d.keysCache?.get() ?? null) : null;
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), keys }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }
