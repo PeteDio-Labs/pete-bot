@@ -118,7 +118,7 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       if (req.method !== 'GET') return json({ error: 'use GET' }, 405);
       if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
       // Null before the first poll: say so instead of answering with a state nobody read.
-      return json(deps.stagingState() ?? { state: 'unknown', detail: 'the staging clock has not read Proxmox yet' });
+      return json(deps.stagingState() ?? { state: 'unknown', checkedAt: new Date().toISOString(), detail: 'the staging clock has not read Proxmox yet' });
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {

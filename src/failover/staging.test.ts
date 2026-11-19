@@ -9,6 +9,10 @@ describe('readStaging', () => {
     const s = { state: 'up', uptimeSec: 60, shutsDownInSec: 86_340, checkedAt: 'x' };
     expect(await readStaging('http://x', 't', now, ok(s))).toEqual(s);
   });
+  test('a state with no time is stamped with the read time, so the dashboard keeps its reason', async () => {
+    const r = await readStaging('http://x', 't', now, ok({ state: 'unknown', detail: 'the staging clock has not read Proxmox yet' }));
+    expect(r).toEqual({ state: 'unknown', detail: 'the staging clock has not read Proxmox yet', checkedAt: now.toISOString() });
+  });
   test('every failure is unknown, and says why', async () => {
     expect((await readStaging('http://x', '', now, ok({}))).state).toBe('unknown');
     expect(((await readStaging('http://x', 't', now, async () => ({ ok: false, status: 401, json: async () => ({}) }))).detail as string)).toContain('401');

@@ -16,7 +16,9 @@ export async function readStaging(url: string, token: string, now: Date, fetchFn
     if (!r.ok) return unknown(`lab-agent answered HTTP ${r.status}`);
     const body = (await r.json()) as unknown;
     if (typeof body !== 'object' || body === null || typeof (body as { state?: unknown }).state !== 'string') return unknown('lab-agent answered with a body the feed could not read');
-    return body as Record<string, unknown>;
+    // The feed's reader requires a time on every state. A state without one is stamped with the read's own time.
+    const b = body as Record<string, unknown>;
+    return typeof b.checkedAt === 'string' && b.checkedAt ? b : { ...b, checkedAt: now.toISOString() };
   } catch (err) {
     return unknown(`lab-agent did not answer (${err instanceof Error ? err.name : 'error'})`);
   }
