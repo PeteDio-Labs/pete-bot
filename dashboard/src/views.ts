@@ -240,7 +240,16 @@ function shortAge(iso: string, now: number): string {
 function nowRow(a: Attention, d: DashboardData, now: number): string {
   const unread = a.state === 'unknown';
   const tail = a.since ? `${shortAge(a.since, now)} ago` : a.fact;
-  const base = { state: a.state, lead: LEAD[a.kind], stateText: [STATE_WORD[a.state], tail].filter(Boolean).join(' · '), title: a.title, sub: a.sub ?? (unread ? undefined : short(a.why)), icon: ICON[a.kind].svg, iconTone: ICON[a.kind].tone, visual: visualFor(a, d, now) || undefined };
+  const visual = visualFor(a, d, now);
+  // A row with a picture says what the picture counts, in the end column. The age stays in the state line.
+  let count: string | undefined;
+  if (visual && a.kind === 'SERVICE') {
+    const probes = d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]);
+    count = `${probes.filter((h) => h === 'ok').length} of ${probes.length} ok`;
+  } else if (visual && a.kind === 'ALERT') count = `${d.alerts.filter((x) => x.state === 'down').length} of ${d.alerts.length} down`;
+  else if (visual && a.kind === 'BACKUP' && d.backups) count = `${d.backups.guests.filter((g) => backupState(g, now) === 'ok').length} of ${d.backups.guests.length} good`;
+  const stateTail = visual && count ? (a.since ? `${shortAge(a.since, now)} ago` : undefined) : tail;
+  const base = { state: a.state, lead: LEAD[a.kind], stateText: [STATE_WORD[a.state], stateTail].filter(Boolean).join(' · '), title: a.title, sub: a.sub ?? (unread ? undefined : short(a.why)), icon: ICON[a.kind].svg, iconTone: ICON[a.kind].tone, visual: visual || undefined, fact: count };
   if (unread) return statusRow({ ...base, href: `#${a.tab}` });
   const lab = a.kind === 'CARD' || a.kind === 'ALERT' || a.kind === 'CVE' || a.kind === 'BACKUP';
   return statusRow({ ...base, action: button({ label: lab ? 'Open lab actions' : `Open ${TAB_LABEL[a.tab]}`, href: lab ? LAB_ACTIONS : `#${a.tab}`, direction: 'next', cls: 'dash-btn' }) });
@@ -289,7 +298,7 @@ export function nowBlocks(d: DashboardData, now: number): string[] {
     const answer = brief({
       state: worst.state, stateText: STATE_WORD[worst.state], palette: 'ink', count: `${act.length}!`,
       title: act.length === 1 ? worst.title : `${act.length} things need you`,
-      body: act.length === 1 ? worst.step ?? worst.why : undefined,
+      body: act.length === 1 ? worst.step ?? worst.why : `Start with: ${act[0]!.title}.`,
     });
     return [answer, section('01', 'Worst first', list(rows.act.map((a) => nowRow(a, d, now)), { label: 'What needs you, worst first' })), ...unreadSection('02'), read];
   }

@@ -4,19 +4,13 @@
 
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
 /* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
-.dash-header { position: relative; z-index: 60; max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
-.dash-settings { position: absolute; top: .75rem; right: 1rem; z-index: 20; }
-.dash-header .dash-appbar { padding-right: 3.25rem; }
+.dash-header { position: relative; z-index: 60; max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem 0; }
+/* The cog sits on the bar's top right corner, so the pill keeps the line it has in the mock. */
+.dash-settings { position: absolute; top: .375rem; right: .625rem; z-index: 20; transform: scale(.85); transform-origin: top right; }
 .dash-appbar .toon-appbar-state { padding-inline: .6rem; letter-spacing: .04em; }
 .dash-appbar .toon-appbar-title, .dash-appbar .toon-appbar-sub { white-space: nowrap; }
 .dash-appbar .toon-appbar-text { min-width: 0; }
-.dash-appbar .toon-appbar-title { font-size: 1.25rem; }
-/* On a phone the pill sits under the title, so the title and the age never share a line with it. */
-@media (max-width: 30rem) {
-  .dash-appbar { flex-wrap: wrap; row-gap: .5rem; }
-  .dash-appbar .toon-appbar-text { flex: 1 1 8rem; }
-  .dash-appbar .toon-appbar-state { margin-left: calc(44px + var(--spacing-s3)); }
-}
+.dash-appbar .toon-appbar-title { font-size: 1.125rem; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
