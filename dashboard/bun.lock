@@ -6,7 +6,7 @@
       "name": "lab-dashboard",
       "dependencies": {
         "preact": "11.2.0",
-        "toonish-ui": "github:PeteDio-Labs/toonish-ui#v0.8.2",
+        "toonish-ui": "github:PeteDio-Labs/toonish-ui#v0.8.3",
       },
       "devDependencies": {
         "@tailwindcss/cli": "4.3.5",
@@ -189,7 +189,7 @@
 
     "tapable": ["tapable@2.3.4", "", {}, "sha512-NHFiWnAbMJxNNpBwiO7jJVGDuqMxT9/oV8v57RR+fgBQShkJil5inGD8/xWy0hjLyHQyX1tu27QANhlz3KBqCg=="],
 
-    "toonish-ui": ["toonish-ui@github:PeteDio-Labs/toonish-ui#741ac7c", {}, "PeteDio-Labs-Toonish-ui-741ac7c", "sha512-tcx3DyptNGTRuEyBzIzebh32R5jZOy97G0bR5qnmYtgEoYAztOjR+rgJcCbv0PEH4Qf9cvSt42JQKnnNz/VfbA=="],
+    "toonish-ui": ["toonish-ui@github:PeteDio-Labs/toonish-ui#5d43a93", {}, "PeteDio-Labs-Toonish-ui-5d43a93", "sha512-7YWUCVbiPKF/6DUpkamJwMsrPFqJxv1BSM3sv26z233QUydbODk4yxNWttSf9lFAGNhoHehqFoCRXEDSlQqPlA=="],
 
     "typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
