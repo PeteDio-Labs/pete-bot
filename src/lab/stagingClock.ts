@@ -25,6 +25,8 @@ export class StagingClock {
   private lastUptime: number | null = null;
   private alerted = new Set<number>();
   private primed = false;
+  /** Why the guest stopped, kept across stopped readings until a running one is seen. */
+  private stopKind: 'limit' | 'stopped' | null = null;
 
   /**
    * Fold one reading into the clock. `reading` is null when Proxmox did not answer or the guest is
@@ -33,15 +35,20 @@ export class StagingClock {
   observe(reading: GuestReading | null, now: Date, why = 'Proxmox did not return the staging guest'): { state: StagingState; alerts: number[] } {
     const checkedAt = now.toISOString();
     if (!reading) return { state: { state: 'unknown', checkedAt, detail: why }, alerts: [] };
-    if (reading.status !== 'running') {
-      const atLimit = this.lastUptime !== null && this.lastUptime >= LIMIT_S - LIMIT_SLACK_S;
+    // A status Proxmox did not give is unknown. It changes nothing about the boot we are tracking.
+    if (reading.status !== 'running' && reading.status !== 'stopped') {
+      return { state: { state: 'unknown', checkedAt, detail: `Proxmox reported the guest status as ${reading.status}` }, alerts: [] };
+    }
+    if (reading.status === 'stopped') {
+      if (this.stopKind === null) this.stopKind = this.lastUptime !== null && this.lastUptime >= LIMIT_S - LIMIT_SLACK_S ? 'limit' : 'stopped';
       this.lastUptime = null;
       this.alerted.clear();
       this.primed = false;
-      return atLimit
+      return this.stopKind === 'limit'
         ? { state: { state: 'limit', checkedAt, detail: 'stopped by the 24-hour limit' }, alerts: [] }
-        : { state: { state: 'stopped', checkedAt, detail: `the guest is ${reading.status}` }, alerts: [] };
+        : { state: { state: 'stopped', checkedAt, detail: 'the guest is stopped' }, alerts: [] };
     }
+    this.stopKind = null;
     // A shorter uptime than the last reading means a new boot: its alerts start over.
     if (this.lastUptime !== null && reading.uptimeSec < this.lastUptime) this.alerted.clear();
     this.lastUptime = reading.uptimeSec;
@@ -55,7 +62,9 @@ export class StagingClock {
   }
 }
 
+/** `hours` is the threshold that crossed; the countdown comes from the uptime read, which can be later than the threshold. */
 export function alertText(hours: number, uptimeSec: number): string {
-  const left = Math.max(0, 24 - hours);
-  return `Staging has been up ${hours} hours (read ${Math.floor(uptimeSec / 3600)}h from Proxmox). It shuts down at 24 hours, in about ${left} hours. A new push starts a fresh 24 hours.`;
+  const up = Math.floor(uptimeSec / 3600);
+  const left = Math.max(0, Math.ceil((LIMIT_S - uptimeSec) / 3600));
+  return `Staging passed ${hours} hours of uptime (${up}h read from Proxmox). It shuts down at 24 hours, in about ${left} ${left === 1 ? 'hour' : 'hours'}. A new push starts a fresh 24 hours.`;
 }

@@ -41,7 +41,25 @@ describe('StagingClock', () => {
     expect(c.observe({ status: 'stopped', uptimeSec: 0 }, t).state.state).toBe('stopped');
     expect(c.observe(null, t).state.state).toBe('unknown');
   });
-  test('alert text names the hours and the limit', () => {
-    expect(alertText(20, 72_000)).toContain('shuts down at 24 hours');
+  test('the limit reason survives repeated stopped readings until the guest runs again', () => {
+    const c = new StagingClock();
+    c.observe({ status: 'running', uptimeSec: LIMIT_S - 30 }, t);
+    for (let i = 0; i < 3; i++) expect(c.observe({ status: 'stopped', uptimeSec: 0 }, t).state.state).toBe('limit');
+    c.observe(up(0.1), t);
+    expect(c.observe({ status: 'stopped', uptimeSec: 0 }, t).state.state).toBe('stopped');
+  });
+  test('an unknown guest status is unknown and keeps the boot state', () => {
+    const c = new StagingClock();
+    c.observe(up(1), t);
+    c.observe(up(3.5), t);
+    expect(c.observe({ status: 'unknown', uptimeSec: 0 }, t).state.state).toBe('unknown');
+    expect(c.observe(up(3.6), t).alerts).toEqual([]); // the 3h alert is still marked sent
+    const d = new StagingClock();
+    d.observe({ status: 'running', uptimeSec: LIMIT_S - 30 }, t);
+    expect(d.observe({ status: 'unknown', uptimeSec: 0 }, t).state.state).toBe('unknown');
+  });
+  test('alert text counts down from the uptime read, not the threshold', () => {
+    expect(alertText(20, 23 * 3600)).toContain('in about 1 hour.');
+    expect(alertText(20, 72_000)).toContain('shuts down at 24 hours, in about 4 hours');
   });
 });
