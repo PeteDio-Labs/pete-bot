@@ -121,11 +121,20 @@ export function getKeysApi(doc: Document = document): KeysApi | null {
   return base ? keysApi(base) : null;
 }
 
-/** True while the address names the Secrets screen. The kit's tabs ignore a hash that is not a tab, so this view is the app's own. */
-function useSecretsRoute(): boolean {
-  const [on, setOn] = useState(() => typeof location !== 'undefined' && location.hash === '#secrets');
+/**
+ * The app's own full-page views, each at its own hash. The kit's tabs ignore a hash that is not a tab, so these are routed here.
+ * To add a view: add its name here, add a `<section class="dash-flow" id="<name>" hidden={route !== '<name>'}>` in `App`, and
+ * add a menu item in `build.ts`. The tab bar and panels hide while any of them shows.
+ */
+export const FLOW_ROUTES = ['secrets'] as const;
+export type FlowRoute = (typeof FLOW_ROUTES)[number];
+
+const routeOf = (hash: string): FlowRoute | null => FLOW_ROUTES.find((r) => hash === `#${r}`) ?? null;
+
+function useFlowRoute(): FlowRoute | null {
+  const [on, setOn] = useState<FlowRoute | null>(() => (typeof location !== 'undefined' ? routeOf(location.hash) : null));
   useEffect(() => {
-    const f = () => setOn(location.hash === '#secrets');
+    const f = () => setOn(routeOf(location.hash));
     window.addEventListener('hashchange', f);
     return () => window.removeEventListener('hashchange', f);
   }, []);
@@ -133,13 +142,15 @@ function useSecretsRoute(): boolean {
 }
 
 export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
-  const secrets = useSecretsRoute();
+  const route = useFlowRoute();
+  const secrets = route === 'secrets';
+  const inFlow = route !== null;
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const main = document.getElementById('main');
-    if (main) main.dataset.view = secrets ? 'secrets' : 'tabs';
+    if (main) main.dataset.view = route ?? 'tabs';
     if (secrets) headRef.current?.focus({ preventScroll: false });
-  }, [secrets]);
+  }, [route]);
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   useEffect(() => {
     let alive = true;
@@ -177,15 +188,15 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
   }, [data, n]);
   return (
     <>
-      {!secrets && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
-      {!secrets && problems.length > 0 && (
+      {!inFlow && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
+      {!inFlow && problems.length > 0 && (
         <details class="toon-callout toon-callout-yellow dash-banner">
           <summary>{`${problems.length === 1 ? 'One part' : `${problems.length} parts`} of the feed could not be read. Details`}</summary>
           <p>{`${problems.slice(0, 4).join('; ')}.`}</p>
         </details>
       )}
-      {!secrets && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
-      {!secrets && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
+      {!inFlow && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
+      {!inFlow && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
       <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
       <Panel id="act">{data && <Blocks blocks={safe(() => actBlocks(data, n))} />}</Panel>
       <Panel id="services">{data && <Guard><Services data={data} now={n} feed={feed} /></Guard>}</Panel>
