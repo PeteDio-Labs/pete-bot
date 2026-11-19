@@ -225,6 +225,8 @@ dd{margin-bottom:var(--s2)}
       <div class="stat"><div class="stat-label">Open PRs</div><div class="stat-value" id="open">0</div><div class="stat-foot" id="dOpen"></div></div>
       <div class="stat"><div class="stat-label">Repos active</div><div class="stat-value" id="nrepos">0</div><div class="stat-foot" id="dRepos"></div></div>
       <div class="stat"><div class="stat-label">PET items</div><div class="stat-value" id="nthemes">0</div><div class="stat-foot" id="dThemes"></div></div>
+      <div class="stat"><div class="stat-label">Median hours to merge</div><div class="stat-value" id="lead">–</div><div class="stat-foot" id="dLead"></div></div>
+      <div class="stat"><div class="stat-label">By threads bot</div><div class="stat-value"><span id="bot">–</span><small>%</small></div><div class="stat-foot" id="dBot"></div></div>
     </div>
   </section>
   <section class="card" aria-label="Summary">
@@ -315,6 +317,11 @@ function render(){
  var w=cur,pw=prevWeek(w),pbr=pw&&pw.byRepo?pw.byRepo:null;genOpts(w);repoSums(w);$('total').textContent=String(w.total);$('open').textContent=String(w.openNow);
  $('cTotal').textContent=pw&&typeof pw.total==='number'?'vs last week ('+pw.total+')':'No earlier week recorded';setChip($('dTotal'),w.total,pw?pw.total:null,false);
  setChip($('dOpen'),w.openNow,pw?pw.openNow:null,true);
+ var ml=w.medianLeadHours,pml=pw?pw.medianLeadHours:null;$('lead').textContent=(typeof ml==='number')?(ml<10?ml.toFixed(1):String(Math.round(ml))):'–';
+ var botPct=function(x){return x&&x.total?Math.round(((x.byAuthor&&x.byAuthor['threads bot'])||0)/x.total*100):null};
+ var bp=botPct(w);$('bot').textContent=bp===null?'–':String(bp);
+ if(typeof ml==='number')setChip($('dLead'),ml,typeof pml==='number'?pml:null,true);else clear($('dLead'));
+ if(bp!==null)setChip($('dBot'),bp,botPct(pw),false);else clear($('dBot'));
  var nr=Object.keys(w.byRepo).length,nt=petCount(w);$('nrepos').textContent=String(nr);$('nthemes').textContent=String(nt);
  setChip($('dRepos'),nr,pbr?Object.keys(pbr).length:null,false);setChip($('dThemes'),nt,pw&&pw.merged?petCount(pw):null,false);
  var has=!!(w.summary&&w.summary.text);$('focus').hidden=!has;$('emptySum').hidden=has;
