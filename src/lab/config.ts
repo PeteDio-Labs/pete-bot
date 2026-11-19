@@ -71,7 +71,11 @@ const EnvSchema = z.object({
   LAB_METRICS_HOST: z.string().ip({ version: 'v4' }).optional(),
   LAB_METRICS_PORT: z.coerce.number().int().min(1024).max(65535).default(3019),
   LAB_METRICS_PEER: z.string().ip({ version: 'v4' }).default('192.168.50.240'),
-  LAB_MTRACE_URL: z.string().url().default('http://192.168.50.237:8237'),
+  // tracerr's address and caller token. LAB_TRACERR_* wins; LAB_MTRACE_* is the pre-rename spelling,
+  // still read so a host that has not moved its env file keeps the media assistant.
+  LAB_TRACERR_URL: z.string().url().optional(),
+  LAB_TRACERR_TOKEN: TOKEN.optional(),
+  LAB_MTRACE_URL: z.string().url().optional(),
   LAB_MTRACE_TOKEN: TOKEN.optional(),
   // Bazarr, for the subtitle search the owner confirms (PET-869). Offered only when the key is set.
   LAB_BAZARR_URL: z.string().url().default('http://192.168.50.222:6767'),
@@ -114,6 +118,11 @@ export interface LabConfig {
   drift: { notifyUrl: string; notifyToken: string; at: string };
   /** null while the MCP door is off. */
   mcp: { host: string; port: number; peer: string; teamDomain: string; aud: string; emails: string[]; agents: Record<string, string> } | null;
+}
+
+/** The tracerr caller token: the new name first, then the pre-rename one. */
+function tracerrToken(e: { LAB_TRACERR_TOKEN?: string; LAB_MTRACE_TOKEN?: string }): string | undefined {
+  return e.LAB_TRACERR_TOKEN ?? e.LAB_MTRACE_TOKEN;
 }
 
 export function loadLabConfig(env: Record<string, string | undefined>, readFile = (p: string) => readFileSync(p, 'utf8')): LabConfig {
@@ -193,7 +202,7 @@ export function loadLabConfig(env: Record<string, string | undefined>, readFile 
     codexReview: e.LAB_CODEX_REVIEW_TOKEN ? { url: e.LAB_CODEX_REVIEW_URL, token: e.LAB_CODEX_REVIEW_TOKEN } : null,
     mediaToolkits: parseToolkits(e.LAB_MEDIA_TOOLKITS),
     metrics: e.LAB_METRICS_HOST ? { host: e.LAB_METRICS_HOST, port: e.LAB_METRICS_PORT, peer: e.LAB_METRICS_PEER } : null,
-    tracerr: e.LAB_MTRACE_TOKEN ? { baseUrl: e.LAB_MTRACE_URL.replace(/\/$/, ''), token: e.LAB_MTRACE_TOKEN } : null,
+    tracerr: tracerrToken(e) ? { baseUrl: (e.LAB_TRACERR_URL ?? e.LAB_MTRACE_URL ?? 'http://192.168.50.237:8237').replace(/\/$/, ''), token: tracerrToken(e)! } : null,
     bazarr: e.LAB_BAZARR_KEY ? { baseUrl: e.LAB_BAZARR_URL.replace(/\/$/, ''), apiKey: e.LAB_BAZARR_KEY } : null,
     drift: { notifyUrl: e.LAB_NOTIFY_URL, notifyToken: e.LAB_NOTIFY_TOKEN, at: e.LAB_DRIFT_AT },
     mcp,

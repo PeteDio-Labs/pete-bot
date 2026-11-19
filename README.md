@@ -188,7 +188,7 @@ configured". `lab-agent` refuses to start on a missing or malformed setting.
 
 `POST /v1/media/ask` on lab-agent takes `{"question", "history"}` (at most 12 turns) with the ask bearer
 and runs the same Qwen loop and limits as `/v1/ask`, over the media tools only. It shares the
-one-question slot with `/v1/ask`, so a second request gets 429. With `LAB_MTRACE_TOKEN` empty it
+one-question slot with `/v1/ask`, so a second request gets 429. With `LAB_TRACERR_TOKEN` empty it
 answers 404, and `lab-agent` starts without the route.
 
 | Tool | Reads |
@@ -224,9 +224,10 @@ head reads `failed`. Requests live in memory, so a restart forgets them and `sta
 `/v1/codex-review` takes its own `CODEX_REVIEW_BEARER_TOKEN`, which no other route accepts. lab-agent reads the
 same value as `LAB_CODEX_REVIEW_TOKEN` and offers the tools only when it is set.
 
-`LAB_MTRACE_TOKEN` is lab-agent's own tracerr caller (`token_lab-agent`), never pete-bot's. 237 reaches tracerr on
+`LAB_TRACERR_TOKEN` is lab-agent's own tracerr caller (`token_lab-agent`), never pete-bot's. 237 reaches tracerr on
 its own LAN address through the `lo` rule in the nftables allowlist. `LAB_OLLAMA_URL` now defaults to
 CT 246 (`192.168.50.246:11434`); `.12` is the Proxmox node pve01 and refuses the port.
+`LAB_MTRACE_TOKEN` and `LAB_MTRACE_URL` still work as the pre-rename names.
 
 `scripts/media-probe.ts` checks these reads against the live hosts without writing anything. It compares
 tracerr's `GET /api/tools` with the list in `src/lab/tools/tracerr.ts` and fails on any difference, calls all
