@@ -19,6 +19,7 @@ import { ALL_TOOLKITS, selectMediaTools } from './toolkits.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
 import { ProxmoxClient } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
+import { StagingClock, alertText, type GuestReading, type StagingState } from './stagingClock.js';
 import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
 import { readKuma } from './tools/kuma.js';
 import { searchMissingViaTracerr, tracerrTools } from './tools/tracerr.js';
@@ -177,6 +178,35 @@ function scheduleDrift(): void {
 }
 scheduleDrift();
 
+// The staging box's 24-hour clock: read the guest's uptime from Proxmox each minute, alert once per
+// threshold per boot through pete-bot's /v1/notify, and serve the state to the dashboard feed.
+const stagingVmid = Number(process.env.STAGING_VMID ?? '249');
+const stagingNotify = notifier(cfg.drift.notifyUrl, cfg.drift.notifyToken, fetch, 'staging clock');
+const stagingClock = new StagingClock();
+let stagingState: StagingState | null = null;
+async function pollStaging(): Promise<void> {
+  let reading: GuestReading | null = null;
+  let why: string | undefined;
+  try {
+    const g = (await pve.guests()).find((x) => x.vmid === stagingVmid);
+    if (g) reading = { status: g.status, uptimeSec: g.uptimeSec };
+    else why = `guest ${stagingVmid} is not in the Proxmox answer`;
+  } catch (err) {
+    why = `Proxmox read failed: ${(err as Error).message}`;
+  }
+  const { state, alerts } = stagingClock.observe(reading, new Date(), why);
+  stagingState = state;
+  for (const h of alerts) {
+    try {
+      await stagingNotify(alertText(h, state.state === 'up' ? state.uptimeSec : h * 3600));
+    } catch (err) {
+      log('staging alert not delivered', { level: 'error', hours: h, error: (err as Error).message });
+    }
+  }
+}
+void pollStaging();
+setInterval(() => void pollStaging().catch((err) => log('staging poll crashed', { level: 'error', error: (err as Error).message })), 60_000);
+
 const metrics = createLabMetrics(cfg.mediaToolkits.length === ALL_TOOLKITS.length ? 'all' : cfg.mediaToolkits.join('+'));
 metrics.setToolsOffered(mediaTools?.size ?? 0);
 
@@ -191,6 +221,7 @@ const handler = createLabHandler({
   checks,
   log,
   runDrift,
+  stagingState: () => stagingState,
   metrics,
 });
 

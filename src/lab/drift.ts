@@ -193,12 +193,12 @@ export async function readLab(readers: LabReaders): Promise<DriftReads> {
 export type Notify = (message: string, opts?: { report?: boolean }) => Promise<void>;
 
 /** POST one message to pete-bot's /v1/notify, as "lab-agent drift". Throws on anything but 2xx. */
-export function notifier(url: string, token: string, fetchImpl: typeof fetch = fetch): Notify {
+export function notifier(url: string, token: string, fetchImpl: typeof fetch = fetch, from = 'lab-agent drift check'): Notify {
   return async (message, opts) => {
     const res = await fetchImpl(url, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ from: 'lab-agent drift check', message, ...(opts?.report ? { kind: 'report' } : {}) }),
+      body: JSON.stringify({ from, message, ...(opts?.report ? { kind: 'report' } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new NotifyRefused(res.status);
