@@ -88,7 +88,14 @@ export function backupState(b: BackupRow, now: number): 'ok' | 'warn' | 'down' {
   return age > BACKUP_LATE_MS ? 'warn' : 'ok';
 }
 
+/** The staging box's 24-hour clock. Null when the feed carried none, which draws nothing. */
+export type StagingClock =
+  | { state: 'up'; uptimeSec: number; shutsDownInSec: number; checkedAt: string }
+  | { state: 'limit' | 'stopped' | 'unknown'; checkedAt: string; detail: string };
+
 export interface DashboardData {
+  /** The staging clock. Null when the feed carried none or it did not parse. */
+  staging: StagingClock | null;
   /** The last good backup per guest. Null when the feed carried no backup report or it did not parse. */
   backups: { checkedAt: string; guests: BackupRow[] } | null;
   history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[]; uptime: Record<string, UptimeCell[]> } | null;
@@ -311,6 +318,14 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       unread.add('backups');
     } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
   }
+  let staging: StagingClock | null = null;
+  if (o.staging !== undefined) {
+    const st = o.staging;
+    const at = isObj(st) ? str(st.checkedAt, 40) : '';
+    if (isObj(st) && st.state === 'up' && num(st.uptimeSec) !== null && num(st.shutsDownInSec) !== null && at) staging = { state: 'up', uptimeSec: num(st.uptimeSec)!, shutsDownInSec: num(st.shutsDownInSec)!, checkedAt: at };
+    else if (isObj(st) && (st.state === 'limit' || st.state === 'stopped' || st.state === 'unknown') && at) staging = { state: st.state, checkedAt: at, detail: str(st.detail, 160) };
+    else problems.push('the staging clock was unreadable');
+  }
   let shipped: DashboardData['shipped'] = null;
   const sh = o.shipped;
   if (sh !== undefined) {
@@ -327,5 +342,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       };
     }
   }
-  return { data: { shipped, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  return { data: { staging, shipped, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
