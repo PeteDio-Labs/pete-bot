@@ -1,7 +1,7 @@
 # Publishes the dashboard build as a release asset that the staging host pulls (CT 249).
 #
 # The host runs no branch code: it downloads `dashboard-dist.tar.gz`, checks `dashboard-dist.tar.gz.sha256`, and
-# serves the files. This job builds on a GitHub-hosted runner with install scripts off, packs `dashboard/dist`
+# serves the files. `build.json` in the archive names the commit. This job builds on a GitHub-hosted runner with install scripts off, packs `dashboard/dist`
 # (fixtures included, so staging reads no lab data), and replaces the two assets on the `dashboard-staging` release.
 #
 # ⚠ THE LOG SAYS WHAT WAS PACKED. It prints the file count and the checksum, and fails when the build is empty,
@@ -33,6 +33,9 @@ jobs:
         env:
           # Unset, the build reads the fixture. Set it to the real feed once its CORS rule is applied (petedio-iac#752).
           DASHBOARD_FEED: ${{ vars.STAGING_DASHBOARD_FEED }}
+          # The page names its build: the environment and the short commit hash.
+          BUILD_ENV: staging
+          BUILD_SHA: ${{ github.sha }}
         run: |
           bun install --frozen-lockfile --ignore-scripts
           bun run build
@@ -40,6 +43,8 @@ jobs:
         run: |
           files=$(find dashboard/dist -type f | wc -l)
           test "$files" -ge 5 || { echo "::error::only $files files in dashboard/dist"; exit 1; }
+          # The served site names its commit at /build.json, so a reader can tell which build a host serves.
+          printf '{"sha":"%s","builtAt":"%s","run":"%s"}\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_RUN_ID" > dashboard/dist/build.json
           tar -czf dashboard-dist.tar.gz -C dashboard/dist .
           sha256sum dashboard-dist.tar.gz > dashboard-dist.tar.gz.sha256
           echo "packed $files files, $(stat -c %s dashboard-dist.tar.gz) bytes"
@@ -50,4 +55,6 @@ jobs:
         run: |
           gh release view dashboard-staging >/dev/null 2>&1 || gh release create dashboard-staging --prerelease --target "$GITHUB_SHA" --title "Dashboard staging build" --notes "The latest dashboard build for staging. Replaced on every push to dashboard-staging or main."
           gh release upload dashboard-staging dashboard-dist.tar.gz dashboard-dist.tar.gz.sha256 --clobber
-          echo "uploaded 2 assets for $GITHUB_SHA"
+          # The release tag stays on the commit that created it, so the notes name the commit of these assets.
+          gh release edit dashboard-staging --notes "The latest dashboard build for staging, built from $GITHUB_SHA. Replaced on every push to dashboard-staging or main. The tag does not move: read the commit here or in build.json inside the archive."
+          echo "uploaded 2 assets for $GITHUB_SHA and named it in the release notes"

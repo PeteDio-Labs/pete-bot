@@ -434,6 +434,9 @@ holds an Anthropic key. `LAB_PROVIDER=gateway` is refused at lab-agent's startup
 | `GITHUB_UPDATES_TOKEN` | No | — | Token `/update` dispatches with; empty leaves `/update` saying it is not configured |
 | `UPDATES_REPO` | No | `PeteDio-Labs/petedio-media-iac` | Repo that holds the update workflow |
 | `UPDATES_WORKFLOW` | No | `media-updates.yml` | The workflow `/update` dispatches |
+| `GITHUB_KEYS_TOKEN` | No | — | Token the dashboard's Secrets API dispatches `keys.yml` with. Fine-grained, limited to `PeteDio-Labs/petedio-iac`, Actions read and write. With `KEYS_ADMIN_EMAILS`, it turns `/api/keys` on; either one empty leaves it answering 404 |
+| `KEYS_ADMIN_EMAILS` | No | — | Comma-separated emails allowed to use `/api/keys`. They must also pass the dashboard's Access check |
+| `KEYS_REPO`, `KEYS_WORKFLOW` | No | `PeteDio-Labs/petedio-iac`, `keys.yml` | The workflow the Secrets API dispatches |
 | `UPDATES_FIND_TIMEOUT_MS` | No | `90000` | How long a dispatched run may take to appear |
 | `UPDATES_RUN_TIMEOUT_MS` | No | `1800000` | How long `/update` follows a run |
 | `UPDATES_POLL_MS` | No | `10000` | How often it asks GitHub about the run |
@@ -501,3 +504,17 @@ To turn it on, set `REPORTS_MODE=on` and these variables:
 | `WEEKLY_OLLAMA_URL` | Default `http://192.168.50.246:11434`. |
 
 If Qwen cannot answer, the week keeps its count and shows "Summary not generated" with the reason. `/health` on the bot reports `weekly`, and `/health` on port 3018 reports the stored weeks and the last attempt.
+
+## Secrets API (dashboard)
+
+`/api/keys` serves the dashboard's Secrets screen, on the same listener and behind the same Access check as the rest of the dashboard.
+
+| Route | Does |
+|---|---|
+| `POST /api/keys/runs` with `{ action, name? }` | Starts `keys.yml` in `petedio-iac`. `action` is `list`, `sync`, `rotate`, `renew` or `reissue`. The last three need an agent name. |
+| `GET /api/keys/runs/:id` | The run's state by request id: `queued`, `running`, `waiting_tap`, `done`, `failed` or `not_found`. A finished `list` adds the parsed rows. |
+
+- **pete-bot never sees a key.** `keys.yml` runs on the lab runner, writes to Vault and Cloudflare after the `lab-write` tap, and prints names, owners and dates only. The owner copies a key from Vault.
+- **Every write waits on the tap.** A request here only asks. Six writes an hour at most, five seconds apart.
+- **Same origin only.** The CORS rule covers `GET /api/dashboard` alone, a request with another `Origin` is refused, and the body must be `application/json`. A dashboard on staging or on AWS cannot call it.
+- **Off until configured.** Without `GITHUB_KEYS_TOKEN` and `KEYS_ADMIN_EMAILS`, every `/api/keys` route answers 404. A signed-in email outside `KEYS_ADMIN_EMAILS` gets 403.

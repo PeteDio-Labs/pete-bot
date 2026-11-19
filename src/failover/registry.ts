@@ -12,7 +12,7 @@ export interface RegistryEntry {
   name: string;
   hostname: string;
   dataClass: DataClass;
-  /** True for a service that stays on-prem: it never gets an enabled switch. */
+  /** True for a service that stays in the Lab: it never gets an enabled switch. */
   pinned: boolean;
   /** An unauthenticated health URL for the lab side. Absent, the lab side is unknown. */
   labUrl?: string;

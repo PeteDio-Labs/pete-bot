@@ -6,8 +6,8 @@
  * `services/lab-agent` exists at version 3, written at 07:12Z, and it cannot read a value.
  * Field names live in the data, so it cannot list those either.
  *
- * ⚠ VAULT SEALS EVERY NIGHT AT ABOUT 02:45 until the Pi's watcher unseals it. A sealed Vault
- * answers 503, and this tool says "Vault is sealed", never "0 secrets".
+ * ⚠ Vault unseals itself through AWS KMS (PET-946). A sealed Vault, which a restart without AWS
+ * or the internet leaves behind, answers 503, and this tool says "Vault is sealed", never "0 secrets".
  */
 import { z } from 'zod';
 import { fetchWithTimeout, LabToolError, type LabTool } from './types.js';
@@ -88,7 +88,7 @@ export class VaultMetadataClient {
       this.cfg.timeoutMs ?? 8_000,
       `Vault ${method} ${this.mount}/metadata/${path}`,
     );
-    if (res.status === 503) throw new VaultSealedError('Vault is sealed (HTTP 503); it seals nightly at about 02:45 until the watcher unseals it');
+    if (res.status === 503) throw new VaultSealedError('Vault is sealed (HTTP 503); it unseals itself through KMS, so a seal means the restart could not reach AWS');
     if (res.status === 403) throw new LabToolError(`Vault refused the lab-agent token for ${this.mount}/metadata/${path} (HTTP 403)`);
     if (res.status === 404) return null;
     if (!res.ok) throw new LabToolError(`Vault ${method} ${this.mount}/metadata/${path} answered HTTP ${res.status}`);

@@ -80,7 +80,7 @@ const pve = new ProxmoxClient(cfg.proxmox);
 const secrets = new VaultMetadataClient(cfg.vault);
 
 // Keep the periodic Vault token alive. A failure is logged and shows on /health; it is not
-// fatal, because Vault seals nightly and a sealed Vault refuses renewals until it opens.
+// fatal, because a sealed Vault refuses renewals until it opens.
 let lastRenewError: string | null = null;
 async function renew(): Promise<void> {
   try {

@@ -24,6 +24,8 @@ import { localTime } from './schedule.js';
 import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './backup.js';
 import { openReportDb } from './db.js';
+import { config } from '../config.js';
+import { createKeysClient } from '../keys/client.js';
 
 let runner: ReportRunner | null = null;
 let state: ReportsState = { state: 'off' };
@@ -137,6 +139,13 @@ export function keepNotifyReport(from: string, text: string, at: Date): boolean 
   return true;
 }
 
+/** The Secrets screen's API, or none. A token and an admin list must both be set. */
+function keysDeps() {
+  const k = config.keys;
+  if (!k.token || k.admins.length === 0) return undefined;
+  return { client: createKeysClient(k), admins: k.admins, log: (m: string) => logger.info(`[Keys] ${m}`) };
+}
+
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
 async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & ReportsEnv): Promise<void> {
   weekly = loadWeeklySettings(env);
@@ -155,7 +164,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails, agents: w.agents });
     await listenDashboard(
-      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys: keysDeps(), log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );

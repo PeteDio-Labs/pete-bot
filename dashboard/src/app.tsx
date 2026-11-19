@@ -1,8 +1,11 @@
 import { render } from 'preact';
 import { useEffect, useErrorBoundary, useRef, useState, useLayoutEffect } from 'preact/hooks';
-import { tabbar } from 'toonish-ui/markup';
+import { Html } from './html.tsx';
+import { tabbar, button } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
+import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
+import { keysApi, sameOriginPath, type KeysApi } from './keys.ts';
 import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, serviceCard, servicesReadout, servicesRecord, servicesVerdict, workBlocks } from './views.ts';
 
 export const TABS = [
@@ -17,37 +20,6 @@ const POLL_MS = 30_000;
 const DRAW_FAILED = 'This tab could not be drawn from the feed, so its state is unknown.';
 
 type Load = { state: 'loading' } | { state: 'error'; message: string; data: DashboardData | null; problems: string[] } | { state: 'ready'; data: DashboardData; problems: string[]; readAt: number };
-
-/**
- * One block of kit markup. Every string comes from the kit's escaping helpers or from esc() in views.ts.
- *
- * The feed is read again every 30 seconds, and an age such as "68 seconds ago" changes each time. Preact replaces a block
- * only when its string changed, and this component then puts back what the reader had: the rows they opened and the
- * control they had focus on. Without that, a poll would close an open row and drop a keyboard user to the top of the page.
- */
-function Html({ html }: { html: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const keyOf = (d: HTMLDetailsElement): string => d.querySelector('summary')?.id || d.querySelector('summary')?.textContent || '';
-    const was = new Map([...el.querySelectorAll('details')].map((d) => [keyOf(d), d.open]));
-    const active = document.activeElement;
-    const had = active instanceof HTMLElement && el.contains(active);
-    const focusId = had ? active.id : '';
-    // A link in a row's panel has no id, so it is found again by its place among the block's controls.
-    const STOPS = 'a[href], button, summary, [tabindex]';
-    const focusAt = had ? [...el.querySelectorAll(STOPS)].indexOf(active) : -1;
-    el.innerHTML = html;
-    for (const d of el.querySelectorAll('details')) {
-      const open = was.get(keyOf(d));
-      if (open !== undefined) d.open = open;
-    }
-    const back = (focusId && document.getElementById(focusId)) || (focusAt >= 0 ? el.querySelectorAll<HTMLElement>(STOPS)[focusAt] : null);
-    back?.focus({ preventScroll: true });
-  }, [html]);
-  return <div class="dash-block" ref={ref} />;
-}
 
 /**
  * A tab's blocks, or one block that says the tab could not be drawn. A kit helper throws on input it refuses, and one
@@ -113,7 +85,7 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
     // Back to the button that opened the confirm step.
     queueMicrotask(() => document.getElementById(`${id}-${to}`)?.focus());
   };
-  const side = (to: Side): string => (to === 'cloud' ? 'cloud' : 'on-prem');
+  const side = (to: Side): string => (to === 'cloud' ? 'cloud' : 'Lab');
   return (
     <>
       <Html html={servicesVerdict(data, now)} />
@@ -142,7 +114,31 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
   );
 }
 
-export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => number }) {
+/** The key API named by `<meta name="dashboard-keys">`, or null. Only a path on this origin counts. */
+export function getKeysApi(doc: Document = document): KeysApi | null {
+  const base = sameOriginPath(doc.querySelector<HTMLMetaElement>('meta[name="dashboard-keys"]')?.content);
+  return base ? keysApi(base) : null;
+}
+
+/** True while the address names the Secrets screen. The kit's tabs ignore a hash that is not a tab, so this view is the app's own. */
+function useSecretsRoute(): boolean {
+  const [on, setOn] = useState(() => typeof location !== 'undefined' && location.hash === '#secrets');
+  useEffect(() => {
+    const f = () => setOn(location.hash === '#secrets');
+    window.addEventListener('hashchange', f);
+    return () => window.removeEventListener('hashchange', f);
+  }, []);
+  return on;
+}
+
+export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
+  const secrets = useSecretsRoute();
+  const headRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const main = document.getElementById('main');
+    if (main) main.dataset.view = secrets ? 'secrets' : 'tabs';
+    if (secrets) headRef.current?.focus({ preventScroll: false });
+  }, [secrets]);
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   useEffect(() => {
     let alive = true;
@@ -170,22 +166,27 @@ export function App({ feed, now = () => Date.now() }: { feed: Feed; now?: () => 
   const problems = load.state === 'loading' ? [] : load.problems;
   return (
     <>
-      {load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
-      {problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
-      {demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
-      {load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
+      {!secrets && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
+      {!secrets && problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
+      {!secrets && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
+      {!secrets && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
       <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
       <Panel id="act">{data && <Blocks blocks={safe(() => actBlocks(data, n))} />}</Panel>
       <Panel id="services">{data && <Guard><Services data={data} now={n} feed={feed} /></Guard>}</Panel>
       <Panel id="health">{data && <Blocks blocks={safe(() => healthBlocks(data, n))} />}</Panel>
       <Panel id="work">{data && <Blocks blocks={safe(() => workBlocks(data, n))} />}</Panel>
+      <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
+        <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
+        <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
+        <Guard><Secrets api={keys} active={secrets} /></Guard>
+      </section>
     </>
   );
 }
 
 const root = typeof document !== 'undefined' ? document.getElementById('app') : null;
 if (root) {
-  render(<App feed={getFeed()} />, root);
+  render(<App feed={getFeed()} keys={getKeysApi()} />, root);
   // The kit wires tabs and the other behaviour once, after the panels exist.
   void import('toonish-ui/toonish.js');
 }

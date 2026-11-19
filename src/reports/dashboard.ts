@@ -21,6 +21,7 @@ import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
+import { createKeysRouter, type KeysRouteDeps } from '../keys/routes.js';
 import { WEEKLY_MODEL, type Summarize, type WeekRecord, type WeekStore, type WeeklyRunner } from './weekly.js';
 
 export interface DashboardDeps {
@@ -33,6 +34,8 @@ export interface DashboardDeps {
   runner?: Pick<WeeklyRunner, 'last' | 'lastFailure'>;
   /** Reads the registry's service rows. Absent, it probes the lab sides. Tests inject a fake so they stay offline. */
   services?: (now: Date) => Promise<unknown[]>;
+  /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
+  keys?: KeysRouteDeps;
   log?: (msg: string) => void;
 }
 
@@ -92,14 +95,17 @@ export function createDashboardApp(d: DashboardDeps): Express {
       res.status(403).json({ error: 'forbidden' });
       return;
     }
-    // A service token (the staging site's proxy) reads and nothing else: it cannot write a summary.
-    if (access.kind === 'agent' && req.method !== 'GET') {
+    // A service token (the staging site's proxy) reads and nothing else: it cannot write a summary or touch keys.
+    if (access.kind === 'agent' && (req.method !== 'GET' || req.path.startsWith('/api/keys'))) {
       d.log?.(`dashboard refused: ${access.email} tried ${req.method}`);
       res.status(403).json({ error: 'forbidden' });
       return;
     }
+    res.locals.email = access.email;
     next();
   });
+
+  if (d.keys) app.use('/api/keys', createKeysRouter(d.keys, (req) => (req.res?.locals.email as string | undefined)));
 
   app.get('/', (_req, res) => {
     res
