@@ -1,8 +1,8 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { readout, verdict } from 'toonish-ui/markup';
+import { meter, readout, verdict } from 'toonish-ui/markup';
 import { Html } from './html.tsx';
-import { ACTION_WORD, CALLERS_EDIT, EXAMPLE_LIST, VAULT_KEYS, agedList, follow, keyLine, keysVerdict, type ChangeAction, type KeyList, type KeysApi, type RunRead } from './keys.ts';
-import { section } from './views.ts';
+import { ACTION_WORD, CALLERS_EDIT, EXAMPLE_LIST, VAULT_KEYS, agedList, follow, keyLine, keysVerdict, type ChangeAction, type KeyList, type KeyRow, type KeysApi, type RunRead } from './keys.ts';
 
 export const SECRETS_QUESTION = 'Which keys can reach my lab, and does one expire soon?';
 
@@ -24,6 +24,113 @@ const later = (f: () => void): void => void queueMicrotask(f);
 export function Secrets({ api, active, readonly = false, fed = null, whyNot = 'The lab has not sent its key list to this dashboard yet.', now = Date.now }: { api: KeysApi | null; active: boolean; readonly?: boolean; fed?: Fed | null; whyNot?: string; now?: () => number }) {
   if (!api && readonly) return <SecretsPreview fed={fed} whyNot={whyNot} now={now} />;
   return <SecretsLive api={api} active={active} />;
+}
+
+
+type Group = 'needs' | 'fine' | 'new';
+const GROUPS: { id: Group; title: string; none: string }[] = [
+  { id: 'needs', title: 'Needs you', none: 'Nothing needs you. No key is expired or due within 21 days.' },
+  { id: 'fine', title: 'Fine', none: 'No key is in this group.' },
+  { id: 'new', title: 'Not created', none: 'No key is waiting to be created.' },
+];
+const groupOf = (r: KeyRow): Group => (!r.hasToken ? 'new' : r.expired || r.renewSoon ? 'needs' : 'fine');
+const days = (r: KeyRow): string => (r.expired ? 'Expired' : r.daysLeft === null ? 'Expiry unknown' : `${r.daysLeft} d left`);
+const KEY_TERM = 90;
+
+/** A state is a glyph and a word, never colour alone. */
+function stateOf(r: KeyRow): { cls: string; text: string } {
+  if (!r.hasToken) return { cls: 'toon-badge toon-badge-mist', text: '+ Not created' };
+  if (r.expired) return { cls: 'toon-badge', text: '\u00d7 Expired' };
+  if (r.renewSoon) return { cls: 'toon-badge toon-badge-yellow', text: '! Renew soon' };
+  return { cls: 'toon-badge toon-badge-paper', text: '\u2713 Valid' };
+}
+
+function daysBar(r: KeyRow): string {
+  const left = r.expired ? 0 : Math.max(0, r.daysLeft ?? 0);
+  return meter({ label: 'Days left', value: left, max: KEY_TERM, clamp: true, tone: r.expired ? 'red' : r.renewSoon ? 'yellow' : 'green', valueText: days(r), id: `bar-${r.name.replace(/[^\w-]/g, '-')}` });
+}
+
+interface BoardProps {
+  rows: KeyRow[];
+  /** The read-only build: buttons look off and only open the steps. */
+  preview: boolean;
+  off: boolean;
+  ask: (action: ChangeAction, name: string | null, from: string) => void;
+  /** The buttons that sit in the bar beside the switch. */
+  bar: ComponentChildren;
+  vault?: boolean;
+}
+
+/**
+ * The keys as one bar and three groups of rows. The switch picks Needs you or All. Each row is a native disclosure, so it
+ * opens in place with no script, and its panel holds the days-left bar and the three changes with their one-line results.
+ */
+function KeyBoard({ rows, preview, off, ask, bar, vault = false }: BoardProps) {
+  const [show, setShow] = useState<'needs' | 'all'>('all');
+  const needs = rows.filter((r) => groupOf(r) === 'needs').length;
+  const pick = (e: Event) => {
+    const v = (e.target as HTMLElement).closest<HTMLElement>('[data-value]')?.dataset.value;
+    if (v === 'needs' || v === 'all') setShow(v);
+  };
+  return (
+    <>
+      <div class="dash-keybar">
+        <div class="toon-seg" role="group" aria-label="Show keys" onClick={pick}>
+          <button type="button" class="toon-seg-btn" aria-pressed={show === 'needs'} data-value="needs">Needs you <span class="toon-seg-count">{needs}</span></button>
+          <button type="button" class="toon-seg-btn" aria-pressed={show === 'all'} data-value="all">All <span class="toon-seg-count">{rows.length}</span></button>
+        </div>
+        <div class="dash-actions">{bar}</div>
+      </div>
+      {GROUPS.filter((g) => show === 'all' || g.id === 'needs').map((g) => {
+        const rs = rows.filter((r) => groupOf(r) === g.id);
+        if (!rs.length && show === 'all') return null;
+        return (
+          <section class="dash-group" key={g.id} aria-labelledby={`grp-${g.id}`}>
+            <h3 class="dash-group-h" id={`grp-${g.id}`}>{`${g.title} \u00b7 ${rs.length}`}</h3>
+            {rs.length === 0 ? (
+              <p class="dash-note">{g.none}</p>
+            ) : (
+              <div class="toon-list dash-keys" role="list" aria-label={g.title}>
+                {rs.map((r) => {
+                  const st = stateOf(r);
+                  return (
+                    <div class="toon-disclosure dash-key" role="listitem" key={r.name}>
+                      <details class="toon-disclosure-details">
+                        <summary class="toon-disclosure-btn">
+                          <span class="toon-disclosure-lead toon-owner-a">KEY</span>
+                          <span class="toon-disclosure-title"><b class="dash-key-name">{r.name}</b> <span class={st.cls}>{st.text}</span></span>
+                          <span class="toon-disclosure-sub">{keyLine(r)}</span>
+                          <span class="toon-disclosure-value toon-disclosure-note">{r.hasToken ? days(r) : 'In git'}</span>
+                        </summary>
+                        <div class="toon-disclosure-panel">
+                          {r.hasToken ? (
+                            <>
+                              <Html html={daysBar(r)} />
+                              <div class="dash-acts">
+                                {(['renew', 'rotate', 'reissue'] as const).map((a) => (
+                                  <>
+                                    <button type="button" key={a} class={`toon-btn ${a === 'renew' ? '' : 'toon-btn-paper '}dash-btn${preview ? ' dash-btn-preview' : ''}`} disabled={off} aria-describedby={preview ? 'preview-note' : undefined} id={`key-${r.name}-${a}`} onClick={() => ask(a, r.name, `key-${r.name}-${a}`)}>{ACTION_WORD[a].label}<span class="sr-only">{` ${r.name}`}</span></button>
+                                    <p>{ACTION_WORD[a].does}</p>
+                                  </>
+                                ))}
+                              </div>
+                              {vault && <p class="dash-actions"><a class="toon-btn toon-btn-paper dash-btn" href={VAULT_KEYS} target="_blank" rel="noopener noreferrer">Copy from Vault<span class="sr-only">{` for ${r.name}`}</span></a></p>}
+                            </>
+                          ) : (
+                            <p>This key is in the list in git and does not exist yet. Apply changes creates it.</p>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </>
+  );
 }
 
 /** The list the lab last read and sent through the feed, with when. */
@@ -118,22 +225,17 @@ function SecretsLive({ api, active }: { api: KeysApi | null; active: boolean }) 
     <>
       {loading && !list ? <p class="dash-loading" role="status">Reading the keys. A run on the lab takes about a minute.</p> : <Html html={keysVerdict(list, readError)} />}
       <div class="dash-section">
-        <Html html={section('01', 'Keys', '')} />
-        {list && list.rows.length > 0 && (
-          <ul class="dash-keys" aria-label="Keys">
-            {list.rows.map((r) => (
-              <li class="toon-card dash-key" key={r.name}>
-                <b class="dash-key-name">{r.name}</b>
-                <p class="dash-key-line">{keyLine(r)}</p>
-                <p class="dash-actions">
-                  {r.hasToken && (['renew', 'rotate', 'reissue'] as const).map((a) => (
-                    <button type="button" key={a} class="toon-btn toon-btn-paper dash-btn" disabled={off} id={`key-${r.name}-${a}`} onClick={() => ask(a, r.name, `key-${r.name}-${a}`)}>{`${ACTION_WORD[a].label}`}<span class="sr-only">{` ${r.name}`}</span></button>
-                  ))}
-                  <a class="toon-btn toon-btn-paper dash-btn" href={VAULT_KEYS} target="_blank" rel="noopener noreferrer">Copy from Vault<span class="sr-only">{` for ${r.name}`}</span></a>
-                </p>
-              </li>
-            ))}
-          </ul>
+        {list && list.rows.length > 0 ? (
+          <KeyBoard rows={list.rows} preview={false} off={off} ask={ask} vault bar={<>
+            <button type="button" class="toon-btn dash-btn" id="key-apply" disabled={off} onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
+            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+            <button type="button" class="toon-btn toon-btn-paper dash-btn" disabled={off || loading} onClick={() => void refresh()}>Refresh the list</button>
+          </>} />
+        ) : (
+          <p class="dash-actions">
+            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+            <button type="button" class="toon-btn toon-btn-paper dash-btn" disabled={off || loading} onClick={() => void refresh()}>Refresh the list</button>
+          </p>
         )}
         {asked && (
           <div class="dash-confirm-box" role="group" aria-label="Confirm the request">
@@ -148,18 +250,7 @@ function SecretsLive({ api, active }: { api: KeysApi | null; active: boolean }) 
           {status?.text}
           {status?.url && <>{' '}<a href={status.url} target="_blank" rel="noopener noreferrer">Open the run</a></>}
         </p>
-        <p class="dash-actions">
-          <button type="button" class="toon-btn toon-btn-paper dash-btn" disabled={off || loading} onClick={() => void refresh()}>Refresh the list</button>
-        </p>
-      </div>
-      <div class="dash-section">
-        <Html html={section('02', 'Add or remove a key', '')} />
-        <p>The list of keys is a file in git, so an addition or a removal is a pull request first. Edit it on GitHub, merge, then apply the change here.</p>
-        <p class="dash-actions">
-          <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit the key list on GitHub</a>
-          <button type="button" class="toon-btn toon-btn-paper dash-btn" id="key-apply" disabled={off} onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
-        </p>
-        <p class="dash-note">A new key also needs its path in <code>secrets/register.yml</code>. A removed key also leaves each route’s <code>agents</code> list.</p>
+        <p class="dash-note">The key list is a file in git, so an addition or a removal is a pull request first. Edit it, merge, then Apply changes. A new key also needs its path in <code>secrets/register.yml</code>. A removed key also leaves each route’s <code>agents</code> list.</p>
       </div>
       <Html html={readout(list && seen.at ? `Read ${list.rows.length} keys at ${when(seen.at)}. ${list.read} No key value is read or shown here: copy a key from Vault, and every change waits for your tap on GitHub. ` : 'The key list has not been read.', { label: 'What was read' })} />
     </>
@@ -197,21 +288,11 @@ function SecretsPreview({ fed, whyNot, now }: { fed: Fed | null; whyNot: string;
       <Html html={keysVerdict(real, real ? null : whyNot, age)} />
       <p class="toon-callout toon-callout-yellow dash-banner" id="preview-note">Staging is read-only. The buttons open the steps and send nothing.</p>
       <div class="dash-section">
-        <Html html={section('01', real ? 'Keys' : 'Example keys', '')} />
         {!real && <p class="dash-note">These rows are examples so you can try the buttons. They are not your keys.</p>}
-        <ul class="dash-keys" aria-label={real ? 'Keys' : 'Example keys'}>
-          {list.rows.map((r) => (
-            <li class="toon-card dash-key" key={r.name}>
-              <b class="dash-key-name">{r.name}</b>
-              <p class="dash-key-line">{keyLine(r)}</p>
-              <p class="dash-actions">
-                {r.hasToken && (['renew', 'rotate', 'reissue'] as const).map((a) => (
-                  <button type="button" key={a} class="toon-btn toon-btn-paper dash-btn dash-btn-preview" aria-describedby="preview-note" id={`key-${r.name}-${a}`} onClick={() => ask(a, r.name, `key-${r.name}-${a}`)}>{ACTION_WORD[a].label}<span class="sr-only">{` ${r.name}`}</span></button>
-                ))}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <KeyBoard rows={list.rows} preview off={false} ask={ask} bar={<>
+          <button type="button" class="toon-btn dash-btn dash-btn-preview" id="key-apply" aria-describedby="preview-note" onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
+          <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+        </>} />
         {asked && (
           <div class="dash-confirm-box" role="group" aria-label="Confirm the request">
             <p>{`${ACTION_WORD[asked.action].label}${asked.name ? ` ${asked.name}` : ''}: ${ACTION_WORD[asked.action].does} On the lab dashboard it runs only after you approve it on GitHub.`}</p>
@@ -222,15 +303,7 @@ function SecretsPreview({ fed, whyNot, now }: { fed: Fed | null; whyNot: string;
             </p>
           </div>
         )}
-        <p class="dash-note">{real ? 'The lab reads this list every 6 hours. Refresh it on the lab dashboard.' : 'When the lab has a list, it reads it every 6 hours and sends it here.'}</p>
-      </div>
-      <div class="dash-section">
-        <Html html={section('02', 'Add or remove a key', '')} />
-        <p>The list of keys is a file in git, so an addition or a removal is a pull request first. Then the change is applied from the lab dashboard.</p>
-        <p class="dash-actions">
-          <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit the key list on GitHub</a>
-          <button type="button" class="toon-btn toon-btn-paper dash-btn dash-btn-preview" id="key-apply" aria-describedby="preview-note" onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
-        </p>
+        <p class="dash-note">{real ? 'The lab reads this list every 6 hours. Refresh it on the lab dashboard.' : 'When the lab has a list, it reads it every 6 hours and sends it here.'} The key list is a file in git, so an addition or a removal is a pull request first, then Apply changes on the lab dashboard.</p>
       </div>
       <Html html={readout(real && fed ? `Read ${real.rows.length} keys by the lab on ${new Date(fed.at).toISOString().slice(0, 10)} at ${when(fed.at)}, ${Math.max(0, Math.floor(age! / 3_600_000))} hours ago. ${real.read} No key value is read or shown here.` : `${whyNot} The rows above are examples.`, { label: 'What was read' })} />
     </>

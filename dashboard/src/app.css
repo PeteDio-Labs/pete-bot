@@ -62,3 +62,11 @@
 .dash-back { margin: 0 0 .75rem; }
 .dash-banner summary { cursor: pointer; min-height: 24px; }
 .dash-banner > p { margin: .5rem 0 0; font-weight: 400; }
+
+/* Secrets: a bar, then groups of disclosure rows (kit 0.8.4). */
+.dash-keybar { display: grid; gap: .75rem; padding: .75rem; margin-bottom: 1rem; border: 3px solid var(--color-toon-ink, #0a0a1f); border-radius: 14px; background: var(--color-toon-paper, #fff6dc); box-shadow: 3px 3px 0 var(--color-toon-blue, #5f8dff); }
+.dash-group { margin-bottom: 1rem; }
+.dash-group-h { margin: 0 0 .5rem; font-family: var(--font-mono, ui-monospace, monospace); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
+.dash-acts { display: grid; grid-template-columns: auto 1fr; gap: .5rem .75rem; align-items: center; margin: .75rem 0 0; }
+.dash-acts p { margin: 0; font-size: .875rem; }
+@media (max-width: 30rem) { .dash-acts { grid-template-columns: 1fr; } }
