@@ -47,3 +47,28 @@ export async function cachedServices(now: Date): Promise<ServiceRow[]> {
   cached = { at: now.getTime(), rows };
   return rows;
 }
+
+/**
+ * Public sites the lab does not run, such as the portfolio on S3 and CloudFront. They have no switch: a site row only says
+ * whether the address answers. Staging answers from the lab network; a redirect to a login reads as unknown, never as up.
+ */
+export interface SiteEntry { name: string; env: 'production' | 'staging'; url: string }
+export interface SiteRow extends SiteEntry { reading: SideStatus | null }
+
+export const SITES: readonly SiteEntry[] = [
+  { name: 'Portfolio', env: 'production', url: 'https://pdlab.dev/' },
+  { name: 'Portfolio', env: 'staging', url: 'https://staging.pdlab.dev/' },
+];
+
+export async function buildSites(now: Date, fetchFn: Fetch = fetch as unknown as Fetch, sites: readonly SiteEntry[] = SITES): Promise<SiteRow[]> {
+  const readings = await Promise.all(sites.map((e) => readLab({ name: e.name, hostname: e.url, dataClass: 'stateless', pinned: true, labUrl: e.url }, fetchFn, now)));
+  return sites.map((e, i) => ({ ...e, reading: readings[i] ?? null }));
+}
+
+let cachedSiteRows: { at: number; rows: SiteRow[] } | null = null;
+export async function cachedSites(now: Date): Promise<SiteRow[]> {
+  if (cachedSiteRows && now.getTime() - cachedSiteRows.at < CACHE_MS) return cachedSiteRows.rows;
+  const rows = await buildSites(now);
+  cachedSiteRows = { at: now.getTime(), rows };
+  return rows;
+}

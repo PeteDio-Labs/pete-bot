@@ -6,7 +6,7 @@ import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
 import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
 import { keysApi, sameOriginPath, type KeysApi } from './keys.ts';
-import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, topBar, serviceCard, servicesReadout, servicesRecord, servicesVerdict, workBlocks } from './views.ts';
+import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, topBar, serviceCard, servicesReadout, servicesRecord, servicesVerdict, sitesBlock, workBlocks } from './views.ts';
 
 export const TABS = [
   { id: 'now', label: 'Now' },
@@ -108,7 +108,8 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
           <p class="dash-status" role="status" aria-live="polite">{msg}</p>
         </div>
       )}
-      <Html html={section('02', 'On record', servicesRecord(data, now))} />
+      {data.sites.length > 0 && <Html html={section('02', 'Public sites', sitesBlock(data, now))} />}
+      <Html html={section(data.sites.length > 0 ? '03' : '02', 'On record', servicesRecord(data, now))} />
       <Html html={servicesReadout(data, now)} />
     </>
   );

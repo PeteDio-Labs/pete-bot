@@ -38,6 +38,8 @@ export interface CveFinding {
   kev: boolean;
 }
 
+export interface SiteRow { name: string; env: 'production' | 'staging'; url: string; reading: SideStatus | null }
+
 export interface SideStatus {
   ok: boolean;
   checkedAt: string;
@@ -99,6 +101,8 @@ export interface DashboardData {
   alerts: AlertRow[];
   cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** The run's full exploited count. `findings` may be capped, so the tile uses this when present. */ exploited: number | null; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
+  /** Public sites the lab does not run. A reading of null is unknown, never up. */
+  sites: SiteRow[];
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
@@ -278,6 +282,14 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     const dc = s.dataClass as ServiceRow['dataClass'];
     services.push({ name: str(s.name, 60), hostname: str(s.hostname, 120), active: s.active, dataClass: dc, pinned: s.pinned === true, auto: s.auto === true, lab: side(s.lab), cloud: side(s.cloud) });
   }
+  const sites: SiteRow[] = [];
+  for (const x of arr('sites')) {
+    if (!isObj(x) || !str(x.name) || (x.env !== 'production' && x.env !== 'staging') || !/^https:\/\//.test(str(x.url, 200))) {
+      problems.push('a site row was unreadable');
+      continue;
+    }
+    sites.push({ name: str(x.name, 60), env: x.env, url: str(x.url, 200), reading: side(x.reading) });
+  }
   const tr = o.triage;
   const trNums = isObj(tr) ? [num(tr.read), num(tr.cards), num(tr.plain), num(tr.failures)] : [];
   const triage = isObj(tr) && trNums.every((v) => v !== null) ? { read: trNums[0]!, cards: trNums[1]!, plain: trNums[2]!, failures: trNums[3]!, since: str(tr.since, 40) } : null;
@@ -309,5 +321,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       unread.add('backups');
     } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
   }
-  return { data: { backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  return { data: { backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
