@@ -162,7 +162,7 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
     const summarize = ollamaSummarizer(w.ollamaUrl);
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
-    const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
+    const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails, agents: w.agents });
     await listenDashboard(
       createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys: keysDeps(), log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,

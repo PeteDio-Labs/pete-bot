@@ -6,6 +6,8 @@
  * The dashboard needs the Access settings: with no AUD tag it does not start, so the page
  * is never served unauthenticated.
  */
+import { parseAgents } from '../mcp-kit/access.js';
+
 export interface WeeklyEnv {
   WEEKLY_REPORT_DIR?: string;
   WEEKLY_DASH_HOST?: string;
@@ -13,6 +15,8 @@ export interface WeeklyEnv {
   WEEKLY_ACCESS_TEAM_DOMAIN?: string;
   WEEKLY_ACCESS_AUD?: string;
   WEEKLY_ACCESS_EMAILS?: string;
+  /** `<32 hex>.access=<name>,...`: service tokens that may read the dashboard feed, and only read it. */
+  WEEKLY_ACCESS_AGENTS?: string;
   WEEKLY_OLLAMA_URL?: string;
 }
 
@@ -23,6 +27,7 @@ export interface WeeklySettings {
   teamDomain: string;
   aud: string;
   emails: string[];
+  agents: Record<string, string>;
   ollamaUrl: string;
 }
 
@@ -41,7 +46,13 @@ export function loadWeeklySettings(env: WeeklyEnv): WeeklyState {
   if (!/^[0-9a-f]{64}$/.test(aud)) return bad('WEEKLY_ACCESS_AUD must be the 64-hex Access AUD tag');
   const emails = (env.WEEKLY_ACCESS_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (emails.length === 0) return bad('WEEKLY_ACCESS_EMAILS is empty');
+  let agents: Record<string, string>;
+  try {
+    agents = parseAgents(env.WEEKLY_ACCESS_AGENTS);
+  } catch (err) {
+    return bad(`WEEKLY_ACCESS_AGENTS is malformed: ${(err as Error).message}`);
+  }
   const ollamaUrl = (env.WEEKLY_OLLAMA_URL ?? '').trim().replace(/\/+$/, '') || 'http://192.168.50.246:11434';
   if (!/^https?:\/\//.test(ollamaUrl)) return bad(`WEEKLY_OLLAMA_URL must start with http:// or https://, not "${ollamaUrl}"`);
-  return { state: 'ready', settings: { dir, host: (env.WEEKLY_DASH_HOST ?? '').trim() || '127.0.0.1', port, teamDomain, aud, emails, ollamaUrl } };
+  return { state: 'ready', settings: { dir, host: (env.WEEKLY_DASH_HOST ?? '').trim() || '127.0.0.1', port, teamDomain, aud, emails, agents, ollamaUrl } };
 }

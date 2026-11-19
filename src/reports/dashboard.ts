@@ -22,7 +22,7 @@ import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
 import { createKeysRouter, type KeysRouteDeps } from '../keys/routes.js';
-import { WEEKLY_MODEL, type Summarize, type WeekStore, type WeeklyRunner } from './weekly.js';
+import { WEEKLY_MODEL, type Summarize, type WeekRecord, type WeekStore, type WeeklyRunner } from './weekly.js';
 
 export interface DashboardDeps {
   store: WeekStore;
@@ -37,6 +37,16 @@ export interface DashboardDeps {
   /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
   keys?: KeysRouteDeps;
   log?: (msg: string) => void;
+}
+
+/** The newest stored week, or null when none is stored or it cannot be read: the section is then left out. */
+function newestWeek(store: WeekStore): WeekRecord | null {
+  try {
+    const w = store.weeks()[0];
+    return w ? store.get(w) : null;
+  } catch {
+    return null;
+  }
 }
 
 export const STAGING_ORIGIN = 'https://staging-dash.pdlab.dev';
@@ -82,6 +92,12 @@ export function createDashboardApp(d: DashboardDeps): Express {
     const access = await d.verify(req.header('cf-access-jwt-assertion') ?? null);
     if (!access.ok) {
       d.log?.(`dashboard refused: ${access.reason}`);
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    // A service token (the staging site's proxy) reads and nothing else: it cannot write a summary or touch keys.
+    if (access.kind === 'agent' && (req.method !== 'GET' || req.path.startsWith('/api/keys'))) {
+      d.log?.(`dashboard refused: ${access.email} tried ${req.method}`);
       res.status(403).json({ error: 'forbidden' });
       return;
     }
@@ -177,7 +193,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/api/dashboard', async (_req, res) => {
     try {
       const now = new Date();
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now) }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), week: newestWeek(d.store) }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }

@@ -486,3 +486,40 @@ describe('sources nobody read never give an all clear', () => {
     expect(() => workView(b.data, now)).not.toThrow();
   });
 });
+
+describe('shipped section', () => {
+  const good = { week: '2026-11-09', generatedAt: '2026-11-16T03:00:00Z', total: 14, openNow: 3, reposRead: 9, reposTotal: 10, unread: ['x'], repos: [{ repo: 'a', count: 8 }], prs: [{ repo: 'a', number: 1, title: 'T', author: 'P' }], summary: 'S' };
+  test('parses a good section and leaves a missing one null', () => {
+    expect(parseDashboard({ ...(fixture as object), shipped: good }).data.shipped?.total).toBe(14);
+    const { shipped: _drop, ...rest } = fixture as Record<string, unknown>;
+    expect(parseDashboard(rest).data.shipped).toBeNull();
+  });
+  test('an unreadable counter drops the section and says so', () => {
+    const r = parseDashboard({ ...(fixture as object), shipped: { ...good, total: 'many' } });
+    expect(r.data.shipped).toBeNull();
+    expect(r.problems.some((x) => x.includes('weekly PR report'))).toBe(true);
+  });
+});
+
+import { workView } from '../src/views.ts';
+describe('Work shows the shipped week', () => {
+  test('a weekly section appears when the feed carries one, and not otherwise', () => {
+    const d = parseDashboard(fixture).data;
+    const now = Date.parse(d.generatedAt);
+    expect(workView(d, now)).toContain('Shipped this week');
+    expect(workView({ ...d, shipped: null }, now)).not.toContain('Shipped this week');
+  });
+});
+
+describe('Work shipped: capped reads and numbering', () => {
+  test('a capped read says "At least", and the section continues the numbering', () => {
+    const d = parseDashboard({ ...(fixture as object), shipped: { ...(fixture as { shipped: object }).shipped, capped: ['example-iac'] } }).data;
+    const html = workView(d, Date.parse(d.generatedAt));
+    expect(html).toContain('At least');
+    expect(html).toContain('stopped inside the week');
+    const nums = [...html.matchAll(/dash-section/g)].length;
+    expect(nums).toBeGreaterThan(1);
+    const kick = [...html.matchAll(/>(0\d)</g)].map((m) => m[1]);
+    expect(new Set(kick).size).toBe(kick.length);
+  });
+});
