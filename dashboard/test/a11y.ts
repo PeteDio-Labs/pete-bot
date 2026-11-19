@@ -171,6 +171,7 @@ try {
       });
       await on.goto(`${server.url.origin}/#secrets`, { waitUntil: 'load' });
       await on.waitForSelector('.dash-key');
+      await on.evaluate(() => document.querySelectorAll('#secrets details').forEach((d) => ((d as HTMLDetailsElement).open = true)));
       const k = await on.evaluate(() => ({ n: document.querySelectorAll('.dash-key').length, short: [...document.querySelectorAll<HTMLElement>('#secrets .toon-btn')].filter((b) => b.getBoundingClientRect().height < 43.5).length, text: document.getElementById('secrets')!.textContent ?? '' }));
       if (k.n !== 2 || k.short) fail.push(`secrets @${w}: ${k.n} key rows, ${k.short} buttons under 44 px`);
       if (!k.text.includes('expire within 21 days') && !k.text.includes('expires within 21 days')) fail.push(`secrets @${w}: a key with 13 days left does not lead the verdict`);
@@ -208,10 +209,15 @@ try {
         });
         await ro.goto(`${server.url.origin}/#secrets`, { waitUntil: 'load' });
         await ro.waitForFunction(() => document.querySelectorAll('#secrets .dash-key').length > 0);
+        await ro.evaluate(() => document.querySelectorAll('#secrets details').forEach((d) => ((d as HTMLDetailsElement).open = true)));
         const t = await ro.evaluate(() => ({ names: [...document.querySelectorAll('#secrets .dash-key-name')].map((e) => e.textContent), short: [...document.querySelectorAll<HTMLElement>('#secrets .toon-btn')].filter((b) => b.getBoundingClientRect().height < 43.5).length, text: document.getElementById('secrets')!.textContent ?? '' }));
-        const want = withList ? ['muse', 'batsy'] : ['example-agent', 'example-soon', 'example-new'];
+        const want = withList ? ['batsy', 'muse'] : ['example-soon', 'example-agent', 'example-new'];
         if (JSON.stringify(t.names) !== JSON.stringify(want)) fail.push(`secrets read-only ${withList ? 'list' : 'examples'} @${w}: rows ${JSON.stringify(t.names)}`);
         if (t.short) fail.push(`secrets read-only @${w}: ${t.short} buttons under 44 px`);
+        await ro.getByRole('button', { name: /^Needs you/ }).click();
+        const sw = await ro.evaluate(() => ({ groups: [...document.querySelectorAll('#secrets .dash-group-h')].map((h) => h.textContent ?? ''), pressed: document.querySelector('#secrets .toon-seg-btn[aria-pressed="true"]')?.getAttribute('data-value') }));
+        if (sw.pressed !== 'needs' || sw.groups.length !== 1 || !sw.groups[0]!.startsWith('Needs you')) fail.push(`secrets read-only @${w}: the Needs you switch left ${JSON.stringify(sw)}`);
+        await ro.getByRole('button', { name: /^All/ }).click();
         if (!withList && !t.text.includes('not your keys')) fail.push(`secrets read-only @${w}: example rows are not labelled as examples`);
         if (withList && /example-/.test(t.text)) fail.push(`secrets read-only @${w}: example rows appear beside a real list`);
         await ro.getByRole('button', { name: withList ? 'Renew batsy' : 'Renew example-soon' }).click();
