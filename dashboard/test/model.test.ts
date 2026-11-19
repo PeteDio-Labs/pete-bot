@@ -515,3 +515,27 @@ describe('The top of Now: app bar, brief and status rows', () => {
     expect(barState(data, now)).toEqual({ text: 'Partly read', tone: 'unknown' });
   });
 });
+
+describe('Now folds rows that say the same thing', () => {
+  const at = '2026-11-18T12:00:00Z';
+  const now = Date.parse('2026-11-18T12:00:30Z');
+  test('three down alerts are one row with cells, and the pill still counts three', async () => {
+    const { nowView, barState } = await import('../src/views.ts');
+    const a = (monitor: string) => ({ monitor, state: 'down', since: at, triage: 'no_action' });
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [a('plane'), a('usaa'), a('vault')] });
+    const html = nowView(data, now);
+    expect(html).toContain('3 alerts are down');
+    expect(html).toContain('plane, usaa, vault');
+    expect((html.match(/toon-srow-down/g) ?? []).length).toBe(1);
+    expect(html).toContain('toon-cells');
+    expect(barState(data, now).text).toBe('3 need you');
+  });
+  test('sources that were not read are one row that names each', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [] });
+    const html = nowView(data, now);
+    expect(html).toContain('3 sources were not read');
+    expect(html).toContain('CVE report');
+    expect(html).not.toContain('All clear');
+  });
+});
