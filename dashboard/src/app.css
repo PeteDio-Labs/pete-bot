@@ -70,3 +70,5 @@
 .dash-acts { display: grid; grid-template-columns: auto 1fr; gap: .5rem .75rem; align-items: center; margin: .75rem 0 0; }
 .dash-acts p { margin: 0; font-size: .875rem; }
 @media (max-width: 30rem) { .dash-acts { grid-template-columns: 1fr; } }
+.dash-keybar .dash-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; }
+.dash-keybar .dash-actions .toon-btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: nowrap; padding-inline: .5rem; }

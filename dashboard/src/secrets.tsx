@@ -228,12 +228,12 @@ function SecretsLive({ api, active }: { api: KeysApi | null; active: boolean }) 
         {list && list.rows.length > 0 ? (
           <KeyBoard rows={list.rows} preview={false} off={off} ask={ask} vault bar={<>
             <button type="button" class="toon-btn dash-btn" id="key-apply" disabled={off} onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
-            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer" aria-label="Edit list on GitHub">Edit list</a>
             <button type="button" class="toon-btn toon-btn-paper dash-btn" disabled={off || loading} onClick={() => void refresh()}>Refresh the list</button>
           </>} />
         ) : (
           <p class="dash-actions">
-            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+            <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer" aria-label="Edit list on GitHub">Edit list</a>
             <button type="button" class="toon-btn toon-btn-paper dash-btn" disabled={off || loading} onClick={() => void refresh()}>Refresh the list</button>
           </p>
         )}
@@ -291,7 +291,7 @@ function SecretsPreview({ fed, whyNot, now }: { fed: Fed | null; whyNot: string;
         {!real && <p class="dash-note">These rows are examples so you can try the buttons. They are not your keys.</p>}
         <KeyBoard rows={list.rows} preview off={false} ask={ask} bar={<>
           <button type="button" class="toon-btn dash-btn dash-btn-preview" id="key-apply" aria-describedby="preview-note" onClick={() => ask('sync', null, 'key-apply')}>Apply changes</button>
-          <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer">Edit list on GitHub</a>
+          <a class="toon-btn toon-btn-paper dash-btn" href={CALLERS_EDIT} target="_blank" rel="noopener noreferrer" aria-label="Edit list on GitHub">Edit list</a>
         </>} />
         {asked && (
           <div class="dash-confirm-box" role="group" aria-label="Confirm the request">
