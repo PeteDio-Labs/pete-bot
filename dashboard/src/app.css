@@ -5,11 +5,16 @@
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
 /* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
 .dash-header { position: relative; z-index: 60; max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem 0; }
-/* The cog sits on the bar's top right corner, so the pill keeps the line it has in the mock. */
-.dash-settings { position: absolute; top: .375rem; right: .625rem; z-index: 20; transform: scale(.85); transform-origin: top right; }
+/* The cog is a tile inside the bar, like the PD mark: same border, radius and shadow, in line with the pill. */
+.dash-barwrap { position: relative; }
+.dash-appbar { flex-wrap: wrap; padding-right: 4.25rem; }
+.dash-settings { position: absolute; top: calc(.75rem + 2px); right: calc(.75rem + 2px); z-index: 20; }
+.dash-settings .toon-settings-btn { width: 44px; height: 44px; border-radius: 12px; box-shadow: 2px 2px 0 var(--color-toon-ink); }
+.dash-settings .toon-gears { width: 30px; height: 30px; }
 .dash-appbar .toon-appbar-state { padding-inline: .6rem; letter-spacing: .04em; }
 .dash-appbar .toon-appbar-title, .dash-appbar .toon-appbar-sub { white-space: nowrap; }
-.dash-appbar .toon-appbar-text { min-width: 0; }
+.dash-appbar .toon-appbar-text { min-width: max-content; }
+@media (max-width: 30rem) { .dash-appbar .toon-appbar-state { margin-left: 3.5rem; } }
 .dash-appbar .toon-appbar-title { font-size: 1.125rem; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
