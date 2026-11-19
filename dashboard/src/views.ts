@@ -203,13 +203,31 @@ function visualFor(a: Attention, d: DashboardData, now: number): string {
   return '';
 }
 
+const svg = (d: string): string => `<svg viewBox="0 0 24 24" focusable="false">${d.replace(/STROKE/g, 'fill="none" stroke="#0a0a1f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"')}</svg>`;
+/** One tile per kind, so a row says what it is before you read it. Drawn here from plain paths: the kit checks that each is one svg of drawing elements. */
+const ICON: Record<Attention['kind'], { svg: string; tone: 'red' | 'yellow' | 'blue' | 'violet' | 'mist' }> = {
+  SERVICE: { svg: svg('<rect x="3" y="4" width="18" height="6" rx="2" STROKE/><rect x="3" y="14" width="18" height="6" rx="2" STROKE/><path d="M7 7h.01M7 17h.01" STROKE/>'), tone: 'blue' },
+  CARD: { svg: svg('<rect x="5" y="4" width="14" height="17" rx="2" STROKE/><path d="M9 4h6v3H9zM9 12h6M9 16h4" STROKE/>'), tone: 'blue' },
+  ALERT: { svg: svg('<path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4" STROKE/>'), tone: 'yellow' },
+  CVE: { svg: svg('<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" STROKE/><path d="M12 8v5M12 16h.01" STROKE/>'), tone: 'yellow' },
+  BACKUP: { svg: svg('<ellipse cx="12" cy="6" rx="8" ry="3" STROKE/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6" STROKE/>'), tone: 'red' },
+  PLANE: { svg: svg('<circle cx="12" cy="12" r="8" STROKE/><path d="M12 7v5l3 2" STROKE/>'), tone: 'violet' },
+  UNREAD: { svg: svg('<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" STROKE/><path d="M4 4l16 16" STROKE/>'), tone: 'mist' },
+};
+
+/** The first sentence of a line, cut to fit a phone row. A row says what is wrong; the tab it opens says how to fix it. */
+const short = (text: string, max = 80): string => {
+  const first = text.split(/(?<=[.!?])\s/)[0]!.trim();
+  return first.length <= max ? first : `${first.slice(0, max - 1).trimEnd()}…`;
+};
+
 /** One row of Now. A row that needs Pedro carries one blue button; a source that was not read links to the tab that says why. */
 function nowRow(a: Attention, d: DashboardData, now: number): string {
-  const sub = [a.why, a.step].filter(Boolean).join(' ');
-  const base = { state: a.state, lead: LEAD[a.kind], stateText: STATE_WORD[a.state], title: a.title, sub, visual: visualFor(a, d, now) || undefined, fact: a.since ? ageText(a.since, now) : a.fact };
-  if (a.state === 'unknown') return statusRow({ ...base, href: `#${a.tab}` });
+  const unread = a.state === 'unknown';
+  const base = { state: a.state, lead: LEAD[a.kind], stateText: STATE_WORD[a.state], title: a.title, sub: unread ? undefined : short(a.why), icon: ICON[a.kind].svg, iconTone: ICON[a.kind].tone, visual: visualFor(a, d, now) || undefined, fact: a.since ? ageText(a.since, now) : a.fact };
+  if (unread) return statusRow({ ...base, href: `#${a.tab}` });
   const lab = a.kind === 'CARD' || a.kind === 'ALERT' || a.kind === 'CVE' || a.kind === 'BACKUP';
-  return statusRow({ ...base, action: button({ label: lab ? 'Open lab actions' : `Open ${TAB_LABEL[a.tab]}`, href: lab ? LAB_ACTIONS : `#${a.tab}`, cls: 'dash-btn' }) });
+  return statusRow({ ...base, action: button({ label: lab ? 'Open lab actions' : `Open ${TAB_LABEL[a.tab]}`, href: lab ? LAB_ACTIONS : `#${a.tab}`, direction: 'next', cls: 'dash-btn' }) });
 }
 
 /** What the app bar's pill says: how many things need Pedro, or that the answer is not an all clear. */
@@ -221,9 +239,21 @@ export function barState(d: DashboardData, now: number): { text: string; tone: T
   return { text: 'All clear', tone: 'ok' };
 }
 
+/** A short age for the header's one quiet line: `60 s ago`, `5 min ago`, `3 h ago`. */
+function shortAge(iso: string, now: number): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return 'at an unknown time';
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 90) return `${s} s ago`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
+
 /** The page's header: logo tile, title, when the feed was read, and the pill. */
 export const topBar = (d: DashboardData | null, now: number): string =>
-  appbar({ title: 'Lab dashboard', sub: d ? `Read ${ageText(d.generatedAt, now)}` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
+  appbar({ title: 'Lab dashboard', sub: d ? `Read ${shortAge(d.generatedAt, now)}` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
 
 export function nowBlocks(d: DashboardData, now: number): string[] {
   const all = attention(d, now);
@@ -237,7 +267,7 @@ export function nowBlocks(d: DashboardData, now: number): string[] {
     const answer = brief({
       state: worst.state, stateText: STATE_WORD[worst.state], palette: 'ink', count: `${act.length}!`,
       title: act.length === 1 ? worst.title : `${act.length} things need you`,
-      body: act.length === 1 ? worst.step ?? worst.why : `Start with: ${act[0]!.title}.`,
+      body: act.length === 1 ? worst.step ?? worst.why : undefined,
     });
     return [answer, section('01', 'Worst first', list(act.map((a) => nowRow(a, d, now)), { label: 'What needs you, worst first' })), ...unreadSection('02'), read];
   }

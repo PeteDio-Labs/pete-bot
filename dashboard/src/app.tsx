@@ -177,7 +177,12 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
   return (
     <>
       {!secrets && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
-      {!secrets && problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
+      {!secrets && problems.length > 0 && (
+        <details class="toon-callout toon-callout-yellow dash-banner">
+          <summary>{`${problems.length === 1 ? 'One part' : `${problems.length} parts`} of the feed could not be read. Details`}</summary>
+          <p>{`${problems.slice(0, 4).join('; ')}.`}</p>
+        </details>
+      )}
       {!secrets && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
       {!secrets && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
       <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
