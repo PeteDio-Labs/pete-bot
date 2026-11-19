@@ -510,3 +510,16 @@ describe('Work shows the shipped week', () => {
     expect(workView({ ...d, shipped: null }, now)).not.toContain('Shipped this week');
   });
 });
+
+describe('Work shipped: capped reads and numbering', () => {
+  test('a capped read says "At least", and the section continues the numbering', () => {
+    const d = parseDashboard({ ...(fixture as object), shipped: { ...(fixture as { shipped: object }).shipped, capped: ['example-iac'] } }).data;
+    const html = workView(d, Date.parse(d.generatedAt));
+    expect(html).toContain('At least');
+    expect(html).toContain('stopped inside the week');
+    const nums = [...html.matchAll(/dash-section/g)].length;
+    expect(nums).toBeGreaterThan(1);
+    const kick = [...html.matchAll(/>(0\d)</g)].map((m) => m[1]);
+    expect(new Set(kick).size).toBe(kick.length);
+  });
+});

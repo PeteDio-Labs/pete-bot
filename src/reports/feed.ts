@@ -95,6 +95,16 @@ export function buildDashboardFeed({ hub, batches, now, services, week }: FeedIn
     if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: typeof p.needsPedro === 'number' ? p.needsPedro : undefined, inReview: p.inReview, cycle: rec(p.cycle).name, lost: typeof p.lost === 'number' ? p.lost : undefined, ...cycleDetail(p) };
   }
 
+  // A stored record that does not have the expected shape must not take the live sections down with it.
+  let shipped: Record<string, unknown> | null = null;
+  if (week) {
+    try {
+      shipped = shippedSection(week);
+    } catch {
+      shipped = null;
+    }
+  }
+
   return {
     generatedAt: now.toISOString(),
     source: 'pete-bot',
@@ -103,7 +113,7 @@ export function buildDashboardFeed({ hub, batches, now, services, week }: FeedIn
     services: services ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
-    ...(week ? { shipped: shippedSection(week) } : {}),
+    ...(shipped ? { shipped } : {}),
   };
 }
 
@@ -119,6 +129,8 @@ function shippedSection(w: WeekRecord): Record<string, unknown> {
     reposRead: w.coverage.reposRead,
     reposTotal: w.coverage.reposTotal,
     unread: w.coverage.unread.slice(0, 10),
+    // Repos whose read stopped inside the week, so the total is a lower bound.
+    capped: w.coverage.floorRepos.slice(0, 10),
     repos,
     prs,
     ...(w.summary.source === 'ollama' && w.summary.text ? { summary: w.summary.text.slice(0, 800) } : {}),

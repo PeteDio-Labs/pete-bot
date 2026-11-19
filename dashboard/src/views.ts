@@ -391,13 +391,13 @@ function shippedBlocks(d: DashboardData, now: number, num: string): string[] {
   const prs = w.prs.length ? list(w.prs.map((x) => row({ lead: `${x.repo} #${x.number}`, title: x.title, aside: x.author })), { label: 'Newest merged pull requests' }) : p('No merged pull request is listed.');
   const repos = w.repos.length ? list(w.repos.map((x) => row({ lead: String(x.count), title: x.repo })), { label: 'Merged pull requests per repository' }) : '';
   const cover = `Read ${w.reposRead} of ${w.reposTotal} repositories${w.unread.length ? `. Not read: ${w.unread.join(', ')}` : ''}.`;
-  const panel = (w.summary ? p(w.summary) : '') + prs + repos + readout(`Week of ${w.week}, written ${ageText(w.generatedAt, now)}. ${cover} The list shows the newest ${w.prs.length} of ${w.total}. ${w.openNow} still open.`);
-  return [section(num, 'Shipped this week', list([disclosure({ id: 'work-shipped', lead: 'PR', title: `${plural(w.total, 'pull request')} merged`, note: `week of ${w.week}`, native: true, panel })], { label: 'The week\'s merged pull requests' }))];
+  const panel = (w.summary ? p(w.summary) : '') + prs + repos + readout(`Week of ${w.week}, written ${ageText(w.generatedAt, now)}. ${cover} ${w.capped.length ? `At least this many: the read of ${w.capped.join(', ')} stopped inside the week. ` : ''}The list shows the newest ${w.prs.length} of ${w.total}. ${w.openNow} still open.`);
+  return [section(num, 'Shipped this week', list([disclosure({ id: 'work-shipped', lead: 'PR', title: `${w.capped.length ? 'At least ' : ''}${plural(w.total, 'pull request')} merged`, note: `week of ${w.week}`, native: true, panel })], { label: 'The week\'s merged pull requests' }))];
 }
 
 export function workBlocks(d: DashboardData, now: number): string[] {
   const out = workCore(d, now);
-  const extra = shippedBlocks(d, now, String(out.filter((b) => b.includes('toon-section')).length + 1).padStart(2, '0'));
+  const extra = shippedBlocks(d, now, String(out.filter((b) => b.includes('dash-section')).length + 1).padStart(2, '0'));
   if (!extra.length) return out;
   // Keep the closing readout last.
   const last = out.length - 1;

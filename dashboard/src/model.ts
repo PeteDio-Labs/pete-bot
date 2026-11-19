@@ -102,7 +102,7 @@ export interface DashboardData {
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
   /** The newest weekly PR report. Null when the feed carried none or it did not parse. */
-  shipped: { week: string; generatedAt: string; total: number; openNow: number; reposRead: number; reposTotal: number; unread: string[]; repos: { repo: string; count: number }[]; prs: { repo: string; number: number; title: string; author: string }[]; summary: string } | null;
+  shipped: { week: string; generatedAt: string; total: number; openNow: number; reposRead: number; reposTotal: number; unread: string[]; /** Repos whose read stopped inside the week: the total is then a lower bound. */ capped: string[]; repos: { repo: string; count: number }[]; prs: { repo: string; number: number; title: string; author: string }[]; summary: string } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
   unread: ('needs' | 'alerts' | 'backups')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
@@ -322,6 +322,7 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
         unread: (Array.isArray(sh.unread) ? sh.unread : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 10),
         repos: sh.repos.filter((r) => isObj(r) && str(r.repo) && num(r.count) !== null).slice(0, 8).map((r) => ({ repo: str((r as Record<string, unknown>).repo, 60), count: num((r as Record<string, unknown>).count)! })),
         prs: sh.prs.filter((r) => isObj(r) && str(r.title) && num(r.number) !== null).slice(0, 10).map((r) => { const x = r as Record<string, unknown>; return { repo: str(x.repo, 60), number: num(x.number)!, title: str(x.title, 160), author: str(x.author, 40) }; }),
+        capped: (Array.isArray(sh.capped) ? sh.capped : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 10),
         summary: str(sh.summary, 800),
       };
     }
