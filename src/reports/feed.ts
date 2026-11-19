@@ -48,9 +48,11 @@ export interface FeedInput {
   now: Date;
   /** Registry rows with their lab readings. Absent, the section is empty and the SPA reads every service as unknown. */
   services?: unknown[];
+  /** Public sites with an address reading. Absent, the SPA shows no sites. */
+  sites?: unknown[];
 }
 
-export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, sites }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -98,6 +100,7 @@ export function buildDashboardFeed({ hub, batches, now, services }: FeedInput): 
     needs,
     alerts,
     services: services ?? [],
+    sites: sites ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
   };

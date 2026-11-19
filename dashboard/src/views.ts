@@ -464,6 +464,24 @@ export function servicesVerdict(d: DashboardData, now: number): string {
   return verdict({ state: anyUnknown ? 'unknown' : 'warn', stateText: 'Partly', title: `${ready.length} of ${plural(movable.length, 'movable service')} can switch now`, body: `Ready: ${ready.map((x) => x.s.name).join(', ')}.${why}${pin}${dropped}` });
 }
 
+/** Public sites the lab does not run. A site that did not answer in time, or answers with a login redirect, is unknown, never up. */
+export function sitesBlock(d: DashboardData, now: number): string {
+  if (d.sites.length === 0) return '';
+  const rows = d.sites.map((x) => {
+    const h = healthOf(x.reading, now);
+    const age = x.reading && h !== 'unknown' ? ` · ${shortAge(x.reading.checkedAt, now)} ago` : '';
+    return statusRow({
+      state: h,
+      lead: 'SITE',
+      stateText: `${HEALTH_WORD[h]}${age}`,
+      title: `${x.name}, ${x.env}`,
+      sub: x.reading && h !== 'unknown' ? short(x.reading.detail.replace('the health URL', 'the address')) : 'The address gave no usable reading: it redirected, or the read is out of date.',
+      action: button({ label: 'Open site', href: x.url, direction: 'next', cls: 'dash-btn' }),
+    });
+  });
+  return list(rows, { label: 'Public sites' });
+}
+
 export function watchdogMeters(d: DashboardData, now: number): string {
   const checks = d.services.flatMap((s) => [healthOf(s.lab, now), healthOf(s.cloud, now)]);
   const count = (h: Health): number => checks.filter((x) => x === h).length;

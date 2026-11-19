@@ -539,3 +539,19 @@ describe('Now folds rows that say the same thing', () => {
     expect(html).not.toContain('All clear');
   });
 });
+
+describe('Sites', () => {
+  const base = { generatedAt: '2026-11-16T22:00:00Z', services: [], needs: [], alerts: [] };
+  test('reads a site with and without a reading, and drops a row that is not https', () => {
+    const { data, problems } = parseDashboard({ ...base, sites: [
+      { name: 'Portfolio', env: 'production', url: 'https://pdlab.dev/', reading: { ok: true, checkedAt: '2026-11-16T22:00:00Z', detail: 'HTTP 200', lagS: null } },
+      { name: 'Portfolio', env: 'staging', url: 'https://staging.pdlab.dev/', reading: null },
+      { name: 'Bad', env: 'production', url: 'javascript:alert(1)', reading: null },
+    ] });
+    expect(data.sites.map((x) => [x.env, x.reading?.ok ?? null])).toEqual([['production', true], ['staging', null]]);
+    expect(problems).toContain('a site row was unreadable');
+  });
+  test('treats a feed with no sites as an empty list', () => {
+    expect(parseDashboard(base).data.sites).toEqual([]);
+  });
+});

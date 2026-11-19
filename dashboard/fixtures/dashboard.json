@@ -708,5 +708,24 @@
         "detail": ""
       }
     ]
-  }
+  },
+  "sites": [
+    {
+      "name": "Portfolio",
+      "env": "production",
+      "url": "https://pdlab.dev/",
+      "reading": {
+        "ok": true,
+        "checkedAt": "2026-11-16T22:00:00Z",
+        "detail": "HTTP 200 from the health URL",
+        "lagS": null
+      }
+    },
+    {
+      "name": "Portfolio",
+      "env": "staging",
+      "url": "https://staging.pdlab.dev/",
+      "reading": null
+    }
+  ]
 }
