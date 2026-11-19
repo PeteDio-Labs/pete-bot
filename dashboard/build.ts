@@ -43,7 +43,7 @@ ${keysUrl ? `<meta name="dashboard-keys" content="${esc(keysUrl)}">` : ''}
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<div class="dash-header"><div class="dash-barwrap"><div id="top">${appbar({ title: 'Lab dashboard', sub: 'PeteDio Labs', cls: 'dash-appbar' })}</div>${settingsMenu({ id: 'settings', cls: 'dash-settings', spin: 'always', items: [{ label: 'Secrets', href: '#secrets' }] })}</div></div>
+<div class="dash-header"><div class="dash-barwrap"><div id="top">${appbar({ title: 'Lab dashboard', sub: 'PeteDio Labs', cls: 'dash-appbar' })}</div>${settingsMenu({ id: 'settings', cls: 'dash-settings', spin: 'always', items: [{ label: 'Secrets', href: '#secrets' }, { label: 'Villains', href: '#villains' }] })}</div></div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>

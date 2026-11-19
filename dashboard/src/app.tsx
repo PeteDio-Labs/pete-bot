@@ -5,6 +5,7 @@ import { tabbar, button } from 'toonish-ui/markup';
 import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
 import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
+import { Villains, VILLAINS_QUESTION } from './villains.tsx';
 import { keysApi, sameOriginPath, type KeysApi } from './keys.ts';
 import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, topBar, serviceCard, servicesReadout, servicesRecord, servicesVerdict, sitesBlock, workBlocks } from './views.ts';
 
@@ -126,7 +127,7 @@ export function getKeysApi(doc: Document = document): KeysApi | null {
  * To add a view: add its name here, add a `<section class="dash-flow" id="<name>" hidden={route !== '<name>'}>` in `App`, and
  * add a menu item in `build.ts`. The tab bar and panels hide while any of them shows.
  */
-export const FLOW_ROUTES = ['secrets'] as const;
+export const FLOW_ROUTES = ['secrets', 'villains'] as const;
 export type FlowRoute = (typeof FLOW_ROUTES)[number];
 
 const routeOf = (hash: string): FlowRoute | null => FLOW_ROUTES.find((r) => hash === `#${r}`) ?? null;
@@ -144,12 +145,15 @@ function useFlowRoute(): FlowRoute | null {
 export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
   const route = useFlowRoute();
   const secrets = route === 'secrets';
+  const villains = route === 'villains';
   const inFlow = route !== null;
   const headRef = useRef<HTMLHeadingElement>(null);
+  const villainsRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const main = document.getElementById('main');
     if (main) main.dataset.view = route ?? 'tabs';
     if (secrets) headRef.current?.focus({ preventScroll: false });
+    if (villains) villainsRef.current?.focus({ preventScroll: false });
   }, [route]);
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   useEffect(() => {
@@ -206,6 +210,11 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
         <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
         <Guard><Secrets api={keys} active={secrets} /></Guard>
+      </section>
+      <section class="dash-flow" id="villains" aria-labelledby="villains-h" hidden={!villains}>
+        <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
+        <h2 class="toon-heading dash-q" id="villains-h" tabIndex={-1} ref={villainsRef}>{VILLAINS_QUESTION}</h2>
+        <Guard><Villains /></Guard>
       </section>
     </>
   );

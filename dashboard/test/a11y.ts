@@ -136,6 +136,30 @@ try {
       polls++;
       await q.close();
     }
+    // Villains: the menu opens a preview whose buttons are all greyed out. Each button keeps focus, says why in a described line,
+    // is 44 px tall, and axe passes. The tabs hide while it shows, and Back returns to Now.
+    {
+      const v = await ctx.newPage();
+      await v.goto(`${server.url.origin}/`, { waitUntil: 'load' });
+      await v.locator('summary[aria-label="Settings"]').click();
+      await v.getByRole('link', { name: 'Villains' }).click();
+      await v.waitForSelector('#villains:not([hidden])');
+      const o = await v.evaluate(() => {
+        const bs = [...document.querySelectorAll<HTMLElement>('#villains button')];
+        return { view: document.getElementById('main')!.dataset.view, tabs: getComputedStyle(document.querySelector('.toon-tabbar')!).display, n: bs.length, enabled: bs.filter((b) => b.getAttribute('aria-disabled') !== 'true').length, noWhy: bs.filter((b) => !document.getElementById(b.getAttribute('aria-describedby') ?? '')?.textContent).length, short: bs.filter((b) => b.getBoundingClientRect().height < 43.5).length, focus: document.activeElement?.id };
+      });
+      if (o.view !== 'villains' || o.tabs !== 'none') fail.push(`villains @${w}: the page did not replace the tabs (${JSON.stringify(o)})`);
+      if (o.n !== 5 || o.enabled !== 0) fail.push(`villains @${w}: expected 5 greyed buttons and 0 live ones, read ${JSON.stringify(o)}`);
+      if (o.noWhy !== 0 || o.short !== 0) fail.push(`villains @${w}: a button has no reason or is under 44 px (${JSON.stringify(o)})`);
+      if (o.focus !== 'villains-h') fail.push(`villains @${w}: focus is on "${o.focus}", not the page's heading`);
+      await v.addScriptTag({ url: '/__axe.js' });
+      const ar = await v.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
+      runs++;
+      for (const x of ar.violations) fail.push(`villains @${w}: ${x.id} (${x.nodes.length}): ${x.help}; first ${x.nodes[0].target.join(' ')}`.slice(0, 300));
+      await v.getByRole('link', { name: 'Back to dashboard' }).click();
+      await v.waitForFunction(() => document.getElementById('main')!.dataset.view === 'tabs');
+      await v.close();
+    }
     // Secrets: the menu opens the screen. Without a key API the screen shows no key and no button; with one it lists keys,
     // a change asks, waits for the tap and ends done, and axe passes in the list, the confirm step and the "off" state.
     {
@@ -248,6 +272,6 @@ try {
   await browser.close();
   server.stop(true);
 }
-console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the switch confirm and the two Secrets states at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
-if (runs !== TABS.length * Object.keys(states).length * 2 + 6 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
+console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the switch confirm the two Secrets states and the Villains preview at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
+if (runs !== TABS.length * Object.keys(states).length * 2 + 8 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
 if (fail.length) { console.error('a11y check FAILED:\n- ' + fail.join('\n- ')); process.exit(1); }
