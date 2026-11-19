@@ -121,6 +121,11 @@ export function getKeysApi(doc: Document = document): KeysApi | null {
   return base ? keysApi(base) : null;
 }
 
+/** True when the build asks for the read-only Secrets screen (staging). `<meta name="dashboard-keys-mode" content="readonly">`. */
+export function getKeysReadonly(doc: Document = document): boolean {
+  return doc.querySelector<HTMLMetaElement>('meta[name="dashboard-keys-mode"]')?.content === 'readonly';
+}
+
 /**
  * The app's own full-page views, each at its own hash. The kit's tabs ignore a hash that is not a tab, so these are routed here.
  * To add a view: add its name here, add a `<section class="dash-flow" id="<name>" hidden={route !== '<name>'}>` in `App`, and
@@ -141,7 +146,15 @@ function useFlowRoute(): FlowRoute | null {
   return on;
 }
 
-export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
+/** Why no key list shows, from what the feed read. Each state gets its own reason, because the feed banners are hidden on this screen. */
+function keysWhy(load: Load): string {
+  if (load.state === 'loading') return 'The feed is still loading.';
+  if (load.state === 'error' && !load.data) return 'The feed could not be read.';
+  if (load.problems.includes('the key list was unreadable')) return 'The lab sent a key list this page could not read.';
+  return 'The lab has not sent its key list to this dashboard yet.';
+}
+
+export function App({ feed, keys = null, keysReadonly = false, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; keysReadonly?: boolean; now?: () => number }) {
   const route = useFlowRoute();
   const secrets = route === 'secrets';
   const inFlow = route !== null;
@@ -205,7 +218,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
       <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
         <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
-        <Guard><Secrets api={keys} active={secrets} /></Guard>
+        <Guard><Secrets api={keys} active={secrets} readonly={keysReadonly} fed={data?.keys ?? null} whyNot={keysWhy(load)} now={now} /></Guard>
       </section>
     </>
   );
@@ -213,7 +226,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
 
 const root = typeof document !== 'undefined' ? document.getElementById('app') : null;
 if (root) {
-  render(<App feed={getFeed()} keys={getKeysApi()} />, root);
+  render(<App feed={getFeed()} keys={getKeysApi()} keysReadonly={getKeysReadonly()} />, root);
   // The kit wires tabs and the other behaviour once, after the panels exist.
   void import('toonish-ui/toonish.js');
 }

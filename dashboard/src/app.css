@@ -56,6 +56,9 @@
 .dash-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 0; }
 .dash-confirm-box { display: grid; gap: .5rem; padding: .75rem; border: 3px solid var(--color-toon-ink, #0a0a1f); border-radius: 12px; background: var(--color-toon-paper, #fff6dc); color: var(--color-toon-ink, #0a0a1f); }
 .dash-confirm-box p { margin: 0; }
+/* A preview button looks off but stays a button, so a person can open the steps. The confirm button is really disabled. */
+.dash-btn-preview { filter: grayscale(1); }
+.dash-btn-off { opacity: .6; }
 .dash-back { margin: 0 0 .75rem; }
 .dash-banner summary { cursor: pointer; min-height: 24px; }
 .dash-banner > p { margin: .5rem 0 0; font-weight: 400; }

@@ -555,3 +555,31 @@ describe('Sites', () => {
     expect(parseDashboard(base).data.sites).toEqual([]);
   });
 });
+
+describe('parseDashboard: keys', () => {
+  const base = { ...(fixture as Record<string, unknown>) };
+  const row = { name: 'muse', owner: 'pedro', hasToken: true, version: '3', expires: '2027-02-10T00:00:00Z', daysLeft: 84, expired: false, renewSoon: false, inCallers: true, clientId: 'ca14c1dd.access' };
+  const keys = { at: '2026-11-19T04:00:00Z', read: 'keys list: read 1 agents in callers.yml and 1 Vault entries; 0 expired', unparsed: 0, rows: [row] };
+  test('reads the list and its time, and keeps nothing but the row fields', () => {
+    const { data, problems } = parseDashboard({ ...base, keys });
+    expect(problems.filter((p) => p.includes('key list'))).toEqual([]);
+    expect(data.keys?.at).toBe(Date.parse('2026-11-19T04:00:00Z'));
+    expect(data.keys?.list.rows).toHaveLength(1);
+    expect(JSON.stringify(data.keys)).not.toContain('ca14c1dd');
+  });
+  test('a feed with no keys section reads as no list, and says nothing is wrong', () => {
+    const { data, problems } = parseDashboard(base);
+    expect(data.keys).toBeNull();
+    expect(problems.some((p) => p.includes('key list'))).toBe(false);
+  });
+  test.each([
+    ['no time', { ...keys, at: '' }],
+    ['no rows', { ...keys, rows: [] }],
+    ['a row with a bad name', { ...keys, rows: [{ ...row, name: '../x' }] }],
+    ['a row with a missing flag', { ...keys, rows: [{ ...row, expired: undefined }] }],
+  ])('a list with %s is unreadable, not empty', (_n, bad) => {
+    const { data, problems } = parseDashboard({ ...base, keys: bad });
+    expect(data.keys).toBeNull();
+    expect(problems).toContain('the key list was unreadable');
+  });
+});

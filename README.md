@@ -508,6 +508,8 @@ If Qwen cannot answer, the week keeps its count and shows "Summary not generated
 
 `/api/keys` serves the dashboard's Secrets screen, on the same listener and behind the same Access check as the rest of the dashboard.
 
+With the token and admin list set, pete-bot also starts `keys.yml` `list` 90 seconds after start and every 6 hours, and keeps the parsed result in `keys-list.json` beside the report store (`src/keys/cache.ts`, `src/keys/refresh.ts`). A finished `list` read through `/api/keys` refreshes it too. `/api/dashboard` carries it as the `keys` section, so the read-only staging screen can show it. The section holds names, owners and dates; no key value is read here. A run that fails leaves the last good list in place and logs why.
+
 | Route | Does |
 |---|---|
 | `POST /api/keys/runs` with `{ action, name? }` | Starts `keys.yml` in `petedio-iac`. `action` is `list`, `sync`, `rotate`, `renew` or `reissue`. The last three need an agent name. |
