@@ -105,3 +105,22 @@ describe('keysApi', () => {
     await expect(a.start('sync')).rejects.toThrow('too many key changes');
   });
 });
+
+describe('keysVerdict with an age', () => {
+  it('reads a list older than 36 hours as unknown, even when every key looked valid', () => {
+    const fresh = text(keysVerdict(list([row()]), null, 3_600_000));
+    expect(fresh).toContain('All 1 key are valid');
+    const old = text(keysVerdict(list([row()]), null, 40 * 3_600_000));
+    expect(old).toContain('The key list is out of date');
+    expect(old).toContain('40 hours ago');
+    expect(old).not.toContain('All 1 key');
+  });
+});
+
+describe('the example rows', () => {
+  it('name no real key and never read as a real list', async () => {
+    const { EXAMPLE_LIST } = await import('../src/keys.ts');
+    expect(EXAMPLE_LIST.rows.every((r) => r.name.startsWith('example-'))).toBe(true);
+    expect(EXAMPLE_LIST.read).toContain('not read from the lab');
+  });
+});

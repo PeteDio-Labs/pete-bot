@@ -8,6 +8,8 @@ import { logger } from '../utils/index.js';
 import { PlaneClient } from './plane.js';
 import { ReportRunner, chunk, type ReportsStatus, type Sender } from './runner.js';
 import { AccessVerifier } from '../lab/access.js';
+import { KeysCache } from '../keys/cache.js';
+import { startKeyRefresh } from '../keys/refresh.js';
 import { createDashboardApp, listenDashboard } from './dashboard.js';
 import { loadReportSettings, type ReportSettings, type ReportsEnv, type ReportsState } from './settings.js';
 import { loadWeeklySettings, type WeeklyEnv, type WeeklyState } from './weeklySettings.js';
@@ -140,10 +142,10 @@ export function keepNotifyReport(from: string, text: string, at: Date): boolean 
 }
 
 /** The Secrets screen's API, or none. A token and an admin list must both be set. */
-function keysDeps() {
+function keysDeps(cache: KeysCache) {
   const k = config.keys;
   if (!k.token || k.admins.length === 0) return undefined;
-  return { client: createKeysClient(k), admins: k.admins, log: (m: string) => logger.info(`[Keys] ${m}`) };
+  return { client: createKeysClient(k), admins: k.admins, cache, log: (m: string) => logger.info(`[Keys] ${m}`) };
 }
 
 /** The Sunday PR report and its Access-gated dashboard (PET-868). Reads GitHub as the reports do. */
@@ -162,13 +164,17 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
     const summarize = ollamaSummarizer(w.ollamaUrl);
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
+    const keysCache = new KeysCache(w.dir);
+    const keys = keysDeps(keysCache);
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
     await listenDashboard(
-      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys: keysDeps(), log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys, keysCache, log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );
     dashboardListening = true;
+    // With a token placed, read the key list every 6 hours so the feed has one without anyone opening Secrets.
+    if (keys) startKeyRefresh({ client: keys.client, cache: keysCache, log: (m) => logger.info(`[Keys] ${m}`) });
     weeklyRunner.start();
     const petClient = s.plane ? new PlaneClient(s.plane) : null;
     const medId = (env.PLANE_MED_PROJECT_ID ?? '').trim();

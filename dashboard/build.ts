@@ -18,6 +18,8 @@ if (keysUrl && !/^\/[A-Za-z0-9._~\/-]*$/.test(keysUrl)) {
 // with `production`, draws nothing. The badge is decided here, at build time, so the page never guesses its environment from its URL.
 const buildEnv = process.env.BUILD_ENV ?? '';
 const buildSha = process.env.BUILD_SHA ?? '';
+// A staging build with no key API shows the keys the lab sent through the feed, read-only. Any other build without the API shows none.
+const keysReadonly = buildEnv === 'staging' && !keysUrl;
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
@@ -38,6 +40,7 @@ const html = `<!doctype html>
 <meta name="dashboard-feed" content="${esc(feed)}">
 ${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
 ${keysUrl ? `<meta name="dashboard-keys" content="${esc(keysUrl)}">` : ''}
+${keysReadonly ? '<meta name="dashboard-keys-mode" content="readonly">' : ''}
 <title>Lab dashboard</title>
 <link rel="stylesheet" href="/app.css">
 </head>

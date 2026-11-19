@@ -9,6 +9,7 @@
  * so they are absent on purpose.
  */
 import type { AlertBatch } from '../server/alertStore.js';
+import type { KeysSnapshot } from '../keys/cache.js';
 import type { HubRecord, ReportHub } from './hub.js';
 import { CVE_KIND } from './hubCve.js';
 import { CYCLE_KIND } from './hubCycle.js';
@@ -50,9 +51,11 @@ export interface FeedInput {
   services?: unknown[];
   /** Public sites with an address reading. Absent, the SPA shows no sites. */
   sites?: unknown[];
+  /** The last key list pete-bot read (names, owners, dates), or null when none was read. */
+  keys?: KeysSnapshot | null;
 }
 
-export function buildDashboardFeed({ hub, batches, now, services, sites }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, sites, keys }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -103,5 +106,7 @@ export function buildDashboardFeed({ hub, batches, now, services, sites }: FeedI
     sites: sites ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
+    // Names, owners and dates. No key value is read here or anywhere in this process.
+    ...(keys ? { keys: { at: keys.at, read: keys.list.read, unparsed: keys.list.unparsed, rows: keys.list.rows } } : {}),
   };
 }

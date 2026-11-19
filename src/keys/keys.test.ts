@@ -7,6 +7,7 @@ import { createKeysClient, newRequestId, REQUEST_ID_RE, type KeysClient } from '
 import { parseKeyList } from './list.js';
 import { createDashboardApp } from '../reports/dashboard.js';
 import { WeekStore } from '../reports/weekly.js';
+import { KeysCache } from './cache.js';
 
 const LOG = [
   '2026-11-18T10:00:00.0000000Z action=list name=none pet=none sha=abc actor=x',
@@ -181,5 +182,22 @@ describe('routes', () => {
       });
     }
     await call(fake({ findRun: vi.fn(async () => undefined) }), {}, async (b) => expect(((await (await fetch(`${b}/api/keys/runs/pb-abc-123456`)).json()) as { state: string }).state).toBe('not_found'));
+  });
+  it('keeps a finished list for the feed, and the feed has no keys section before any list was read', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'keys-'));
+    const cache = new KeysCache();
+    const client = fake({ findRun: vi.fn(async () => ({ id: 7, url: 'u', status: 'completed', conclusion: 'success' })) });
+    const app = createDashboardApp({ store: new WeekStore(dir), services: async () => [], keysCache: cache, verify: async () => ({ ok: true, email: 'pedro@x.dev' }), keys: { client, admins: ['pedro@x.dev'], cache, findTimeoutMs: 0, sleep: async () => {} } });
+    const server = app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      expect(((await (await fetch(`${base}/api/dashboard`)).json()) as { keys?: unknown }).keys).toBeUndefined();
+      await fetch(`${base}/api/keys/runs/pb-abc-123456?action=list`);
+      const feed = (await (await fetch(`${base}/api/dashboard`)).json()) as { keys?: { rows: { name: string }[] } };
+      expect(feed.keys?.rows.map((r) => r.name)).toEqual(['muse', 'batsy', 'old', 'staging']);
+      expect(JSON.stringify(feed)).not.toContain('ca14c1dd');
+    } finally {
+      server.close();
+    }
   });
 });

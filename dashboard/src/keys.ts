@@ -131,9 +131,27 @@ export function keyLine(r: KeyRow): string {
   return `Owner ${r.owner || 'unknown'}. Expires ${exp} (${left}).${r.inCallers ? '' : ' Not in git: Apply changes revokes it.'}`;
 }
 
-/** The answer the screen leads with. A list that was not read is unknown, never all clear. `verdict()` escapes its text, so nothing is escaped here. */
-export function keysVerdict(list: KeyList | null, readError: string | null = null): string {
+/** A list read longer ago than this no longer says which keys are valid now. The lab reads every 6 hours. */
+export const KEYS_STALE_MS = 36 * 3_600_000;
+
+/** Three synthetic keys for a read-only build with no list yet, so its buttons can be tried. They never stand for a real key. */
+export const EXAMPLE_LIST: KeyList = {
+  read: 'Example rows, not read from the lab.',
+  unparsed: 0,
+  rows: [
+    { name: 'example-agent', owner: 'example', hasToken: true, version: '2', expires: '2027-03-01T00:00:00Z', daysLeft: 90, expired: false, renewSoon: false, inCallers: true },
+    { name: 'example-soon', owner: 'example', hasToken: true, version: '1', expires: '2026-12-01T00:00:00Z', daysLeft: 12, expired: false, renewSoon: true, inCallers: true },
+    { name: 'example-new', owner: '', hasToken: false, version: null, expires: null, daysLeft: null, expired: false, renewSoon: false, inCallers: true },
+  ],
+};
+
+/**
+ * The answer the screen leads with. A list that was not read is unknown, never all clear. A list read long ago is unknown too.
+ * `verdict()` escapes its text, so nothing is escaped here.
+ */
+export function keysVerdict(list: KeyList | null, readError: string | null = null, ageMs: number | null = null): string {
   if (!list) return verdict({ state: 'unknown', title: 'The key list was not read', body: readError ?? 'So it is unknown which keys are valid.' });
+  if (ageMs !== null && ageMs > KEYS_STALE_MS) return verdict({ state: 'unknown', title: 'The key list is out of date', body: `The lab last read it ${Math.floor(ageMs / 3_600_000)} hours ago, so it is unknown which keys are valid now.` });
   const rows = list.rows;
   const expired = rows.filter((r) => r.expired);
   const soon = rows.filter((r) => !r.expired && r.renewSoon);

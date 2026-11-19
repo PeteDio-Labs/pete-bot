@@ -21,6 +21,7 @@ import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
+import type { KeysCache } from '../keys/cache.js';
 import { createKeysRouter, type KeysRouteDeps } from '../keys/routes.js';
 import { WEEKLY_MODEL, type Summarize, type WeekStore, type WeeklyRunner } from './weekly.js';
 
@@ -37,6 +38,8 @@ export interface DashboardDeps {
   sites?: (now: Date) => Promise<unknown[]>;
   /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
   keys?: KeysRouteDeps;
+  /** The last key list read, which the feed carries for staging. Absent, the feed has no `keys` section. */
+  keysCache?: KeysCache;
   log?: (msg: string) => void;
 }
 
@@ -178,7 +181,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
   app.get('/api/dashboard', async (_req, res) => {
     try {
       const now = new Date();
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now) }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), keys: d.keysCache?.get() ?? null }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }

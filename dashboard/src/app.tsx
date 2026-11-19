@@ -121,6 +121,11 @@ export function getKeysApi(doc: Document = document): KeysApi | null {
   return base ? keysApi(base) : null;
 }
 
+/** True when the build asks for the read-only Secrets screen (staging). `<meta name="dashboard-keys-mode" content="readonly">`. */
+export function getKeysReadonly(doc: Document = document): boolean {
+  return doc.querySelector<HTMLMetaElement>('meta[name="dashboard-keys-mode"]')?.content === 'readonly';
+}
+
 /**
  * The app's own full-page views, each at its own hash. The kit's tabs ignore a hash that is not a tab, so these are routed here.
  * To add a view: add its name here, add a `<section class="dash-flow" id="<name>" hidden={route !== '<name>'}>` in `App`, and
@@ -141,7 +146,7 @@ function useFlowRoute(): FlowRoute | null {
   return on;
 }
 
-export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
+export function App({ feed, keys = null, keysReadonly = false, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; keysReadonly?: boolean; now?: () => number }) {
   const route = useFlowRoute();
   const secrets = route === 'secrets';
   const inFlow = route !== null;
@@ -205,7 +210,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
       <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
         <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
-        <Guard><Secrets api={keys} active={secrets} /></Guard>
+        <Guard><Secrets api={keys} active={secrets} readonly={keysReadonly} fed={data?.keys ?? null} now={now} /></Guard>
       </section>
     </>
   );
@@ -213,7 +218,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
 
 const root = typeof document !== 'undefined' ? document.getElementById('app') : null;
 if (root) {
-  render(<App feed={getFeed()} keys={getKeysApi()} />, root);
+  render(<App feed={getFeed()} keys={getKeysApi()} keysReadonly={getKeysReadonly()} />, root);
   // The kit wires tabs and the other behaviour once, after the panels exist.
   void import('toonish-ui/toonish.js');
 }

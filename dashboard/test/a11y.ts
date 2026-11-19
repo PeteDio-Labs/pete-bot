@@ -195,6 +195,38 @@ try {
       await on.waitForFunction(() => document.querySelector('#secrets .dash-status')?.textContent?.includes('done'), null, { timeout: 15000 });
       if (!posts.some((x) => x === '{"action":"renew","name":"batsy"}')) fail.push(`secrets @${w}: the renew request was ${JSON.stringify(posts)}`);
       await on.close();
+
+      // The read-only build (staging): the keys the lab sent through the feed, buttons that open the steps and send nothing.
+      for (const withList of [false, true]) {
+        const ro = await ctx.newPage();
+        const sent: string[] = [];
+        await ro.route(server.url.origin + '/', async (r) => r.fulfill({ contentType: 'text/html', body: (await Bun.file(`${root}/index.html`).text()).replace('<title>', '<meta name="dashboard-keys-mode" content="readonly"><title>') }));
+        await ro.route('**/api/keys/**', (r) => { sent.push(r.request().url()); return r.fulfill({ status: 500, json: {} }); });
+        await ro.route('**/fixtures/dashboard.json', async (r) => {
+          const feed = (await Bun.file(`${root}/fixtures/dashboard.json`).json()) as Record<string, unknown>;
+          return r.fulfill({ json: withList ? { ...feed, keys: { at: new Date().toISOString(), ...KEYS } } : feed });
+        });
+        await ro.goto(`${server.url.origin}/#secrets`, { waitUntil: 'load' });
+        await ro.waitForFunction(() => document.querySelectorAll('#secrets .dash-key').length > 0);
+        const t = await ro.evaluate(() => ({ names: [...document.querySelectorAll('#secrets .dash-key-name')].map((e) => e.textContent), short: [...document.querySelectorAll<HTMLElement>('#secrets .toon-btn')].filter((b) => b.getBoundingClientRect().height < 43.5).length, text: document.getElementById('secrets')!.textContent ?? '' }));
+        const want = withList ? ['muse', 'batsy'] : ['example-agent', 'example-soon', 'example-new'];
+        if (JSON.stringify(t.names) !== JSON.stringify(want)) fail.push(`secrets read-only ${withList ? 'list' : 'examples'} @${w}: rows ${JSON.stringify(t.names)}`);
+        if (t.short) fail.push(`secrets read-only @${w}: ${t.short} buttons under 44 px`);
+        if (!withList && !t.text.includes('not your keys')) fail.push(`secrets read-only @${w}: example rows are not labelled as examples`);
+        if (withList && /example-/.test(t.text)) fail.push(`secrets read-only @${w}: example rows appear beside a real list`);
+        await ro.getByRole('button', { name: withList ? 'Renew batsy' : 'Renew example-soon' }).click();
+        await ro.waitForFunction(() => document.activeElement?.textContent === 'Cancel', null, { timeout: 3000 }).catch(() => fail.push(`secrets read-only @${w}: focus did not move into the confirm step`));
+        const c = await ro.evaluate(() => { const b = [...document.querySelectorAll<HTMLButtonElement>('#secrets .dash-confirm button')]; return { off: b.find((x) => x.textContent?.startsWith('Confirm'))?.disabled, text: document.querySelector('.dash-confirm-box')?.textContent ?? '' }; });
+        if (c.off !== true || !c.text.includes('nothing is sent')) fail.push(`secrets read-only @${w}: the confirm step is not switched off or does not say so`);
+        await ro.addScriptTag({ url: '/__axe.js' });
+        const rr = await ro.evaluate((run) => (window as any).axe.run(document, { runOnly: run }), RUN);
+        runs++;
+        for (const v of rr.violations) fail.push(`secrets read-only ${withList ? 'list' : 'examples'} @${w}: ${v.id} (${v.nodes.length}): ${v.help}; first ${v.nodes[0].target.join(' ')}`.slice(0, 300));
+        await ro.getByRole('button', { name: 'Cancel' }).click();
+        await ro.waitForFunction((id) => document.activeElement?.id === id, withList ? 'key-batsy-renew' : 'key-example-soon-renew', { timeout: 3000 }).catch(() => fail.push(`secrets read-only @${w}: Cancel did not return focus to the button that opened the step`));
+        if (sent.length) fail.push(`secrets read-only @${w}: the page made ${sent.length} request to the key API: ${sent[0]}`);
+        await ro.close();
+      }
     }
     // The skip link is the first stop on a fresh load with no hash; a hash makes the kit move focus to its tab.
     await p.goto(server.url.origin + '/', { waitUntil: 'load' });
@@ -248,6 +280,6 @@ try {
   await browser.close();
   server.stop(true);
 }
-console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the switch confirm and the two Secrets states at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
-if (runs !== TABS.length * Object.keys(states).length * 2 + 6 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
+console.log(`a11y: ${runs} axe runs (5 tabs x 4 feed states x 2 widths, plus the switch confirm and the two Secrets states and the two read-only states at each width), the switch confirm flow, ${polls} poll checks and the skip link at 2 widths, ${measured} elements measured at 320 px, the fold and text size on ${folds} phone tabs; ${rules} rule passes, ${fail.length} failures`);
+if (runs !== TABS.length * Object.keys(states).length * 2 + 10 || measured < 20 || polls !== 2 || folds !== TABS.length) { console.error(`a11y check read too little: ${runs} runs, ${measured} elements measured, ${polls} poll checks, ${folds} phone tabs read for the fold`); process.exit(1); }
 if (fail.length) { console.error('a11y check FAILED:\n- ' + fail.join('\n- ')); process.exit(1); }

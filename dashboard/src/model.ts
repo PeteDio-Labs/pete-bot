@@ -6,6 +6,7 @@
  * Every view says what it examined (counts and the time of the read), so "0 findings after
  * reading 412 packages" and "0 findings because nothing was read" do not look alike.
  */
+import type { KeyList } from './keys.ts';
 export type Side = 'lab' | 'cloud';
 export type Health = 'ok' | 'down' | 'unknown';
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -105,6 +106,8 @@ export interface DashboardData {
   sites: SiteRow[];
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
+  /** The last key list the lab read, with when it read it. Null when the feed carried none or it did not parse. Names, owners and dates only. */
+  keys: { list: KeyList; at: number } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
   unread: ('needs' | 'alerts' | 'backups')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
@@ -321,5 +324,23 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       unread.add('backups');
     } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
   }
-  return { data: { backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  let keysSec: DashboardData['keys'] = null;
+  const ks = o.keys;
+  if (ks !== undefined) {
+    const at = isObj(ks) ? Date.parse(str(ks.at, 40)) : NaN;
+    const rows = isObj(ks) && Array.isArray(ks.rows) ? ks.rows : null;
+    const rowOk = (r: unknown): r is Record<string, unknown> => isObj(r) && /^[a-z][a-z0-9-]{1,30}$/.test(str(r.name)) && typeof r.hasToken === 'boolean' && typeof r.inCallers === 'boolean' && typeof r.expired === 'boolean' && typeof r.renewSoon === 'boolean';
+    if (!isObj(ks) || !Number.isFinite(at) || !rows || rows.length === 0 || rows.length > 100 || !rows.every(rowOk)) problems.push('the key list was unreadable');
+    else {
+      keysSec = {
+        at,
+        list: {
+          read: str(ks.read, 200),
+          unparsed: Math.max(0, num(ks.unparsed) ?? 0),
+          rows: rows.map((r) => { const x = r as Record<string, unknown>; return { name: str(x.name, 31), owner: str(x.owner, 60), hasToken: x.hasToken === true, version: str(x.version, 12) || null, expires: str(x.expires, 40) || null, daysLeft: num(x.daysLeft), expired: x.expired === true, renewSoon: x.renewSoon === true, inCallers: x.inCallers === true }; }),
+        },
+      };
+    }
+  }
+  return { data: { keys: keysSec, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
