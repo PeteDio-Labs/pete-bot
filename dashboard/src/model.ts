@@ -91,7 +91,14 @@ export function backupState(b: BackupRow, now: number): 'ok' | 'warn' | 'down' {
   return age > BACKUP_LATE_MS ? 'warn' : 'ok';
 }
 
+/** The staging box's 24-hour clock. Null when the feed carried none, which draws nothing. */
+export type StagingClock =
+  | { state: 'up'; uptimeSec: number; shutsDownInSec: number; checkedAt: string }
+  | { state: 'limit' | 'stopped' | 'unknown'; checkedAt: string; detail: string };
+
 export interface DashboardData {
+  /** The staging clock. Null when the feed carried none or it did not parse. */
+  staging: StagingClock | null;
   /** The last good backup per guest. Null when the feed carried no backup report or it did not parse. */
   backups: { checkedAt: string; guests: BackupRow[] } | null;
   history: { alerts: DayAlerts[]; cve: DayCve[]; drills: Drill[]; uptime: Record<string, UptimeCell[]> } | null;
@@ -108,6 +115,8 @@ export interface DashboardData {
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
   /** The last key list the lab read, with when it read it. Null when the feed carried none or it did not parse. Names, owners and dates only. */
   keys: { list: KeyList; at: number } | null;
+  /** The newest weekly PR report. Null when the feed carried none or it did not parse. */
+  shipped: { week: string; generatedAt: string; total: number; openNow: number; reposRead: number; reposTotal: number; unread: string[]; /** Repos whose read stopped inside the week: the total is then a lower bound. */ capped: string[]; repos: { repo: string; count: number }[]; prs: { repo: string; number: number; title: string; author: string }[]; summary: string } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
   unread: ('needs' | 'alerts' | 'backups')[];
   /** Service rows the parser dropped. Probe totals then cover fewer services than the feed listed. */
@@ -342,5 +351,29 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       };
     }
   }
-  return { data: { keys: keysSec, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  let staging: StagingClock | null = null;
+  if (o.staging !== undefined) {
+    const st = o.staging;
+    const at = isObj(st) ? str(st.checkedAt, 40) : '';
+    if (isObj(st) && st.state === 'up' && num(st.uptimeSec) !== null && num(st.shutsDownInSec) !== null && at) staging = { state: 'up', uptimeSec: num(st.uptimeSec)!, shutsDownInSec: num(st.shutsDownInSec)!, checkedAt: at };
+    else if (isObj(st) && (st.state === 'limit' || st.state === 'stopped' || st.state === 'unknown') && at) staging = { state: st.state, checkedAt: at, detail: str(st.detail, 160) };
+    else problems.push('the staging clock was unreadable');
+  }
+  let shipped: DashboardData['shipped'] = null;
+  const sh = o.shipped;
+  if (sh !== undefined) {
+    const nums = isObj(sh) ? [num(sh.total), num(sh.openNow), num(sh.reposRead), num(sh.reposTotal)] : [];
+    if (!isObj(sh) || !str(sh.week) || !str(sh.generatedAt) || nums.some((v) => v === null) || !Array.isArray(sh.repos) || !Array.isArray(sh.prs)) problems.push('the weekly PR report was unreadable');
+    else {
+      shipped = {
+        week: str(sh.week, 10), generatedAt: str(sh.generatedAt, 40), total: nums[0]!, openNow: nums[1]!, reposRead: nums[2]!, reposTotal: nums[3]!,
+        unread: (Array.isArray(sh.unread) ? sh.unread : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 10),
+        repos: sh.repos.filter((r) => isObj(r) && str(r.repo) && num(r.count) !== null).slice(0, 8).map((r) => ({ repo: str((r as Record<string, unknown>).repo, 60), count: num((r as Record<string, unknown>).count)! })),
+        prs: sh.prs.filter((r) => isObj(r) && str(r.title) && num(r.number) !== null).slice(0, 10).map((r) => { const x = r as Record<string, unknown>; return { repo: str(x.repo, 60), number: num(x.number)!, title: str(x.title, 160), author: str(x.author, 40) }; }),
+        capped: (Array.isArray(sh.capped) ? sh.capped : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 10),
+        summary: str(sh.summary, 800),
+      };
+    }
+  }
+  return { data: { staging, shipped, keys: keysSec, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }

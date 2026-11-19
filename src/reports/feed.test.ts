@@ -70,3 +70,40 @@ describe('buildDashboardFeed', () => {
     expect('plane' in feed({ hub, now, batches: [] })).toBe(false);
   });
 });
+
+describe('buildDashboardFeed: shipped', () => {
+  const week = {
+    week: '2026-11-09', generatedAt: '2026-11-16T03:00:00Z', total: 12, openNow: 2,
+    byRepo: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`r${i}`, 10 - i])),
+    byAuthor: { P: 12 },
+    merged: Array.from({ length: 12 }, (_, i) => ({ repo: 'r0', number: i + 1, title: `PR ${i + 1}`, url: 'https://github.com/o/r0/pull/1', author: 'P', mergedAt: `2026-11-1${i % 10}T00:00:00Z`, petKeys: [] })),
+    coverage: { reposRead: 9, reposTotal: 10, unread: ['x'], floorRepos: [] },
+    summary: { source: 'ollama' as const, model: 'm', text: 'A summary.' },
+  };
+  it('carries a bounded weekly section with no URLs', () => {
+    const f = buildDashboardFeed({ hub: null, now, batches: [], week }) as unknown as { shipped: { repos: unknown[]; prs: Row[]; summary: string } };
+    expect(f.shipped.repos).toHaveLength(8);
+    expect(f.shipped.prs).toHaveLength(10);
+    expect(f.shipped.prs[0]).not.toHaveProperty('url');
+    expect(f.shipped.summary).toBe('A summary.');
+  });
+  it('leaves the section out with no stored week, and drops a failed summary', () => {
+    expect(buildDashboardFeed({ hub: null, now, batches: [], week: null })).not.toHaveProperty('shipped');
+    const f = buildDashboardFeed({ hub: null, now, batches: [], week: { ...week, summary: { source: 'none' as const, text: '', reason: 'down' } } }) as unknown as { shipped: Row };
+    expect(f.shipped).not.toHaveProperty('summary');
+  });
+});
+
+describe('buildDashboardFeed: a malformed or capped week', () => {
+  it('omits the shipped section instead of failing, and keeps the live sections', () => {
+    const bad = {} as unknown as Parameters<typeof buildDashboardFeed>[0]['week'];
+    const f = buildDashboardFeed({ hub: null, now, batches: [batch({ Grafana: { since: 1, checks: 1 } })], week: bad }) as unknown as { alerts: unknown[] };
+    expect(f).not.toHaveProperty('shipped');
+    expect(f.alerts).toHaveLength(1);
+  });
+  it('carries the capped repos so the total reads as a lower bound', () => {
+    const w = { week: '2026-11-09', generatedAt: '2026-11-16T03:00:00Z', total: 1, openNow: 0, byRepo: { a: 1 }, byAuthor: {}, merged: [], coverage: { reposRead: 1, reposTotal: 1, unread: [], floorRepos: ['a'] }, summary: { source: 'none' as const, text: '' } };
+    const f = buildDashboardFeed({ hub: null, now, batches: [], week: w }) as unknown as { shipped: { capped: string[] } };
+    expect(f.shipped.capped).toEqual(['a']);
+  });
+});

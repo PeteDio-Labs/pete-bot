@@ -23,7 +23,7 @@ import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
 import type { KeysCache } from '../keys/cache.js';
 import { createKeysRouter, type KeysRouteDeps } from '../keys/routes.js';
-import { WEEKLY_MODEL, type Summarize, type WeekStore, type WeeklyRunner } from './weekly.js';
+import { WEEKLY_MODEL, type Summarize, type WeekRecord, type WeekStore, type WeeklyRunner } from './weekly.js';
 
 export interface DashboardDeps {
   store: WeekStore;
@@ -36,11 +36,23 @@ export interface DashboardDeps {
   /** Reads the registry's service rows. Absent, it probes the lab sides. Tests inject a fake so they stay offline. */
   services?: (now: Date) => Promise<unknown[]>;
   sites?: (now: Date) => Promise<unknown[]>;
+  /** The staging clock (lab-agent). Absent, the feed carries no staging section. */
+  staging?: (now: Date) => Promise<Record<string, unknown>>;
   /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
   keys?: KeysRouteDeps;
   /** The last key list read, which the feed carries for staging. Absent, the feed has no `keys` section. */
   keysCache?: KeysCache;
   log?: (msg: string) => void;
+}
+
+/** The newest stored week, or null when none is stored or it cannot be read: the section is then left out. */
+function newestWeek(store: WeekStore): WeekRecord | null {
+  try {
+    const w = store.weeks()[0];
+    return w ? store.get(w) : null;
+  } catch {
+    return null;
+  }
 }
 
 export const STAGING_ORIGIN = 'https://staging-dash.pdlab.dev';
@@ -86,6 +98,12 @@ export function createDashboardApp(d: DashboardDeps): Express {
     const access = await d.verify(req.header('cf-access-jwt-assertion') ?? null);
     if (!access.ok) {
       d.log?.(`dashboard refused: ${access.reason}`);
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    // A service token (the staging site's proxy) reads and nothing else: it cannot write a summary or touch keys.
+    if (access.kind === 'agent' && (req.method !== 'GET' || req.path.startsWith('/api/keys'))) {
+      d.log?.(`dashboard refused: ${access.email} tried ${req.method}`);
       res.status(403).json({ error: 'forbidden' });
       return;
     }
@@ -184,7 +202,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
       // The key list goes only to a person /api/keys would also serve: the feed passes the general Access check, the keys API the admin list.
       const who = (res.locals.email as string | undefined)?.toLowerCase();
       const keys = who && d.keys?.admins.includes(who) ? (d.keysCache?.get() ?? null) : null;
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), keys }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), staging: d.staging ? await d.staging(now) : null, week: newestWeek(d.store), keys }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }

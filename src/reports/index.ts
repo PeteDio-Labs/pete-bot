@@ -27,6 +27,7 @@ import { ollamaSummarizer, WeekStore, WeeklyRunner } from './weekly.js';
 import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './backup.js';
 import { openReportDb } from './db.js';
 import { config } from '../config.js';
+import { cachedStaging } from '../failover/staging.js';
 import { createKeysClient } from '../keys/client.js';
 
 let runner: ReportRunner | null = null;
@@ -166,9 +167,9 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
     const keysCache = new KeysCache(w.dir);
     const keys = keysDeps(keysCache);
-    const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails });
+    const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails, agents: w.agents });
     await listenDashboard(
-      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys, keysCache, log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys, keysCache, staging: cachedStaging(config.lab.url, config.lab.token), log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );

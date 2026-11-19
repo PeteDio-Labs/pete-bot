@@ -10,6 +10,7 @@
  */
 import type { AlertBatch } from '../server/alertStore.js';
 import type { KeysSnapshot } from '../keys/cache.js';
+import type { WeekRecord } from './weekly.js';
 import type { HubRecord, ReportHub } from './hub.js';
 import { CVE_KIND } from './hubCve.js';
 import { CYCLE_KIND } from './hubCycle.js';
@@ -53,9 +54,13 @@ export interface FeedInput {
   sites?: unknown[];
   /** The last key list pete-bot read (names, owners, dates), or null when none was read. */
   keys?: KeysSnapshot | null;
+  /** The staging box's 24-hour clock from lab-agent. Absent, the feed carries no staging section. */
+  staging?: Record<string, unknown> | null;
+  /** The newest stored weekly PR record, or null when none is stored. */
+  week?: WeekRecord | null;
 }
 
-export function buildDashboardFeed({ hub, batches, now, services, sites, keys }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, sites, keys, staging, week }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -97,6 +102,16 @@ export function buildDashboardFeed({ hub, batches, now, services, sites, keys }:
     if (p && typeof p.open === 'number' && typeof p.inReview === 'number') plane = { checkedAt: p.generatedAt, open: p.open, needsPedro: typeof p.needsPedro === 'number' ? p.needsPedro : undefined, inReview: p.inReview, cycle: rec(p.cycle).name, lost: typeof p.lost === 'number' ? p.lost : undefined, ...cycleDetail(p) };
   }
 
+  // A stored record that does not have the expected shape must not take the live sections down with it.
+  let shipped: Record<string, unknown> | null = null;
+  if (week) {
+    try {
+      shipped = shippedSection(week);
+    } catch {
+      shipped = null;
+    }
+  }
+
   return {
     generatedAt: now.toISOString(),
     source: 'pete-bot',
@@ -108,5 +123,27 @@ export function buildDashboardFeed({ hub, batches, now, services, sites, keys }:
     ...(plane ? { plane } : {}),
     // Names, owners and dates. No key value is read here or anywhere in this process.
     ...(keys ? { keys: { at: keys.at, read: keys.list.read, unparsed: keys.list.unparsed, rows: keys.list.rows.map((r) => ({ name: r.name, owner: r.owner, hasToken: r.hasToken, version: r.version, expires: r.expires, daysLeft: r.daysLeft, expired: r.expired, renewSoon: r.renewSoon, inCallers: r.inCallers })) } } : {}),
+    ...(shipped ? { shipped } : {}),
+    ...(staging ? { staging } : {}),
+  };
+}
+
+/** The week's PR report, bounded: the newest ten PRs and the eight busiest repos. */
+function shippedSection(w: WeekRecord): Record<string, unknown> {
+  const repos = Object.entries(w.byRepo).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8).map(([repo, count]) => ({ repo, count }));
+  const prs = [...w.merged].sort((a, b) => b.mergedAt.localeCompare(a.mergedAt)).slice(0, 10).map((p) => ({ repo: p.repo, number: p.number, title: p.title, author: p.author }));
+  return {
+    week: w.week,
+    generatedAt: w.generatedAt,
+    total: w.total,
+    openNow: w.openNow,
+    reposRead: w.coverage.reposRead,
+    reposTotal: w.coverage.reposTotal,
+    unread: w.coverage.unread.slice(0, 10),
+    // Repos whose read stopped inside the week, so the total is a lower bound.
+    capped: w.coverage.floorRepos.slice(0, 10),
+    repos,
+    prs,
+    ...(w.summary.source === 'ollama' && w.summary.text ? { summary: w.summary.text.slice(0, 800) } : {}),
   };
 }

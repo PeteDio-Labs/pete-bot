@@ -285,7 +285,27 @@ export function barState(d: DashboardData, now: number): { text: string; tone: T
 export const topBar = (d: DashboardData | null, now: number): string =>
   appbar({ title: 'Lab dashboard', sub: d ? `Read ${shortAge(d.generatedAt, now)} ago` : 'PeteDio Labs', state: d ? barState(d, now) : undefined, cls: 'dash-appbar' });
 
+/** One plain line about the staging box, before what was read. Drawn only when the feed carries the clock. A stop by the limit is not "down". */
+function stagingLine(d: DashboardData, now: number): string[] {
+  const c = d.staging;
+  if (!c) return [];
+  const hours = (sec: number): string => `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  const age = ageText(c.checkedAt, now);
+  const text =
+    c.state === 'up' ? `Staging up ${hours(c.uptimeSec)}, shuts down at 24h (in ${hours(c.shutsDownInSec)}). Read ${age}.`
+    : c.state === 'limit' ? `Staging stopped by the 24-hour limit. A new push starts a fresh 24 hours. Read ${age}.`
+    : c.state === 'stopped' ? `Staging is stopped. Read ${age}.`
+    : `The staging clock was not read: ${c.detail || 'no reason given'}.`;
+  return [readout(text)];
+}
+
 export function nowBlocks(d: DashboardData, now: number): string[] {
+  const blocks = nowCore(d, now);
+  const last = blocks.length - 1;
+  return [...blocks.slice(0, last), ...stagingLine(d, now), blocks[last]!];
+}
+
+function nowCore(d: DashboardData, now: number): string[] {
   const all = attention(d, now);
   // Worst first: a thing that is wrong now sits above a thing that needs a step. Array.sort is stable, so each group keeps its order.
   const act = all.filter((a) => a.state !== 'unknown').sort((x, y) => Number(y.state === 'down') - Number(x.state === 'down'));
@@ -518,7 +538,27 @@ export function servicesRecord(d: DashboardData, now: number): string {
 
 // ---- Work: what is waiting on me, and what is stuck? ----
 
+/** The week's shipped PRs, as one tap-to-open record under Work. Empty when the feed carried no weekly report. */
+function shippedBlocks(d: DashboardData, now: number, num: string): string[] {
+  const w = d.shipped;
+  if (!w) return [];
+  const prs = w.prs.length ? list(w.prs.map((x) => row({ lead: `${x.repo} #${x.number}`, title: x.title, aside: x.author })), { label: 'Newest merged pull requests' }) : p('No merged pull request is listed.');
+  const repos = w.repos.length ? list(w.repos.map((x) => row({ lead: String(x.count), title: x.repo })), { label: 'Merged pull requests per repository' }) : '';
+  const cover = `Read ${w.reposRead} of ${w.reposTotal} repositories${w.unread.length ? `. Not read: ${w.unread.join(', ')}` : ''}.`;
+  const panel = (w.summary ? p(w.summary) : '') + prs + repos + readout(`Week of ${w.week}, written ${ageText(w.generatedAt, now)}. ${cover} ${w.capped.length ? `At least this many: the read of ${w.capped.join(', ')} stopped inside the week. ` : ''}The list shows the newest ${w.prs.length} of ${w.total}. ${w.openNow} still open.`);
+  return [section(num, 'Shipped this week', list([disclosure({ id: 'work-shipped', lead: 'PR', title: `${w.capped.length ? 'At least ' : ''}${plural(w.total, 'pull request')} merged`, note: `week of ${w.week}`, native: true, panel })], { label: 'The week\'s merged pull requests' }))];
+}
+
 export function workBlocks(d: DashboardData, now: number): string[] {
+  const out = workCore(d, now);
+  const extra = shippedBlocks(d, now, String(out.filter((b) => b.includes('dash-section')).length + 1).padStart(2, '0'));
+  if (!extra.length) return out;
+  // Keep the closing readout last.
+  const last = out.length - 1;
+  return [...out.slice(0, last), ...extra, out[last]!];
+}
+
+function workCore(d: DashboardData, now: number): string[] {
   const pl = d.plane;
   const gap = 'Pending lab-write taps and pull requests that wait for your word are not in the feed yet.';
   if (!pl) return [verdict({ state: 'unknown', title: 'The Plane board was not read', body: 'So it is unknown what waits on you.' }), readout(`The Plane board was not read. ${gap}`)];
