@@ -583,3 +583,68 @@ describe('parseDashboard: keys', () => {
     expect(problems).toContain('the key list was unreadable');
   });
 });
+
+describe('shipped section', () => {
+  const good = { week: '2026-11-09', generatedAt: '2026-11-16T03:00:00Z', total: 14, openNow: 3, reposRead: 9, reposTotal: 10, unread: ['x'], repos: [{ repo: 'a', count: 8 }], prs: [{ repo: 'a', number: 1, title: 'T', author: 'P' }], summary: 'S' };
+  test('parses a good section and leaves a missing one null', () => {
+    expect(parseDashboard({ ...(fixture as object), shipped: good }).data.shipped?.total).toBe(14);
+    const { shipped: _drop, ...rest } = fixture as Record<string, unknown>;
+    expect(parseDashboard(rest).data.shipped).toBeNull();
+  });
+  test('an unreadable counter drops the section and says so', () => {
+    const r = parseDashboard({ ...(fixture as object), shipped: { ...good, total: 'many' } });
+    expect(r.data.shipped).toBeNull();
+    expect(r.problems.some((x) => x.includes('weekly PR report'))).toBe(true);
+  });
+});
+
+import { workView } from '../src/views.ts';
+describe('Work shows the shipped week', () => {
+  test('a weekly section appears when the feed carries one, and not otherwise', () => {
+    const d = parseDashboard(fixture).data;
+    const now = Date.parse(d.generatedAt);
+    expect(workView(d, now)).toContain('Shipped this week');
+    expect(workView({ ...d, shipped: null }, now)).not.toContain('Shipped this week');
+  });
+});
+
+describe('Work shipped: capped reads and numbering', () => {
+  test('a capped read says "At least", and the section continues the numbering', () => {
+    const d = parseDashboard({ ...(fixture as object), shipped: { ...(fixture as { shipped: object }).shipped, capped: ['example-iac'] } }).data;
+    const html = workView(d, Date.parse(d.generatedAt));
+    expect(html).toContain('At least');
+    expect(html).toContain('stopped inside the week');
+    const nums = [...html.matchAll(/dash-section/g)].length;
+    expect(nums).toBeGreaterThan(1);
+    const kick = [...html.matchAll(/>(0\d)</g)].map((m) => m[1]);
+    expect(new Set(kick).size).toBe(kick.length);
+  });
+});
+
+describe('staging clock', () => {
+  const at = '2026-11-19T12:00:00Z';
+  const now = Date.parse(at) + 60_000;
+  const view = async (staging: unknown) => {
+    const { nowView } = await import('../src/views.ts');
+    const r = parseDashboard({ ...fixture, staging });
+    return { html: nowView(r.data, now), problems: r.problems };
+  };
+  test('an up box says how long it has run and when it shuts down', async () => {
+    const { html } = await view({ state: 'up', uptimeSec: 4 * 3600 + 120, shutsDownInSec: 20 * 3600 - 120, checkedAt: at });
+    expect(html).toContain('Staging up 4h 2m, shuts down at 24h');
+  });
+  test('a stop by the limit is not called down', async () => {
+    const { html } = await view({ state: 'limit', checkedAt: at, detail: 'stopped by the 24-hour limit' });
+    expect(html).toContain('stopped by the 24-hour limit');
+    expect(html).not.toContain('Staging is down');
+  });
+  test('unknown names the reason; an unreadable section is a problem, not a clean line', async () => {
+    expect((await view({ state: 'unknown', checkedAt: at, detail: 'lab-agent answered HTTP 401' })).html).toContain('was not read: lab-agent answered HTTP 401');
+    const bad = await view({ state: 'up', uptimeSec: 'x' });
+    expect(bad.problems).toContain('the staging clock was unreadable');
+    expect(bad.html).not.toContain('Staging up');
+  });
+  test('no staging section draws no line', async () => {
+    expect((await view(undefined)).html).not.toContain('Staging');
+  });
+});

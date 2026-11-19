@@ -499,6 +499,7 @@ To turn it on, set `REPORTS_MODE=on` and these variables:
 |---|---|
 | `WEEKLY_REPORT_DIR` | Directory for the `<monday>.json` files. Empty turns the feature off. |
 | `WEEKLY_ACCESS_TEAM_DOMAIN`, `WEEKLY_ACCESS_AUD`, `WEEKLY_ACCESS_EMAILS` | The Cloudflare Access application that fronts the dashboard. All three are required: the dashboard never starts without them. |
+| `WEEKLY_ACCESS_AGENTS` | Optional. `<32 hex>.access=<name>` pairs for Access service tokens, such as the staging site's proxy. An agent can send GET requests only; the summary route refuses it. |
 | `WEEKLY_DASH_HOST`, `WEEKLY_DASH_PORT` | Listener address. Default `127.0.0.1:3018`. |
 | `WEEKLY_OLLAMA_URL` | Default `http://192.168.50.246:11434`. |
 

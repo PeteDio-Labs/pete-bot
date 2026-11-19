@@ -250,6 +250,16 @@ describe('lab-agent HTTP surface', () => {
   const post = (body: unknown, token = ASK) =>
     new Request('http://127.0.0.1:3016/v1/ask', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 
+  it('serves the staging clock only with the bearer, and says so before the first read', async () => {
+    const get = (token?: string) => new Request('http://127.0.0.1:3016/v1/staging', { headers: token ? { authorization: `Bearer ${token}` } : {} });
+    const h = handler({ stagingState: () => null });
+    expect((await h(get())).status).toBe(401);
+    const res = await h(get(ASK));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'unknown', checkedAt: expect.any(String) });
+    expect(await (await handler({ stagingState: () => ({ state: 'up', uptimeSec: 60, shutsDownInSec: 86_340, checkedAt: 'x' }) })(get(ASK))).json()).toMatchObject({ state: 'up' });
+  });
+
   it('answers a question with the right bearer', async () => {
     const res = await handler()(post({ question: 'where does plane run' }));
     expect(res.status).toBe(200);
