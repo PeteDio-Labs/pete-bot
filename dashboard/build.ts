@@ -2,7 +2,7 @@
 // Exits non-zero when a step fails or an output is missing, and says what it wrote.
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { TABBAR } from './src/app.tsx';
-import { buildBadge, masthead, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
+import { appbar, buildBadge, settingsMenu, skipLink, esc } from 'toonish-ui/markup';
 
 const out = 'dist';
 const feed = process.env.DASHBOARD_FEED || '/fixtures/dashboard.json';
@@ -18,6 +18,8 @@ if (keysUrl && !/^\/[A-Za-z0-9._~\/-]*$/.test(keysUrl)) {
 // with `production`, draws nothing. The badge is decided here, at build time, so the page never guesses its environment from its URL.
 const buildEnv = process.env.BUILD_ENV ?? '';
 const buildSha = process.env.BUILD_SHA ?? '';
+// A staging build with no key API shows the keys the lab sent through the feed, read-only. Any other build without the API shows none.
+const keysReadonly = buildEnv === 'staging' && !keysUrl;
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
@@ -38,12 +40,13 @@ const html = `<!doctype html>
 <meta name="dashboard-feed" content="${esc(feed)}">
 ${switchUrl ? `<meta name="dashboard-switch" content="${esc(switchUrl)}">` : ''}
 ${keysUrl ? `<meta name="dashboard-keys" content="${esc(keysUrl)}">` : ''}
+${keysReadonly ? '<meta name="dashboard-keys-mode" content="readonly">' : ''}
 <title>Lab dashboard</title>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 ${skipLink('main', 'Skip to content')}
-<div class="dash-header">${masthead({ title: 'Lab dashboard', eyebrow: 'PeteDio Labs' })}${settingsMenu({ id: 'settings', cls: 'dash-settings', items: [{ label: 'Secrets', href: '#secrets' }] })}</div>
+<div class="dash-header"><div class="dash-barwrap"><div id="top">${appbar({ title: 'Lab dashboard', sub: 'PeteDio Labs', cls: 'dash-appbar' })}</div>${settingsMenu({ id: 'settings', cls: 'dash-settings', spin: 'always', items: [{ label: 'Secrets', href: '#secrets' }] })}</div></div>
 <main id="main" class="dash-main">
 ${TABBAR}
 <div id="app"></div>

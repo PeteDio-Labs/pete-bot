@@ -6,7 +6,7 @@ import { getFeed, type Feed } from './data.ts';
 import { DEMO_SOURCE, clockFor, type DashboardData, type Side } from './model.ts';
 import { Secrets, SECRETS_QUESTION } from './secrets.tsx';
 import { keysApi, sameOriginPath, type KeysApi } from './keys.ts';
-import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, serviceCard, servicesReadout, servicesRecord, servicesVerdict, workBlocks } from './views.ts';
+import { QUESTIONS, actBlocks, healthBlocks, nowBlocks, section, topBar, serviceCard, servicesReadout, servicesRecord, servicesVerdict, sitesBlock, workBlocks } from './views.ts';
 
 export const TABS = [
   { id: 'now', label: 'Now' },
@@ -108,7 +108,8 @@ function Services({ data, now, feed }: { data: DashboardData; now: number; feed:
           <p class="dash-status" role="status" aria-live="polite">{msg}</p>
         </div>
       )}
-      <Html html={section('02', 'On record', servicesRecord(data, now))} />
+      {data.sites.length > 0 && <Html html={section('02', 'Public sites', sitesBlock(data, now))} />}
+      <Html html={section(data.sites.length > 0 ? '03' : '02', 'On record', servicesRecord(data, now))} />
       <Html html={servicesReadout(data, now)} />
     </>
   );
@@ -120,25 +121,49 @@ export function getKeysApi(doc: Document = document): KeysApi | null {
   return base ? keysApi(base) : null;
 }
 
-/** True while the address names the Secrets screen. The kit's tabs ignore a hash that is not a tab, so this view is the app's own. */
-function useSecretsRoute(): boolean {
-  const [on, setOn] = useState(() => typeof location !== 'undefined' && location.hash === '#secrets');
+/** True when the build asks for the read-only Secrets screen (staging). `<meta name="dashboard-keys-mode" content="readonly">`. */
+export function getKeysReadonly(doc: Document = document): boolean {
+  return doc.querySelector<HTMLMetaElement>('meta[name="dashboard-keys-mode"]')?.content === 'readonly';
+}
+
+/**
+ * The app's own full-page views, each at its own hash. The kit's tabs ignore a hash that is not a tab, so these are routed here.
+ * To add a view: add its name here, add a `<section class="dash-flow" id="<name>" hidden={route !== '<name>'}>` in `App`, and
+ * add a menu item in `build.ts`. The tab bar and panels hide while any of them shows.
+ */
+export const FLOW_ROUTES = ['secrets'] as const;
+export type FlowRoute = (typeof FLOW_ROUTES)[number];
+
+const routeOf = (hash: string): FlowRoute | null => FLOW_ROUTES.find((r) => hash === `#${r}`) ?? null;
+
+function useFlowRoute(): FlowRoute | null {
+  const [on, setOn] = useState<FlowRoute | null>(() => (typeof location !== 'undefined' ? routeOf(location.hash) : null));
   useEffect(() => {
-    const f = () => setOn(location.hash === '#secrets');
+    const f = () => setOn(routeOf(location.hash));
     window.addEventListener('hashchange', f);
     return () => window.removeEventListener('hashchange', f);
   }, []);
   return on;
 }
 
-export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; now?: () => number }) {
-  const secrets = useSecretsRoute();
+/** Why no key list shows, from what the feed read. Each state gets its own reason, because the feed banners are hidden on this screen. */
+function keysWhy(load: Load): string {
+  if (load.state === 'loading') return 'The feed is still loading.';
+  if (load.state === 'error' && !load.data) return 'The feed could not be read.';
+  if (load.problems.includes('the key list was unreadable')) return 'The lab sent a key list this page could not read.';
+  return 'The lab has not sent its key list to this dashboard yet.';
+}
+
+export function App({ feed, keys = null, keysReadonly = false, now = () => Date.now() }: { feed: Feed; keys?: KeysApi | null; keysReadonly?: boolean; now?: () => number }) {
+  const route = useFlowRoute();
+  const secrets = route === 'secrets';
+  const inFlow = route !== null;
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const main = document.getElementById('main');
-    if (main) main.dataset.view = secrets ? 'secrets' : 'tabs';
+    if (main) main.dataset.view = route ?? 'tabs';
     if (secrets) headRef.current?.focus({ preventScroll: false });
-  }, [secrets]);
+  }, [route]);
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   useEffect(() => {
     let alive = true;
@@ -164,12 +189,27 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
   const demo = feed.demo && data?.source === DEMO_SOURCE;
   const n = data ? clockFor(data, now(), feed.demo) : now();
   const problems = load.state === 'loading' ? [] : load.problems;
+  // The header is the static bar from the build until a feed is read; then it says how many things need Pedro.
+  useEffect(() => {
+    const top = document.getElementById('top');
+    if (!top) return;
+    try {
+      top.innerHTML = topBar(data, n);
+    } catch {
+      /* The static bar stays, and it makes no claim about state. */
+    }
+  }, [data, n]);
   return (
     <>
-      {!secrets && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
-      {!secrets && problems.length > 0 && <p class="toon-callout toon-callout-yellow dash-banner" role="status">{`Part of the feed was unreadable: ${problems.slice(0, 4).join('; ')}.`}</p>}
-      {!secrets && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
-      {!secrets && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
+      {!inFlow && load.state === 'error' && <p class="toon-callout dash-banner" role="alert">{`The feed could not be read (${load.message}). ${data ? 'Showing the last data, which is out of date.' : 'Nothing is shown because nothing was read.'}`}</p>}
+      {!inFlow && problems.length > 0 && (
+        <details class="toon-callout toon-callout-yellow dash-banner">
+          <summary>{`${problems.length === 1 ? 'One part' : `${problems.length} parts`} of the feed could not be read. Details`}</summary>
+          <p>{`${problems.slice(0, 4).join('; ')}.`}</p>
+        </details>
+      )}
+      {!inFlow && demo && <p class="toon-callout toon-callout-yellow dash-banner">Demo data, not the lab.</p>}
+      {!inFlow && load.state === 'loading' && <p class="dash-loading" role="status">Reading the feed.</p>}
       <Panel id="now">{data && <Blocks blocks={safe(() => nowBlocks(data, n))} />}</Panel>
       <Panel id="act">{data && <Blocks blocks={safe(() => actBlocks(data, n))} />}</Panel>
       <Panel id="services">{data && <Guard><Services data={data} now={n} feed={feed} /></Guard>}</Panel>
@@ -178,7 +218,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
       <section class="dash-flow dash-secrets" id="secrets" aria-labelledby="secrets-h" hidden={!secrets}>
         <p class="dash-back" dangerouslySetInnerHTML={{ __html: button({ label: 'Back to dashboard', href: '#now', direction: 'back', cls: 'dash-btn' }) }} />
         <h2 class="toon-heading dash-q" id="secrets-h" tabIndex={-1} ref={headRef}>{SECRETS_QUESTION}</h2>
-        <Guard><Secrets api={keys} active={secrets} /></Guard>
+        <Guard><Secrets api={keys} active={secrets} readonly={keysReadonly} fed={data?.keys ?? null} whyNot={keysWhy(load)} now={now} /></Guard>
       </section>
     </>
   );
@@ -186,7 +226,7 @@ export function App({ feed, keys = null, now = () => Date.now() }: { feed: Feed;
 
 const root = typeof document !== 'undefined' ? document.getElementById('app') : null;
 if (root) {
-  render(<App feed={getFeed()} keys={getKeysApi()} />, root);
+  render(<App feed={getFeed()} keys={getKeysApi()} keysReadonly={getKeysReadonly()} />, root);
   // The kit wires tabs and the other behaviour once, after the panels exist.
   void import('toonish-ui/toonish.js');
 }

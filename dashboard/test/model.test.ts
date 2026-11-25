@@ -487,6 +487,103 @@ describe('sources nobody read never give an all clear', () => {
   });
 });
 
+describe('The top of Now: app bar, brief and status rows', () => {
+  const at = '2026-11-18T12:00:00Z';
+  const now = Date.parse('2026-11-18T12:00:30Z');
+  const cve = (findings: unknown[]) => ({ checkedAt: at, hosts: 1, packages: 1, advisories: 1, notChecked: [], gaps: [], kevChecked: true, findings });
+  const kev = { id: 'CVE-2026-0001', pkg: 'openssl', host: 'vault', severity: 'high', kev: true, fixed: '3.0.99' };
+  test('the pill counts what needs Pedro and the strip is an ink brief with the count', async () => {
+    const { barState, nowView, topBar } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [], cve: cve([kev]) });
+    expect(barState(data, now)).toEqual({ text: '1 needs you', tone: 'down' });
+    const html = nowView(data, now);
+    expect(html).toContain('toon-brief toon-brief-ink');
+    expect(html).toContain('toon-srow-down');
+    expect(html).toContain('Open lab actions');
+    expect(topBar(data, now)).toContain('toon-appbar-state-down');
+  });
+  test('rows are worst first: a down row sits above a warn row', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [], cve: cve([{ id: 'CVE-2026-0002', pkg: 'curl', host: 'h', severity: 'high', kev: false, fixed: '9.9' }, kev]) });
+    const html = nowView(data, now);
+    expect(html.indexOf('toon-srow-down')).toBeLessThan(html.indexOf('toon-srow-warn'));
+  });
+  test('the header makes no claim of state before a feed is read, and a source not read is never an all clear pill', async () => {
+    const { barState, topBar } = await import('../src/views.ts');
+    expect(topBar(null, now)).not.toContain('toon-appbar-state');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [] });
+    expect(barState(data, now)).toEqual({ text: 'Partly read', tone: 'unknown' });
+  });
+});
+
+describe('Now folds rows that say the same thing', () => {
+  const at = '2026-11-18T12:00:00Z';
+  const now = Date.parse('2026-11-18T12:00:30Z');
+  test('three down alerts are one row with cells, and the pill still counts three', async () => {
+    const { nowView, barState } = await import('../src/views.ts');
+    const a = (monitor: string) => ({ monitor, state: 'down', since: at, triage: 'no_action' });
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [a('plane'), a('usaa'), a('vault')] });
+    const html = nowView(data, now);
+    expect(html).toContain('3 alerts are down');
+    expect(html).toContain('plane, usaa, vault');
+    expect((html.match(/toon-srow-down/g) ?? []).length).toBe(1);
+    expect(html).toContain('toon-cells');
+    expect(barState(data, now).text).toBe('3 need you');
+  });
+  test('sources that were not read are one row that names each', async () => {
+    const { nowView } = await import('../src/views.ts');
+    const { data } = parseDashboard({ generatedAt: at, services: [], needs: [], alerts: [] });
+    const html = nowView(data, now);
+    expect(html).toContain('3 sources were not read');
+    expect(html).toContain('CVE report');
+    expect(html).not.toContain('All clear');
+  });
+});
+
+describe('Sites', () => {
+  const base = { generatedAt: '2026-11-16T22:00:00Z', services: [], needs: [], alerts: [] };
+  test('reads a site with and without a reading, and drops a row that is not https', () => {
+    const { data, problems } = parseDashboard({ ...base, sites: [
+      { name: 'Portfolio', env: 'production', url: 'https://pdlab.dev/', reading: { ok: true, checkedAt: '2026-11-16T22:00:00Z', detail: 'HTTP 200', lagS: null } },
+      { name: 'Portfolio', env: 'staging', url: 'https://staging.pdlab.dev/', reading: null },
+      { name: 'Bad', env: 'production', url: 'javascript:alert(1)', reading: null },
+    ] });
+    expect(data.sites.map((x) => [x.env, x.reading?.ok ?? null])).toEqual([['production', true], ['staging', null]]);
+    expect(problems).toContain('a site row was unreadable');
+  });
+  test('treats a feed with no sites as an empty list', () => {
+    expect(parseDashboard(base).data.sites).toEqual([]);
+  });
+});
+
+describe('parseDashboard: keys', () => {
+  const base = { ...(fixture as Record<string, unknown>) };
+  const row = { name: 'muse', owner: 'pedro', hasToken: true, version: '3', expires: '2027-02-10T00:00:00Z', daysLeft: 84, expired: false, renewSoon: false, inCallers: true, clientId: 'ca14c1dd.access' };
+  const keys = { at: '2026-11-19T04:00:00Z', read: 'keys list: read 1 agents in callers.yml and 1 Vault entries; 0 expired', unparsed: 0, rows: [row] };
+  test('reads the list and its time, and keeps nothing but the row fields', () => {
+    const { data, problems } = parseDashboard({ ...base, keys });
+    expect(problems.filter((p) => p.includes('key list'))).toEqual([]);
+    expect(data.keys?.at).toBe(Date.parse('2026-11-19T04:00:00Z'));
+    expect(data.keys?.list.rows).toHaveLength(1);
+    expect(JSON.stringify(data.keys)).not.toContain('ca14c1dd');
+  });
+  test('a feed with no keys section reads as no list, and says nothing is wrong', () => {
+    const { data, problems } = parseDashboard(base);
+    expect(data.keys).toBeNull();
+    expect(problems.some((p) => p.includes('key list'))).toBe(false);
+  });
+  test.each([
+    ['no time', { ...keys, at: '' }],
+    ['no rows', { ...keys, rows: [] }],
+    ['a row with a bad name', { ...keys, rows: [{ ...row, name: '../x' }] }],
+    ['a row with a missing flag', { ...keys, rows: [{ ...row, expired: undefined }] }],
+  ])('a list with %s is unreadable, not empty', (_n, bad) => {
+    const { data, problems } = parseDashboard({ ...base, keys: bad });
+    expect(data.keys).toBeNull();
+    expect(problems).toContain('the key list was unreadable');
+  });
+});
+
 describe('shipped section', () => {
   const good = { week: '2026-11-09', generatedAt: '2026-11-16T03:00:00Z', total: 14, openNow: 3, reposRead: 9, reposTotal: 10, unread: ['x'], repos: [{ repo: 'a', count: 8 }], prs: [{ repo: 'a', number: 1, title: 'T', author: 'P' }], summary: 'S' };
   test('parses a good section and leaves a missing one null', () => {

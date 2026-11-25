@@ -4,9 +4,18 @@
 
 /* The page's layout only. Every colour, type size and component comes from toonish-ui: fix a look there, not here. */
 /* A phone gives the header as little height as it can, so the tab's question and answer sit above the fold. */
-.dash-header { position: relative; max-width: 64rem; margin: 0 auto; padding: .75rem 1rem 0; }
-.dash-settings { position: absolute; top: .75rem; right: 1rem; z-index: 20; }
-.dash-header .toon-masthead { padding-right: 4rem; }
+.dash-header { position: relative; z-index: 60; max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem 0; }
+/* The cog is a tile inside the bar, like the PD mark: same border, radius and shadow, in line with the pill. */
+.dash-barwrap { position: relative; }
+.dash-appbar { flex-wrap: wrap; padding-right: 4.25rem; }
+.dash-settings { position: absolute; top: calc(.75rem + 2px); right: calc(.75rem + 2px); z-index: 20; }
+.dash-settings .toon-settings-btn { width: 44px; height: 44px; border-radius: 12px; box-shadow: 2px 2px 0 var(--color-toon-ink); }
+.dash-settings .toon-gears { width: 30px; height: 30px; }
+.dash-appbar .toon-appbar-state { padding-inline: .6rem; letter-spacing: .04em; }
+.dash-appbar .toon-appbar-title, .dash-appbar .toon-appbar-sub { white-space: nowrap; }
+.dash-appbar .toon-appbar-text { min-width: max-content; }
+@media (max-width: 30rem) { .dash-appbar .toon-appbar-state { margin-left: 3.5rem; } }
+.dash-appbar .toon-appbar-title { font-size: 1.125rem; }
 .dash-main { max-width: 64rem; margin: 0 auto; padding-bottom: var(--toon-tabbar-h, 0px); }
 .dash-main > #app { padding: 1rem; }
 .dash-main .toon-tabpanel { padding: 0; }
@@ -38,8 +47,8 @@
 }
 
 /* The Secrets screen is the app's own view: it replaces the tabs while the address is #secrets. */
-.dash-secrets[hidden] { display: none; }
-.dash-main[data-view="secrets"] > .toon-tabbar, .dash-main[data-view="secrets"] .toon-tabpanel { display: none; }
+.dash-flow[hidden] { display: none; }
+.dash-main[data-view]:not([data-view="tabs"]) > .toon-tabbar, .dash-main[data-view]:not([data-view="tabs"]) .toon-tabpanel { display: none; }
 .dash-keys { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
 .dash-key { display: grid; gap: .5rem; }
 .dash-key-name { font-size: 1.125rem; }
@@ -47,4 +56,19 @@
 .dash-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 0; }
 .dash-confirm-box { display: grid; gap: .5rem; padding: .75rem; border: 3px solid var(--color-toon-ink, #0a0a1f); border-radius: 12px; background: var(--color-toon-paper, #fff6dc); color: var(--color-toon-ink, #0a0a1f); }
 .dash-confirm-box p { margin: 0; }
+/* A preview button looks off but stays a button, so a person can open the steps. The confirm button is really disabled. */
+.dash-btn-preview { filter: grayscale(1); }
+.dash-btn-off { opacity: .6; }
 .dash-back { margin: 0 0 .75rem; }
+.dash-banner summary { cursor: pointer; min-height: 24px; }
+.dash-banner > p { margin: .5rem 0 0; font-weight: 400; }
+
+/* Secrets: a bar, then groups of disclosure rows (kit 0.8.4). */
+.dash-keybar { display: grid; gap: .75rem; padding: .75rem; margin-bottom: 1rem; border: 3px solid var(--color-toon-ink, #0a0a1f); border-radius: 14px; background: var(--color-toon-paper, #fff6dc); box-shadow: 3px 3px 0 var(--color-toon-blue, #5f8dff); }
+.dash-group { margin-bottom: 1rem; }
+.dash-group-h { margin: 0 0 .5rem; font-family: var(--font-mono, ui-monospace, monospace); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
+.dash-acts { display: grid; grid-template-columns: auto 1fr; gap: .5rem .75rem; align-items: center; margin: .75rem 0 0; }
+.dash-acts p { margin: 0; font-size: .875rem; }
+@media (max-width: 30rem) { .dash-acts { grid-template-columns: 1fr; } }
+.dash-keybar .dash-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; }
+.dash-keybar .dash-actions .toon-btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: nowrap; padding-inline: .5rem; }

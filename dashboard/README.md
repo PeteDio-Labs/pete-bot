@@ -69,6 +69,7 @@ change runs only after Pedro taps `lab-write` on GitHub. The screen shows "waiti
 - **No key is read or shown.** The owner copies a key from Vault. The page names owners, dates and run states only.
 - **Add and remove go through git.** The key list is `secrets/callers.yml`, so those buttons open the file on GitHub. Apply changes then runs `sync`.
 - **Off by default.** `DASHBOARD_KEYS` names the API as a path on the page's own origin, such as `/api/keys`, and the build refuses any other value. Unset, the screen says keys cannot be managed from here and draws no button. Staging and the AWS dashboard leave it unset, so neither has a path to the lab's keys, and the server refuses a cross-origin write as well.
+- **Staging is read-only, not blank.** A build with `BUILD_ENV=staging` and no `DASHBOARD_KEYS` shows the key list the lab last read, which arrives in the feed's `keys` section (names, owners, dates). Its Renew, Rotate, Reissue and Apply changes buttons open the same steps as the live screen, and the Confirm button is off, so nothing is sent. With no list yet it shows three rows labelled as examples. A list read more than 36 hours ago reads as unknown.
 - **Unknown is not fine.** A list that was not read, finished with no rows, or had unreadable lines is never "All clear".
 
 ## Data

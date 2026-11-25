@@ -115,6 +115,74 @@ export class ProxmoxClient {
   }
 }
 
+/** One guest's newest backup, as the dashboard's Backups row reads it. */
+export interface BackupReading {
+  guest: string;
+  /** ISO time of the newest backup volume, or null when none was found. */
+  lastGood: string | null;
+  detail: string;
+}
+
+export interface BackupReport {
+  checkedAt: string;
+  guests: BackupReading[];
+}
+
+/**
+ * Newest backup volume per guest, read from every storage that holds backups (GET only).
+ *
+ * ⚠ A STORAGE THAT CANNOT BE READ IS NAMED, NEVER SKIPPED. A guest whose newest copy might sit on an unread storage
+ * gets that reason in `detail`, so a missing copy never reads as "no backup exists". Every storage failing is an error.
+ * A volume is a copy that exists, not proof the job succeeded; the row says "newest copy on <storage>".
+ */
+export async function readBackups(client: Pick<ProxmoxClient, 'get' | 'guests'>, now: Date = new Date()): Promise<BackupReport> {
+  const guests = await client.guests();
+  const storages = await client.get<Array<Record<string, unknown>>>('/cluster/resources?type=storage');
+  if (!Array.isArray(storages)) throw new LabToolError('Proxmox cluster/resources did not answer with a list of storages');
+  // A shared storage answers the same on every node, so it is read once.
+  const targets = new Map<string, { node: string; storage: string }>();
+  for (const s of storages) {
+    const content = String(s.content ?? '');
+    if (!content.split(',').includes('backup') || s.status === 'unavailable' || s.disabled) continue;
+    const storage = String(s.storage ?? '');
+    const node = String(s.node ?? '');
+    if (!storage || !node) continue;
+    const key = s.shared ? storage : `${node}/${storage}`;
+    if (!targets.has(key)) targets.set(key, { node, storage });
+  }
+  if (targets.size === 0) throw new LabToolError('Proxmox lists no storage that holds backups, so no backup was read');
+  const newest = new Map<number, { at: number; storage: string }>();
+  const failed: string[] = [];
+  for (const { node, storage } of targets.values()) {
+    try {
+      const vols = await client.get<Array<Record<string, unknown>>>(`/nodes/${encodeURIComponent(node)}/storage/${encodeURIComponent(storage)}/content?content=backup`);
+      if (!Array.isArray(vols)) throw new Error('not a list');
+      for (const v of vols) {
+        const vmid = Number(v.vmid);
+        const ctime = Number(v.ctime);
+        if (!Number.isFinite(vmid) || !Number.isFinite(ctime)) continue;
+        const prev = newest.get(vmid);
+        if (!prev || ctime * 1000 > prev.at) newest.set(vmid, { at: ctime * 1000, storage });
+      }
+    } catch (err) {
+      failed.push(`${storage} (${(err as Error).message.slice(0, 60)})`);
+    }
+  }
+  if (failed.length === targets.size) throw new LabToolError(`every backup storage failed to read: ${failed.join('; ').slice(0, 200)}`);
+  const unreadNote = failed.length ? `Storage not read: ${failed.join(', ').slice(0, 100)}.` : '';
+  return {
+    checkedAt: now.toISOString(),
+    guests: guests.map((g) => {
+      const n = newest.get(g.vmid);
+      return {
+        guest: g.name || String(g.vmid),
+        lastGood: n ? new Date(n.at).toISOString() : null,
+        detail: n ? `Newest copy on ${n.storage}. ${unreadNote}`.trim() : `No backup copy was found on the ${targets.size - failed.length} storage read. ${unreadNote}`.trim(),
+      };
+    }),
+  };
+}
+
 export function summarizeConfig(config: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(config)) {

@@ -9,6 +9,7 @@
  * so they are absent on purpose.
  */
 import type { AlertBatch } from '../server/alertStore.js';
+import type { KeysSnapshot } from '../keys/cache.js';
 import type { WeekRecord } from './weekly.js';
 import type { HubRecord, ReportHub } from './hub.js';
 import { CVE_KIND } from './hubCve.js';
@@ -49,13 +50,23 @@ export interface FeedInput {
   now: Date;
   /** Registry rows with their lab readings. Absent, the section is empty and the SPA reads every service as unknown. */
   services?: unknown[];
+  /** Public sites with an address reading. Absent, the SPA shows no sites. */
+  sites?: unknown[];
+  /** The last key list pete-bot read (names, owners, dates), or null when none was read. */
+  keys?: KeysSnapshot | null;
   /** The staging box's 24-hour clock from lab-agent. Absent, the feed carries no staging section. */
   staging?: Record<string, unknown> | null;
+  /** The newest backup copy per guest from lab-agent. Null when it was not read, and then the feed carries no `backups`. */
+  backups?: Record<string, unknown> | null;
+  /** From the ledger: alerts per day, CVE days and uptime cells. Null when nothing was observed. */
+  history?: Record<string, unknown> | null;
+  /** From the ledger: counts of the incidents it saw. */
+  triage?: Record<string, unknown> | null;
   /** The newest stored weekly PR record, or null when none is stored. */
   week?: WeekRecord | null;
 }
 
-export function buildDashboardFeed({ hub, batches, now, services, staging, week }: FeedInput): Record<string, unknown> {
+export function buildDashboardFeed({ hub, batches, now, services, sites, keys, staging, week, backups, history, triage }: FeedInput): Record<string, unknown> {
   const alerts: Record<string, unknown>[] = [];
   const needs: Record<string, unknown>[] = [];
   for (const b of batches) {
@@ -113,9 +124,15 @@ export function buildDashboardFeed({ hub, batches, now, services, staging, week 
     needs,
     alerts,
     services: services ?? [],
+    sites: sites ?? [],
     ...(cve ? { cve } : {}),
     ...(plane ? { plane } : {}),
+    // Names, owners and dates. No key value is read here or anywhere in this process.
+    ...(keys ? { keys: { at: keys.at, read: keys.list.read, unparsed: keys.list.unparsed, rows: keys.list.rows.map((r) => ({ name: r.name, owner: r.owner, hasToken: r.hasToken, version: r.version, expires: r.expires, daysLeft: r.daysLeft, expired: r.expired, renewSoon: r.renewSoon, inCallers: r.inCallers })) } } : {}),
     ...(shipped ? { shipped } : {}),
+    ...(backups ? { backups } : {}),
+    ...(history ? { history } : {}),
+    ...(triage ? { triage } : {}),
     ...(staging ? { staging } : {}),
   };
 }

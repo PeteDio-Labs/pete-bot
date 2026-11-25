@@ -15,6 +15,7 @@
 import express, { Router, type Request, type Response } from 'express';
 import { KEY_ACTIONS, NAMED_ACTIONS, NAME_RE, REQUEST_ID_RE, newRequestId, type KeyAction, type KeysClient } from './client.js';
 import { parseKeyList } from './list.js';
+import type { KeysCache } from './cache.js';
 
 export interface KeysRouteDeps {
   client: KeysClient;
@@ -22,6 +23,8 @@ export interface KeysRouteDeps {
   admins: string[];
   /** How long to look for the run before answering without it. */
   findTimeoutMs?: number;
+  /** Where a finished list is kept for the dashboard feed. Absent, a list is returned and not kept. */
+  cache?: KeysCache;
   log?: (msg: string) => void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -115,7 +118,10 @@ export function createKeysRouter(d: KeysRouteDeps, email: (req: Request) => stri
       if (ok && asked === 'list') {
         try {
           const list = parseKeyList(await d.client.jobLog(run.id));
-          if (list) out.list = list;
+          if (list && list.rows.length > 0) {
+            out.list = list;
+            d.cache?.set(list, new Date(now()));
+          } else if (list) Object.assign(out, { state: 'failed', logError: 'the run finished but listed no keys' });
           else Object.assign(out, { state: 'failed', logError: 'the run finished but its log had no key list' });
         } catch (err) {
           Object.assign(out, { state: 'failed', logError: (err as Error).message.slice(0, 120) });

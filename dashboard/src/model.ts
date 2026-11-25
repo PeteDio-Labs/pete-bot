@@ -6,6 +6,7 @@
  * Every view says what it examined (counts and the time of the read), so "0 findings after
  * reading 412 packages" and "0 findings because nothing was read" do not look alike.
  */
+import type { KeyList } from './keys.ts';
 export type Side = 'lab' | 'cloud';
 export type Health = 'ok' | 'down' | 'unknown';
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -37,6 +38,8 @@ export interface CveFinding {
   fixed: string | null;
   kev: boolean;
 }
+
+export interface SiteRow { name: string; env: 'production' | 'staging'; url: string; reading: SideStatus | null }
 
 export interface SideStatus {
   ok: boolean;
@@ -106,8 +109,12 @@ export interface DashboardData {
   alerts: AlertRow[];
   cve: { checkedAt: string; hosts: number; packages: number; advisories: number; notChecked: string[]; findings: CveFinding[]; /** The run's full exploited count. `findings` may be capped, so the tile uses this when present. */ exploited: number | null; /** What the run could not examine. Empty means the run says it examined everything. */ gaps: string[]; /** False when the exploited-vulnerability list was not read, so no finding carries a KEV flag and a zero means nothing. */ kevChecked: boolean } | null;
   services: ServiceRow[];
+  /** Public sites the lab does not run. A reading of null is unknown, never up. */
+  sites: SiteRow[];
   /** `cycle` names the current cycle. `lost` counts cycle items missing from the board read, so the counts cover fewer items than the cycle holds. */
   plane: { checkedAt: string; open: number; needsPedro: number; inReview: number; cycle: string; lost: number | null; /** The cycle's progress, split and open items. Null when the feed carried none or a part of it did not parse: the view then shows the counts alone. */ detail: PlaneDetail | null } | null;
+  /** The last key list the lab read, with when it read it. Null when the feed carried none or it did not parse. Names, owners and dates only. */
+  keys: { list: KeyList; at: number } | null;
   /** The newest weekly PR report. Null when the feed carried none or it did not parse. */
   shipped: { week: string; generatedAt: string; total: number; openNow: number; reposRead: number; reposTotal: number; unread: string[]; /** Repos whose read stopped inside the week: the total is then a lower bound. */ capped: string[]; repos: { repo: string; count: number }[]; prs: { repo: string; number: number; title: string; author: string }[]; summary: string } | null;
   /** Live sections the feed did not carry or carried stale. Their tiles read `unknown`, never a zero. */
@@ -287,6 +294,14 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
     const dc = s.dataClass as ServiceRow['dataClass'];
     services.push({ name: str(s.name, 60), hostname: str(s.hostname, 120), active: s.active, dataClass: dc, pinned: s.pinned === true, auto: s.auto === true, lab: side(s.lab), cloud: side(s.cloud) });
   }
+  const sites: SiteRow[] = [];
+  for (const x of arr('sites')) {
+    if (!isObj(x) || !str(x.name) || (x.env !== 'production' && x.env !== 'staging') || !/^https:\/\//.test(str(x.url, 200))) {
+      problems.push('a site row was unreadable');
+      continue;
+    }
+    sites.push({ name: str(x.name, 60), env: x.env, url: str(x.url, 200), reading: side(x.reading) });
+  }
   const tr = o.triage;
   const trNums = isObj(tr) ? [num(tr.read), num(tr.cards), num(tr.plain), num(tr.failures)] : [];
   const triage = isObj(tr) && trNums.every((v) => v !== null) ? { read: trNums[0]!, cards: trNums[1]!, plain: trNums[2]!, failures: trNums[3]!, since: str(tr.since, 40) } : null;
@@ -318,6 +333,24 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       unread.add('backups');
     } else backups = { checkedAt: str(bk.checkedAt, 40), guests: rows.slice(0, 60).map((g) => { const r = g as Record<string, unknown>; return { guest: str(r.guest, 60), lastGood: str(r.lastGood, 40) || null, detail: str(r.detail, 160) }; }) };
   }
+  let keysSec: DashboardData['keys'] = null;
+  const ks = o.keys;
+  if (ks !== undefined) {
+    const at = isObj(ks) ? Date.parse(str(ks.at, 40)) : NaN;
+    const rows = isObj(ks) && Array.isArray(ks.rows) ? ks.rows : null;
+    const rowOk = (r: unknown): r is Record<string, unknown> => isObj(r) && /^[a-z][a-z0-9-]{1,30}$/.test(str(r.name)) && typeof r.hasToken === 'boolean' && typeof r.inCallers === 'boolean' && typeof r.expired === 'boolean' && typeof r.renewSoon === 'boolean';
+    if (!isObj(ks) || !Number.isFinite(at) || !rows || rows.length === 0 || rows.length > 100 || !rows.every(rowOk)) problems.push('the key list was unreadable');
+    else {
+      keysSec = {
+        at,
+        list: {
+          read: str(ks.read, 200),
+          unparsed: Math.max(0, num(ks.unparsed) ?? 0),
+          rows: rows.map((r) => { const x = r as Record<string, unknown>; return { name: str(x.name, 31), owner: str(x.owner, 60), hasToken: x.hasToken === true, version: str(x.version, 12) || null, expires: str(x.expires, 40) || null, daysLeft: num(x.daysLeft), expired: x.expired === true, renewSoon: x.renewSoon === true, inCallers: x.inCallers === true }; }),
+        },
+      };
+    }
+  }
   let staging: StagingClock | null = null;
   if (o.staging !== undefined) {
     const st = o.staging;
@@ -342,5 +375,5 @@ export function parseDashboard(raw: unknown): { data: DashboardData; problems: s
       };
     }
   }
-  return { data: { staging, shipped, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
+  return { data: { staging, shipped, keys: keysSec, backups, history, generatedAt: str(o.generatedAt, 40), source: str(o.source, 40) || 'unknown', triage, needs, alerts, cve, services, sites, plane, unread: [...unread], droppedServices: droppedServices + (num(o.droppedServices) ?? 0) }, problems };
 }
