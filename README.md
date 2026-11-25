@@ -507,6 +507,8 @@ If Qwen cannot answer, the week keeps its count and shows "Summary not generated
 
 ## Secrets API (dashboard)
 
+The feed's `backups`, `history` and `triage` sections come from three places. `backups` is the newest backup copy per guest, read by lab-agent from Proxmox (`GET /v1/backups`, the ask bearer, cached 5 minutes) and left out of the feed when the read fails. `history` and `triage` come from `dashboard-ledger.json` beside the report store (`src/reports/ledger.ts`), which a sampler fills every 5 minutes: alerts per day, one uptime cell per service per half hour, and the incident counts since the ledger began. CVE days come from the hub's daily records. Triage is not wired into the alert path, so every incident counts as sent plain unless a held DOWN carried a card. No failover drill is recorded anywhere, so the drill list is empty.
+
 `/api/keys` serves the dashboard's Secrets screen, on the same listener and behind the same Access check as the rest of the dashboard.
 
 With the token and admin list set, pete-bot also starts `keys.yml` `list` 90 seconds after start and every 6 hours, and keeps the parsed result in `keys-list.json` beside the report store (`src/keys/cache.ts`, `src/keys/refresh.ts`). A finished `list` read through `/api/keys` refreshes it too. `/api/dashboard` carries it as the `keys` section, so the read-only staging screen can show it. The section holds names, owners and dates; no key value is read here. A run that fails leaves the last good list in place and logs why.

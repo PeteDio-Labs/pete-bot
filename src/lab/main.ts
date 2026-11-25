@@ -17,7 +17,7 @@ import { createLabHandler, type Check } from './server.js';
 import { createLabMetrics, createMetricsHandler } from './metrics.js';
 import { ALL_TOOLKITS, selectMediaTools } from './toolkits.js';
 import { buildLabTools, GitClone, LAB_UNITS, secretsHealth, VaultMetadataClient } from './tools/index.js';
-import { ProxmoxClient } from './tools/proxmox.js';
+import { ProxmoxClient, readBackups } from './tools/proxmox.js';
 import { HostIndex } from './tools/hosts.js';
 import { StagingClock, alertText, type GuestReading, type StagingState } from './stagingClock.js';
 import { driftHealth, msUntil, notifier, readLab, runDriftCheck, singleFlight, type DriftOutcome } from './drift.js';
@@ -207,6 +207,15 @@ async function pollStaging(): Promise<void> {
 void pollStaging();
 setInterval(() => void pollStaging().catch((err) => log('staging poll crashed', { level: 'error', error: (err as Error).message })), 60_000);
 
+// Backups: one Proxmox read per 5 minutes however many dashboards ask. A failed read is not cached.
+let backupsCache: { at: number; value: unknown } | null = null;
+async function backupsReport(): Promise<unknown> {
+  if (backupsCache && Date.now() - backupsCache.at < 300_000) return backupsCache.value;
+  const value = await readBackups(pve);
+  backupsCache = { at: Date.now(), value };
+  return value;
+}
+
 const metrics = createLabMetrics(cfg.mediaToolkits.length === ALL_TOOLKITS.length ? 'all' : cfg.mediaToolkits.join('+'));
 metrics.setToolsOffered(mediaTools?.size ?? 0);
 
@@ -222,6 +231,7 @@ const handler = createLabHandler({
   log,
   runDrift,
   stagingState: () => stagingState,
+  backups: backupsReport,
   metrics,
 });
 

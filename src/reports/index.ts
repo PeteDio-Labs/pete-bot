@@ -28,6 +28,10 @@ import { loadBackupConfig, ReportBackup, s3Target, type BackupEnv } from './back
 import { openReportDb } from './db.js';
 import { config } from '../config.js';
 import { cachedStaging } from '../failover/staging.js';
+import { cachedBackups } from '../failover/backups.js';
+import { cachedServices } from '../failover/services.js';
+import { Ledger } from './ledger.js';
+import { activeBatches } from '../server/alertStore.js';
 import { createKeysClient } from '../keys/client.js';
 
 let runner: ReportRunner | null = null;
@@ -165,11 +169,19 @@ async function startWeekly(s: ReportSettings, env: WeeklyEnv & BackupEnv & Repor
     const gh = new GitHubApp({ appId: s.appId, installationId: s.installationId, privateKeyPem: s.privateKeyPem, org: s.org });
     const summarize = ollamaSummarizer(w.ollamaUrl);
     weeklyRunner = new WeeklyRunner({ gh, org: s.org, repos: s.repos, store, summarize, log: logger });
+    const ledger = new Ledger(w.dir, (m) => logger.warn(`[Ledger] ${m}`));
+    const sample = async (): Promise<void> => {
+      const now = new Date();
+      const r = ledger.observe(now, activeBatches(), await cachedServices(now));
+      if (r.incidents || r.cells) logger.info(`[Ledger] recorded ${r.incidents} new incidents and ${r.cells} uptime cells`);
+    };
+    void sample().catch((e) => logger.warn(`[Ledger] first sample failed: ${(e as Error).message}`));
+    setInterval(() => void sample().catch((e) => logger.warn(`[Ledger] sample failed: ${(e as Error).message}`)), 5 * 60_000).unref();
     const keysCache = new KeysCache(w.dir);
     const keys = keysDeps(keysCache);
     const verifier = new AccessVerifier({ teamDomain: w.teamDomain, aud: w.aud, emails: w.emails, agents: w.agents });
     await listenDashboard(
-      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys, keysCache, staging: cachedStaging(config.lab.url, config.lab.token), log: (m) => logger.warn(`[Weekly] ${m}`) }),
+      createDashboardApp({ store, hub, summarize, verify: (jwt) => verifier.verify(jwt), runner: weeklyRunner, keys, keysCache, staging: cachedStaging(config.lab.url, config.lab.token), backups: cachedBackups(config.lab.url, config.lab.token, (m) => logger.warn(`[Backups] ${m}`)), ledger, log: (m) => logger.warn(`[Weekly] ${m}`) }),
       w.host,
       w.port,
     );
