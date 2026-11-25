@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Ledger } from './ledger.js';
+import { ReportHub } from './hub.js';
+import { buildDashboardFeed } from './feed.js';
 import { readBackups } from '../lab/tools/proxmox.js';
 import { readBackups as readBackupsHttp, cachedBackups } from '../failover/backups.js';
 
@@ -79,5 +81,22 @@ describe('backups reader', () => {
     expect(logs[0]).toContain('HTTP 502');
     expect((await readBackupsHttp('http://x', '', ok({}))).ok).toBe(false);
     expect((await readBackupsHttp('http://x', 't', ok({ checkedAt: 'a', guests: [] }))).ok).toBe(true);
+  });
+});
+
+describe('feed', () => {
+  it('carries the ledger and backup sections, and CVE days from the hub', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ledger-'));
+    const hub = new ReportHub(dir);
+    hub.save('cve', { id: '2026-11-23', generatedAt: '2026-11-23T06:00:00Z', bySeverity: { CRITICAL: 1, HIGH: 2, MODERATE: 3, LOW: 4, unrated: 9 } });
+    const l = new Ledger(dir);
+    const now = new Date('2026-11-24T12:00:00Z');
+    l.observe(now, [batch()], [{ name: 'plex', lab: { ok: true, checkedAt: now.toISOString(), detail: '' } }]);
+    const backups = { checkedAt: now.toISOString(), guests: [{ guest: 'plex', lastGood: now.toISOString(), detail: '' }] };
+    const feed = buildDashboardFeed({ hub, batches: [], now, services: [], backups, history: l.history(now, hub), triage: l.triage(now) });
+    expect((feed.history as { cve: unknown[] }).cve).toEqual([{ day: '2026-11-23', critical: 1, high: 2, medium: 3, low: 4 }]);
+    expect(feed.backups).toEqual(backups);
+    expect((feed.triage as { read: number }).read).toBe(1);
+    expect(buildDashboardFeed({ hub: null, batches: [], now, services: [] }).backups).toBeUndefined();
   });
 });
