@@ -21,6 +21,7 @@ import type { Server } from 'node:http';
 import type { AccessResult } from '../lab/access.js';
 import { DASHBOARD_HTML } from './dashboardPage.js';
 import type { ReportHub } from './hub.js';
+import type { Ledger } from './ledger.js';
 import type { KeysCache } from '../keys/cache.js';
 import { createKeysRouter, type KeysRouteDeps } from '../keys/routes.js';
 import { WEEKLY_MODEL, type Summarize, type WeekRecord, type WeekStore, type WeeklyRunner } from './weekly.js';
@@ -36,6 +37,10 @@ export interface DashboardDeps {
   /** Reads the registry's service rows. Absent, it probes the lab sides. Tests inject a fake so they stay offline. */
   services?: (now: Date) => Promise<unknown[]>;
   sites?: (now: Date) => Promise<unknown[]>;
+  /** The newest backup copy per guest. Absent or null, the feed has no `backups` section. */
+  backups?: (now: Date) => Promise<Record<string, unknown> | null>;
+  /** What the sampler recorded. Absent, the feed has no `history` or `triage`. */
+  ledger?: Ledger;
   /** The staging clock (lab-agent). Absent, the feed carries no staging section. */
   staging?: (now: Date) => Promise<Record<string, unknown>>;
   /** The key manager's routes (Secrets screen). Absent, /api/keys answers 404. */
@@ -202,7 +207,7 @@ export function createDashboardApp(d: DashboardDeps): Express {
       // The key list goes only to a person /api/keys would also serve: the feed passes the general Access check, the keys API the admin list.
       const who = (res.locals.email as string | undefined)?.toLowerCase();
       const keys = who && d.keys?.admins.includes(who) ? (d.keysCache?.get() ?? null) : null;
-      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), staging: d.staging ? await d.staging(now) : null, week: newestWeek(d.store), keys }));
+      res.json(buildDashboardFeed({ hub: d.hub ?? null, batches: activeBatches(), now, services: await (d.services ?? cachedServices)(now), sites: await (d.sites ?? cachedSites)(now), staging: d.staging ? await d.staging(now) : null, week: newestWeek(d.store), keys, backups: d.backups ? await d.backups(now) : null, history: d.ledger?.history(now, d.hub ?? null) ?? null, triage: d.ledger ? d.ledger.triage(now) : null }));
     } catch (err) {
       res.status(500).json({ error: `cannot build the feed: ${(err as Error).message.slice(0, 120)}` });
     }

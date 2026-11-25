@@ -647,7 +647,7 @@ export function cveHistoryChart(d: DashboardData): string {
   if (!h) return empty('The CVE history was not read, so there is no chart.');
   if (h.cve.length === 0) return empty('Read 0 days of CVE history.');
   const chart = drawBars(
-    { label: 'Open CVE findings with a fix, per day', columns: h.cve.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.critical, tone: 'red', label: 'critical' }, { value: x.high, tone: 'yellow', label: 'high' }, { value: x.medium, tone: 'violet', label: 'medium' }, { value: x.low, tone: 'hatch', label: 'low' }] })) },
+    { label: 'Open CVE findings, per day', columns: h.cve.map((x) => ({ label: shortDay(x.day), segments: [{ value: x.critical, tone: 'red', label: 'critical' }, { value: x.high, tone: 'yellow', label: 'high' }, { value: x.medium, tone: 'violet', label: 'medium' }, { value: x.low, tone: 'hatch', label: 'low' }] })) },
     [{ label: 'Critical', tone: 'red' }, { label: 'High', tone: 'yellow' }, { label: 'Medium', tone: 'violet' }, { label: 'Low', tone: 'hatch' }],
   );
   return card(chart + chartTable({ caption: 'CVE findings per day', head: ['Day', 'Critical', 'High', 'Medium', 'Low'], rows: h.cve.map((x) => [x.day, String(x.critical), String(x.high), String(x.medium), String(x.low)]) }) + note(`${plural(h.cve.length, 'day')} of CVE counts.`));

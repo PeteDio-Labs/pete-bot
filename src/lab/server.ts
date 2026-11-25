@@ -11,6 +11,7 @@
  *   POST /v1/media/act  {"kind": "series"|"movie", "id": 12} with the ask bearer (PET-869).
  *                  Runs the one write lab-agent holds, a Bazarr subtitle search, after the
  *                  owner tapped Confirm in Discord. 404 without a Bazarr key.
+ *   GET  /v1/backups  the newest backup copy per guest, read from Proxmox, with the ask bearer.
  *   GET  /v1/staging  the staging box's 24-hour clock state, with the ask bearer.
  *   POST /v1/drift/run  the nightly drift check, now, with the ask bearer (PET-671). It
  *                  answers with the run's outcome and DMs exactly as the nightly run does.
@@ -49,6 +50,8 @@ export interface LabServerDeps {
   runDrift?: () => Promise<DriftOutcome>;
   /** The staging clock's last state. Absent, GET /v1/staging answers 404. */
   stagingState?: () => StagingState | null;
+  /** The newest backup copy per guest. Absent, GET /v1/backups answers 404. It throws when nothing was read. */
+  backups?: () => Promise<unknown>;
   /** Media routing metrics. Absent, GET /metrics answers 404. */
   metrics?: LabMetrics;
 }
@@ -112,6 +115,17 @@ export function createLabHandler(deps: LabServerDeps): (req: Request) => Promise
       // reads only the status never mistakes either for a clean run.
       const outcome = await deps.runDrift();
       return json(outcome, outcome.kind === 'read-failed' || outcome.delivered === false ? 502 : 200);
+    }
+
+    if (url.pathname === '/v1/backups' && deps.backups) {
+      if (req.method !== 'GET') return json({ error: 'use GET' }, 405);
+      if (!authorized(req)) return json({ error: 'unauthorized' }, 401);
+      try {
+        return json(await deps.backups());
+      } catch (err) {
+        // 502 so the caller never reads a failed read as an empty report.
+        return json({ error: `backups not read: ${(err as Error).message.slice(0, 160)}` }, 502);
+      }
     }
 
     if (url.pathname === '/v1/staging' && deps.stagingState) {
